@@ -80,3 +80,48 @@ def test_reading_material(setup_db):
     assert resp.status_code == 200
     data = resp.json()
     assert "text" in data and "questions" in data
+
+
+def test_dictation_grade_updates_word_mastery(setup_db):
+    """答对累计 correct_count 并排到后面；答错标记薄弱。"""
+    from app.models import Lesson, WordBank, WordMastery
+    from app.database import SessionLocal
+    s = SessionLocal()
+    s.add(Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3, audit_status="approved"))
+    s.flush()
+    lid = s.query(Lesson).first().id
+    wb = WordBank(lesson_id=lid, subject="语文", word="徘徊", extra="pái huái")
+    s.add(wb); s.flush()
+    wid = wb.id
+    s.commit(); s.close()
+
+    c = _client()
+    # 答错：mistake_count=1, is_weak=True
+    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "排回"})
+    s = SessionLocal()
+    m = s.query(WordMastery).filter_by(word_bank_id=wid).first()
+    assert m is not None and m.mistake_count == 1 and m.is_weak is True
+    # 答对两次：correct_count 累计
+    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "徘徊"})
+    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "徘徊"})
+    s.expire_all()
+    m = s.query(WordMastery).filter_by(word_bank_id=wid).first()
+    assert m.correct_count == 2 and m.next_review_at is not None
+    s.close()
+
+
+def test_dictation_complete_records_wrong_words(setup_db):
+    from app.models import User
+    from app.database import SessionLocal
+    s = SessionLocal()
+    s.add(User(name="晨晨", role="child")); s.commit(); s.close()
+    resp = _client().post("/api/dictation/complete", json={
+        "user_id": 1, "correct": 4, "wrong": 1,
+        "wrong_words": [{"word": "矗立", "your_answer": "矗力"}],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["mistakes_recorded"] == 1
+    from app.models import Mistake
+    s = SessionLocal()
+    assert s.query(Mistake).filter_by(source_type="dictation").count() == 1
+    s.close()
