@@ -21,6 +21,14 @@ def create_goal(req: GoalReq, db: Session = Depends(get_db)):
     db.add(g); db.commit(); db.refresh(g)
     return {"id": g.id, "content": g.content, "status": g.status}
 
+@router.get("")
+def list_goals(user_id: int, db: Session = Depends(get_db)):
+    goals = db.query(Goal).filter_by(user_id=user_id).order_by(Goal.id.desc()).all()
+    return [
+        {"id": g.id, "content": g.content, "status": g.status, "achieved_at": g.achieved_at}
+        for g in goals
+    ]
+
 @router.post("/{goal_id}/assess")
 def assess(goal_id: int, req: AssessReq, db: Session = Depends(get_db)):
     rate = req.correct / req.total if req.total else 0
