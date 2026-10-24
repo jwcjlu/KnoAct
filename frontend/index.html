@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知学伴 · 联调页</title>
+<style>
+  :root{--blue:#3158e8;--green:#2e8b5a;--orange:#dc872d;--bg:#f7f8f5;--card:#fff;--ink:#202723;--gray:#78817b;--line:#e3e7e0;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
+  .wrap{max-width:760px;margin:0 auto;padding:24px 16px 60px}
+  h1{font-size:22px;margin-bottom:4px}
+  .sub{color:var(--gray);font-size:13px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .card h2{font-size:15px;margin-bottom:12px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button{background:var(--blue);color:#fff;border:none;border-radius:9px;padding:9px 16px;font-size:14px;cursor:pointer}
+  button.green{background:var(--green)} button.orange{background:var(--orange)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  input{flex:1;min-width:140px;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:14px}
+  .tag{display:inline-block;background:#edf1ff;color:var(--blue);border-radius:20px;padding:2px 12px;font-size:12px;margin-right:6px}
+  .log{background:#0f1411;color:#c9d6cd;border-radius:10px;padding:14px;font-family:ui-monospace,Consolas,monospace;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto;margin-top:8px}
+  .bal{font-size:28px;font-weight:700;color:var(--orange)}
+  .note{background:#fffbe6;border:1px solid #f0e4a8;border-radius:8px;padding:10px 12px;font-size:13px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>知学伴 · 前后端联调</h1>
+  <div class="sub">验证核心闭环：听写打卡 → 积分 → 兑换，以及笔记 / 答疑 / 目标考核</div>
+
+  <div class="card">
+    <h2>① 登录（孩子）</h2>
+    <div class="row">
+      <input id="loginName" value="林晨" placeholder="姓名">
+      <button onclick="doLogin()">登录</button>
+    </div>
+    <div id="loginResult" class="note" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>② 听写打卡（当前课词库）</h2>
+    <div class="row">
+      <button class="green" onclick="loadWords()">取词</button>
+      <button class="green" onclick="doDictationComplete()">完成打卡（对5错1）</button>
+    </div>
+    <div id="words" class="log" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>③ 积分余额 / 兑换</h2>
+    <div class="row">
+      <span class="bal" id="balance">--</span>
+      <button onclick="loadBalance()">刷新</button>
+      <button class="orange" onclick="doRedeem('tablet',30)">兑换平板30分</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>④ 不懂就问（AI 答疑）</h2>
+    <div class="row">
+      <input id="q" value="“白鹭是一首精巧的诗”这句话什么意思？">
+      <button onclick="doAsk()">提问</button>
+    </div>
+    <div id="askResult" class="log" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>⑤ 记笔记</h2>
+    <div class="row">
+      <input id="noteText" value="白鹭很常见反而被忽略它的美">
+      <button onclick="doAddNote()">记笔记</button>
+      <button onclick="doListNotes()">查笔记</button>
+    </div>
+    <div id="notesResult" class="log" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>⑥ 教学目标考核</h2>
+    <div class="row">
+      <button onclick="doCreateGoal()">建目标</button>
+      <button onclick="doAssessGoal(1,4,5)">考核（4/5 达成）</button>
+    </div>
+    <div id="goalResult" class="log" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>日志</h2>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+const API = 'http://127.0.0.1:8000';
+let uid = 1;
+
+function show(el){ el.style.display='block'; }
+function log(msg){ const l=document.getElementById('log'); l.textContent += msg + '\n'; l.scrollTop=l.scrollHeight; }
+
+async function api(path, opts={}){
+  const init = {headers:{'Content-Type':'application/json'}, ...opts};
+  if(opts.body) init.body = JSON.stringify(opts.body);
+  const r = await fetch(API + path, init);
+  return r.json();
+}
+
+async function doLogin(){
+  const name = document.getElementById('loginName').value;
+  const d = await api('/api/auth/login', {method:'POST', body:{name}});
+  uid = d.id;
+  const el = document.getElementById('loginResult');
+  show(el); el.textContent = `已登录：${d.name}（id=${d.id}，角色=${d.role}）`;
+  log(`login → ${JSON.stringify(d)}`);
+}
+
+async function loadWords(){
+  const d = await api(`/api/dictation/words?user_id=${uid}`);
+  const el = document.getElementById('words');
+  show(el); el.textContent = JSON.stringify(d, null, 2);
+  log(`words → ${d.length} 个词`);
+}
+
+async function doDictationComplete(){
+  const d = await api('/api/dictation/complete', {method:'POST', body:{user_id:uid, correct:5, wrong:1}});
+  log(`dictation/complete → ${JSON.stringify(d)}`);
+  loadBalance();
+}
+
+async function loadBalance(){
+  const d = await api(`/api/points/balance?user_id=${uid}`);
+  document.getElementById('balance').textContent = d.balance;
+  log(`balance → ${d.balance}`);
+}
+
+async function doRedeem(device, minutes){
+  const d = await api('/api/points/redeem', {method:'POST', body:{user_id:uid, device, minutes}});
+  log(`redeem → ${JSON.stringify(d)}`);
+  loadBalance();
+}
+
+async function doAsk(){
+  const question = document.getElementById('q').value;
+  const d = await api('/api/ask', {method:'POST', body:{lesson_id:1, question, context:'白鹭是一首精巧的诗。'}});
+  const el = document.getElementById('askResult');
+  show(el); el.textContent = d.answer;
+  log(`ask → ${(d.answer||'').slice(0,60)}...`);
+}
+
+async function doAddNote(){
+  const content = document.getElementById('noteText').value;
+  const d = await api('/api/notes', {method:'POST', body:{lesson_id:1, author_role:'child', content}});
+  log(`note → ${JSON.stringify(d)}`);
+}
+
+async function doListNotes(){
+  const d = await api('/api/notes?lesson_id=1');
+  const el = document.getElementById('notesResult');
+  show(el); el.textContent = JSON.stringify(d, null, 2);
+  log(`notes → ${d.length} 条`);
+}
+
+async function doCreateGoal(){
+  const d = await api('/api/goals', {method:'POST', body:{user_id:uid, content:'掌握第3单元生词'}});
+  const el = document.getElementById('goalResult');
+  show(el); el.textContent = JSON.stringify(d);
+  log(`goal → ${JSON.stringify(d)}`);
+}
+
+async function doAssessGoal(goalId, correct, total){
+  const d = await api(`/api/goals/${goalId}/assess`, {method:'POST', body:{correct, total}});
+  const el = document.getElementById('goalResult');
+  show(el); el.textContent = JSON.stringify(d);
+  log(`assess → ${JSON.stringify(d)}`);
+}
+
+// 初始加载
+loadBalance();
+</script>
+</body>
+</html>
