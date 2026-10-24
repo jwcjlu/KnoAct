@@ -61,3 +61,22 @@ def test_review_wrong_to_mistake(setup_db):
     s = SessionLocal()
     assert s.query(Mistake).count() >= 1
     s.close()
+
+
+def test_listening_material(setup_db):
+    resp = _client().get("/api/listening/material?user_id=1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "text" in data and "questions" in data
+
+
+def test_reading_material(setup_db):
+    from app.models import Text
+    from app.database import SessionLocal
+    s = SessionLocal()
+    s.add(Text(lesson_id=1, content="白鹭是一首精巧的诗。"))
+    s.commit(); s.close()
+    resp = _client().get("/api/reading/material?lesson_id=1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "text" in data and "questions" in data

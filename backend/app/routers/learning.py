@@ -74,3 +74,33 @@ def review_submit(req: ReviewSubmitReq, db: Session = Depends(get_db)):
         ))
         db.commit()
     return {"ok": True}
+
+@router.get("/api/listening/material")
+def listening_material(user_id: int, db: Session = Depends(get_db)):
+    provider = get_provider(db)
+    try:
+        text = provider.generate(
+            prompt="用小学生已学单词编一段 3 句的英语对话，并出 1 道理解题（题目||答案）。",
+            system="你是英语老师。",
+        )
+    except Exception:
+        text = "A: What can you do? B: I can sing. || 对话里 B 会做什么？|| 唱歌"
+    stem, _, ans = text.partition("||")
+    return {"text": stem, "questions": [{"question": ans, "answer": ans}]}
+
+@router.get("/api/reading/material")
+def reading_material(lesson_id: int, db: Session = Depends(get_db)):
+    from ..models import Text
+    t = db.query(Text).filter_by(lesson_id=lesson_id).first()
+    provider = get_provider(db)
+    if not t:
+        return {"text": "", "questions": []}
+    try:
+        q = provider.generate(
+            prompt=f"针对课文「{t.content}」出 1 道阅读理解题，格式：题目||答案",
+            system="你是语文老师。",
+        )
+        stem, _, ans = q.partition("||")
+    except Exception:
+        stem, ans = "文中作者表达了什么感情？", "对故乡的喜爱"
+    return {"text": t.content, "questions": [{"question": stem, "answer": ans}]}
