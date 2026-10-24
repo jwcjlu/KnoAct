@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, tts_router
 
 app = FastAPI(title="知学伴 API")
 
@@ -17,3 +17,4 @@ app.include_router(learning.router)
 app.include_router(goals.router)
 app.include_router(mistakes.router)
 app.include_router(knowledge.router)
+app.include_router(tts_router.router)
