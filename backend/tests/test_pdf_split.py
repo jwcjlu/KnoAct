@@ -1,4 +1,4 @@
-from app.services.pdf_split import SUBJECT_RULES, render_pages, detect_lessons
+from app.services.pdf_split import SUBJECT_RULES, render_pages, detect_lessons, detect_lessons_from_pdf
 
 
 def test_subject_rules_present():
@@ -16,3 +16,7 @@ def test_detect_lessons_anchor():
     titles = ["第 1 课 古诗三首", "第 2 课 白鹭", "第 12 课 精读"]
     lessons = detect_lessons(titles)
     assert [l["title"] for l in lessons] == ["第 1 课 古诗三首", "第 2 课 白鹭", "第 12 课 精读"]
+
+
+def test_detect_lessons_from_pdf_missing_file(tmp_path):
+    assert detect_lessons_from_pdf(str(tmp_path / "nope.pdf"), "语文") == []
