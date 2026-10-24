@@ -40,3 +40,24 @@ def test_dictation_complete_awards_points(setup_db):
     resp = _client().post("/api/dictation/complete", json={"user_id": 1, "correct": 5, "wrong": 1})
     assert resp.status_code == 200
     assert resp.json()["points_awarded"] > 0
+
+
+def test_review_generate_questions(setup_db):
+    from app.models import KnowledgePoint
+    from app.database import SessionLocal
+    s = SessionLocal()
+    s.add(KnowledgePoint(subject="英语", category="语法", content="动词第三人称单数加 s"))
+    s.commit(); s.close()
+    resp = _client().get("/api/review/questions?subject=英语")
+    assert resp.status_code == 200
+    assert len(resp.json()) > 0
+
+
+def test_review_wrong_to_mistake(setup_db):
+    resp = _client().post("/api/review/submit", json={"user_id": 1, "question": "go 的第三人称单数", "your_answer": "gos", "correct_answer": "goes", "source_type": "review"})
+    assert resp.status_code == 200
+    from app.models import Mistake
+    from app.database import SessionLocal
+    s = SessionLocal()
+    assert s.query(Mistake).count() >= 1
+    s.close()
