@@ -490,12 +490,14 @@ function finishTask(id, reward){
 }
 async function doTask(id, type){
   if(type==='dictation'){ await startDictation(); return; }
-  if(type==='reading'){ await loadCenter(); centerTab='阅读理解'; setPage('学习中心'); return; }
-  if(type==='listening'){ await loadCenter(); centerTab='听力理解'; setPage('学习中心'); return; }
-  if(type==='knowledge' || type==='review'){ setPage('学习中心'); return; }
-  // custom 及其它：直接提交，等待家长确认
-  await api(`/api/tasks/${id}/submit`, {method:'POST'});
-  toast('已提交，等待家长确认');
+  if(type==='reading'){ await loadCenter(); centerTab='阅读理解'; setPage('学习中心'); }
+  else if(type==='listening'){ await loadCenter(); centerTab='听力理解'; setPage('学习中心'); }
+  else if(type==='knowledge' || type==='review'){ setPage('学习中心'); }
+  // 完成练习后标记已提交，等待家长完成审核（听写类在 finishDictation 提交）
+  if(type!=='dictation'){
+    await api(`/api/tasks/${id}/submit`, {method:'POST'});
+    toast('已提交，等待家长确认');
+  }
   render();
 }
 async function redeemHome(cost, device, minutes){

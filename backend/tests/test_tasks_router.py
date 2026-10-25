@@ -108,6 +108,23 @@ def test_submit_after_confirm_does_not_downgrade():
     db.close()
 
 
+def test_confirm_unsubmitted_task_is_refused():
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "custom",
+        "title": "读一页书",
+    })
+    tid = r.json()["id"]
+    resp = client.post(f"/api/tasks/{tid}/confirm").json()
+    assert resp["ok"] is False
+    db = SessionLocal()
+    t = db.get(Task, tid)
+    assert t.submit_status == "not_started"
+    pts = db.query(Point).filter_by(user_id=uid).all()
+    assert len(pts) == 0
+    db.close()
+
+
 def test_upload_photo_rejects_unsupported_ext():
     uid = _seed()
     r = client.post("/api/tasks", json={

@@ -170,6 +170,8 @@ def confirm(task_id: int, db: Session = Depends(get_db)):
         return {"ok": False}
     if t.submit_status == "approved":
         return {"ok": True, "points": t.points, "already": True}
+    if t.submit_status != "submitted":
+        return {"ok": False, "error": "任务尚未提交，无法确认"}
     t.submit_status = "approved"
     db.add(Point(user_id=t.user_id, delta=t.points, reason=f"任务完成：{t.title}"))
     db.commit()
