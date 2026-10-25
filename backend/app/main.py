@@ -36,3 +36,31 @@ app.include_router(tts_router.router)
 app.include_router(annotations.router)
 app.include_router(home.router)
 app.include_router(tasks.router)
+
+# 每天 03:00 定时生成当天任务（模块级调度器，pytest 导入时不启动）
+import sys
+from datetime import date
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from .database import SessionLocal
+from .services.task_gen import generate_daily_tasks
+
+
+def _scheduled_generate() -> None:
+    db = SessionLocal()
+    try:
+        generate_daily_tasks(db, date.today())
+    finally:
+        db.close()
+
+
+if "pytest" not in sys.modules:
+    _scheduler = BackgroundScheduler()
+    _scheduler.add_job(
+        _scheduled_generate,
+        CronTrigger(hour=3, minute=0),
+        id="daily_tasks",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    _scheduler.start()
