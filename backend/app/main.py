@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, tts_router
+from fastapi.staticfiles import StaticFiles
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks
 
 app = FastAPI(title="知学伴 API")
 
@@ -12,6 +13,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 暴露 PDF 渲染页图片（uploads/{doc.id}_pages/*.png）
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.get("/health")
 def health():
@@ -27,4 +31,8 @@ app.include_router(learning.router)
 app.include_router(goals.router)
 app.include_router(mistakes.router)
 app.include_router(knowledge.router)
+app.include_router(questions.router)
 app.include_router(tts_router.router)
+app.include_router(annotations.router)
+app.include_router(home.router)
+app.include_router(tasks.router)
