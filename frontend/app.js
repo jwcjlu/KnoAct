@@ -579,6 +579,33 @@ async function finishDictation(){
   const wrongWords = s.wrong.map(x=>({word:x.word, your_answer:x.yours}));
   const d = await api('/api/dictation/complete', {method:'POST', body:{user_id:uid, correct:s.correct, wrong:s.wrong.length, wrong_words:wrongWords}});
   if(!completed.includes(1)) completed.push(1);
+
+  // 查找今天的听写任务，标记已提交并引导拍照上传，家长核对后发放积分
+  try {
+    const t = new Date();
+    const day = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+    const tasks = await api(`/api/tasks?user_id=${uid}&date=${day}&role=child`);
+    const list = Array.isArray(tasks) ? tasks : (tasks && tasks.tasks) || [];
+    const task = list.find(x => x && x.task_type === 'dictation' && x.submit_status !== 'approved');
+    if(task && task.id){
+      await api('/api/tasks/'+task.id+'/submit', {method:'POST'});
+      if(confirm('请拍照上传你的听写字迹，家长核对后发放积分。现在上传？')){
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async () => {
+          if(!input.files || !input.files[0]) return;
+          const fd = new FormData();
+          fd.append('file', input.files[0]);
+          const r = await apiForm(`/api/tasks/${task.id}/upload-photo`, fd);
+          if(r && r.ok) toast('已上传，等待家长确认');
+          else toast('上传失败，请重试');
+        };
+        input.click();
+      }
+    }
+  } catch(e){ /* 任务查找失败不影响主流程 */ }
+
   await loadPoints();
   setPage('学习首页');
   toast(`完成打卡，获得 ${d.points_awarded} 积分`);
