@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, Text as TextCls, ForeignKey, JSON
+from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, Text as TextCls, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -166,6 +166,9 @@ class ModelConfig(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "subject", "date", "task_type", name="uq_task_user_subject_date_type"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     subject: Mapped[str] = mapped_column(String(16))            # '语文' | '英语'

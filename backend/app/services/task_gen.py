@@ -59,7 +59,7 @@ def _gen_review(db, lesson, count):
         WordMastery.next_review_at.isnot(None), WordMastery.next_review_at <= now).all()]
     if not weak_ids:
         return None
-    words = db.query(WordBank).filter(WordBank.id.in_(weak_ids), WordBank.subject == lesson.subject).limit(count).all()
+    words = db.query(WordBank).filter(WordBank.id.in_(weak_ids), WordBank.lesson_id == lesson.id).limit(count).all()
     if not words:
         return None
     return Task(

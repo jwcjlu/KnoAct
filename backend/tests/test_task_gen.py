@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, date, timedelta
 from app.database import SessionLocal, Base, engine
-from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text
+from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task
 from app.services.task_gen import generate_tasks_for_user, _current_lesson
 
 
@@ -12,6 +12,7 @@ def _setup(db):
     db.query(Text).delete()
     db.query(Lesson).delete()
     db.query(PdfDocument).delete()
+    db.query(Task).delete()
     db.query(User).delete()
     db.commit()
     u = User(name="测试孩子", role="child")
@@ -37,13 +38,44 @@ def test_current_lesson_matches_subject():
     db.close()
 
 
-def test_generate_tasks_for_user_creates_three_types():
+def test_generate_tasks_creates_dictation_and_knowledge_and_is_idempotent():
     db = SessionLocal()
     uid, l1 = _setup(db)
     generate_tasks_for_user(db, uid, date.today())
-    from app.models import Task
     rows = db.query(Task).filter_by(user_id=uid, date=date.today()).all()
     types = {r.task_type for r in rows}
     assert "dictation" in types
     assert "knowledge" in types
+
+    before = db.query(Task).filter_by(user_id=uid, date=date.today()).count()
+    generate_tasks_for_user(db, uid, date.today())  # 第二次调用应幂等，不新增行
+    after = db.query(Task).filter_by(user_id=uid, date=date.today()).count()
+    assert after == before
+    db.close()
+
+
+def test_generate_tasks_creates_review_when_word_is_due():
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    # 挑一个本课生词，造一条到期待复习记录
+    wb = db.query(WordBank).filter_by(lesson_id=l1_id).first()
+    db.add(WordMastery(word_bank_id=wb.id, is_weak=True,
+                       next_review_at=datetime.utcnow() - timedelta(days=1)))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    types = {r.task_type for r in db.query(Task).filter_by(user_id=uid, date=date.today()).all()}
+    assert "review" in types
+    db.close()
+
+
+def test_generate_tasks_no_lesson_produces_no_tasks():
+    db = SessionLocal()
+    u = User(name="无课孩子", role="child")
+    db.add(u); db.flush()
+    uid = u.id
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())  # 两科均无课，不应抛异常
+    assert db.query(Task).filter_by(user_id=uid, date=date.today()).count() == 0
     db.close()
