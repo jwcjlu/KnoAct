@@ -12,6 +12,9 @@ from ..services.task_gen import generate_daily_tasks
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
+ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+MAX_BYTES = 5 * 1024 * 1024  # 5MB
+
 
 class ApproveAllReq(BaseModel):
     user_id: int
@@ -79,8 +82,9 @@ def approve(task_id: int, db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
-    t.content_status = "published"
-    db.commit()
+    if t.content_status == "pending_review":
+        t.content_status = "published"
+        db.commit()
     return {"ok": True}
 
 
@@ -133,8 +137,9 @@ def submit(task_id: int, db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
-    t.submit_status = "submitted"
-    db.commit()
+    if t.submit_status != "approved":
+        t.submit_status = "submitted"
+        db.commit()
     return {"ok": True}
 
 
@@ -143,11 +148,16 @@ async def upload_photo(task_id: int, file: UploadFile = File(...), db: Session =
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXT:
+        return {"ok": False, "error": "unsupported file type"}
+    data = await file.read()
+    if len(data) > MAX_BYTES:
+        return {"ok": False, "error": "file too large"}
     os.makedirs("uploads/task_photos", exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
     path = f"uploads/task_photos/task_{task_id}{ext}"
     with open(path, "wb") as f:
-        f.write(await file.read())
+        f.write(data)
     t.photo_path = path
     db.commit()
     return {"ok": True, "path": path}
@@ -158,6 +168,8 @@ def confirm(task_id: int, db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
+    if t.submit_status == "approved":
+        return {"ok": True, "points": t.points, "already": True}
     t.submit_status = "approved"
     db.add(Point(user_id=t.user_id, delta=t.points, reason=f"任务完成：{t.title}"))
     db.commit()

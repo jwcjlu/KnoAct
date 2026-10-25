@@ -64,3 +64,59 @@ def test_add_custom_task_and_confirm_awards_points():
     tid = r.json()["id"]
     assert client.post(f"/api/tasks/{tid}/submit").json() == {"ok": True}
     assert client.post(f"/api/tasks/{tid}/confirm").json()["ok"] is True
+    db = SessionLocal()
+    pts = db.query(Point).filter_by(user_id=uid).all()
+    assert len(pts) == 1
+    assert pts[0].delta == 30
+    db.close()
+
+
+def test_double_confirm_awards_only_one_point():
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "custom",
+        "title": "读一页书", "points": 30,
+    })
+    tid = r.json()["id"]
+    client.post(f"/api/tasks/{tid}/submit")
+    first = client.post(f"/api/tasks/{tid}/confirm").json()
+    second = client.post(f"/api/tasks/{tid}/confirm").json()
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert second.get("already") is True
+    db = SessionLocal()
+    pts = db.query(Point).filter_by(user_id=uid).all()
+    assert len(pts) == 1
+    assert pts[0].delta == 30
+    db.close()
+
+
+def test_submit_after_confirm_does_not_downgrade():
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "custom",
+        "title": "读一页书", "points": 30,
+    })
+    tid = r.json()["id"]
+    client.post(f"/api/tasks/{tid}/submit")
+    client.post(f"/api/tasks/{tid}/confirm")
+    # 已 approved，再 submit 不应降级回 submitted
+    assert client.post(f"/api/tasks/{tid}/submit").json() == {"ok": True}
+    db = SessionLocal()
+    t = db.get(Task, tid)
+    assert t.submit_status == "approved"
+    db.close()
+
+
+def test_upload_photo_rejects_unsupported_ext():
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "custom",
+        "title": "读一页书",
+    })
+    tid = r.json()["id"]
+    resp = client.post(
+        f"/api/tasks/{tid}/upload-photo",
+        files={"file": ("bad.txt", b"hello", "text/plain")},
+    )
+    assert resp.json() == {"ok": False, "error": "unsupported file type"}
