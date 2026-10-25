@@ -1,5 +1,5 @@
-from datetime import datetime
-from sqlalchemy import String, Integer, Float, Boolean, DateTime, Text as TextCls, ForeignKey, JSON
+from datetime import datetime, date
+from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, Text as TextCls, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -69,6 +69,15 @@ class Text(Base):
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     content: Mapped[str] = mapped_column(TextCls)
 
+class Question(Base):
+    __tablename__ = "questions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
+    qtype: Mapped[str] = mapped_column(String(16), default="reading")   # reading | listening
+    question: Mapped[str] = mapped_column(TextCls)
+    answer: Mapped[str] = mapped_column(TextCls, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class Note(Base):
     __tablename__ = "notes"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -78,6 +87,21 @@ class Note(Base):
     anchor_text: Mapped[str] = mapped_column(TextCls, default="")
     page_number: Mapped[int] = mapped_column(Integer, nullable=True)
     knowledge_point_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Annotation(Base):
+    __tablename__ = "annotations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), default=0)
+    kind: Mapped[str] = mapped_column(String(16))           # highlight | underline | note | glossary
+    quote: Mapped[str] = mapped_column(TextCls)             # 被选中的原文片段
+    note: Mapped[str] = mapped_column(TextCls, default="")  # 笔记内容 / 生词释义
+    color: Mapped[str] = mapped_column(String(16), default="yellow")
+    page_number: Mapped[int] = mapped_column(Integer, default=1)
+    # 归一化矩形坐标（JSON 文本，如 [[x0,y0,x1,y1],...]，0~1 相对页宽高），
+    # 用于在原文上精确铺高亮/下划线，对齐 DeepTutor 的 normalised rects 机制。
+    rects: Mapped[str] = mapped_column(TextCls, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class WordMastery(Base):
@@ -139,3 +163,21 @@ class ModelConfig(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str] = mapped_column(String(64), unique=True)   # ai_provider / ai_model / ai_key / tts_provider / tts_voice / tts_key / tts_speed / tts_repeat
     value: Mapped[str] = mapped_column(TextCls, default="")
+
+class Task(Base):
+    __tablename__ = "tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    subject: Mapped[str] = mapped_column(String(16))            # '语文' | '英语'
+    date: Mapped[date] = mapped_column(Date)                    # 任务所属日期
+    task_type: Mapped[str] = mapped_column(String(16))          # dictation|knowledge|review|reading|listening|custom
+    title: Mapped[str] = mapped_column(String(255))
+    detail: Mapped[str] = mapped_column(String(255), default="")
+    content: Mapped[str] = mapped_column(TextCls, default="")   # JSON 文本快照
+    points: Mapped[int] = mapped_column(Integer, default=20)
+    content_status: Mapped[str] = mapped_column(String(16), default="pending_review")  # pending_review|published
+    submit_status: Mapped[str] = mapped_column(String(16), default="not_started")      # not_started|submitted|approved
+    photo_path: Mapped[str] = mapped_column(String(512), default="")
+    reviewed_by: Mapped[int] = mapped_column(Integer, nullable=True)
+    difficulty: Mapped[str] = mapped_column(String(16), nullable=True)  # 预留，本次恒 null
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
