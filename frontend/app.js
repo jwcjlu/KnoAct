@@ -80,6 +80,10 @@ let aiModelOptions = [];  // 中转站拉取到的动态模型列表
 let ttsModelOptions = []; // 中转站拉取到的动态语音模型列表
 let ttsConfig = {provider:'minimax', voice:'清澈男声', key:'', baseUrl:'', model:'speech-2.8-hd', speed:1.0, repeat:2};
 
+// 家长端任务审核
+let parentTaskDate = '';   // 家长端任务查看的日期（默认今天）
+let parentTasks = [];      // 当天全部任务（含待审核）
+
 // 听写状态
 let dictWords = [];   // [{id, word, extra}]
 let dictState = null; // {idx, phase, wrong:[], correct:0}
@@ -1964,6 +1968,7 @@ function setParentTab(t){
   if(t==='题目') loadQuestionData().then(()=>render());
   if(t==='目标') loadGoals();
   if(t==='报告') loadReport();
+  if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
   render();
 }
@@ -2078,8 +2083,79 @@ async function delQuestion(id){
   }
 }
 
+// ---- 任务审核 ----
+async function loadParentTasks(){
+  if(!parentTaskDate){
+    const t = new Date();
+    parentTaskDate = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  }
+  parentTasks = await api(`/api/tasks?user_id=${uid}&date=${parentTaskDate}&role=parent`);
+  if(!Array.isArray(parentTasks)) parentTasks = [];
+}
+const TASK_TYPE_LABEL = {
+  dictation:'听写', knowledge:'基础练习', review:'复习',
+  reading:'阅读理解', listening:'听力理解', custom:'自由任务'
+};
+function renderTaskTab(){
+  const typeChip = tt => `<span style="font-size:11px;font-weight:600;color:#5c6761;background:#eef0ed;border-radius:6px;padding:2px 8px">${TASK_TYPE_LABEL[tt]||tt||'任务'}</span>`;
+  const rows = parentTasks.map(t=>{
+    let status = '';
+    let actions = '';
+    if(t.content_status==='pending_review'){
+      status = `<span class="g-status" style="background:var(--orange-soft);color:var(--orange2)">待审核</span>`;
+      actions = `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="approveTask(${t.id})">通过</button>`;
+    } else if(t.submit_status==='submitted'){
+      status = `<span class="g-status" style="background:var(--orange-soft);color:var(--orange2)">待完成审核</span>`;
+      actions = `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="confirmTask(${t.id})">确认完成</button>` +
+        (t.photo_path ? `<a href="/${t.photo_path}" target="_blank" style="font-size:12px;color:#3158e8;text-decoration:none;align-self:center">查看照片</a>` : '');
+    } else if(t.submit_status==='approved'){
+      status = `<span class="g-status" style="background:var(--green-soft2);color:var(--green)">已完成</span>`;
+    } else {
+      status = `<span class="g-status" style="background:#eef0ed;color:#78817b">已发布</span>`;
+    }
+    const meta = [
+      t.subject||'',
+      t.detail||'',
+      (t.points!==undefined && t.points!==null) ? `${t.points} 积分` : ''
+    ].filter(Boolean).join(' · ');
+    return `<div class="goal-item" style="display:flex;align-items:center;gap:12px">
+      <div style="flex:1;min-width:0">
+        <div class="g-top"><span class="g-name">${t.title||'(无标题)'}</span>${status}</div>
+        ${meta?`<div class="g-meta">${meta}</div>`:''}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">${actions}<button class="btn-ghost" style="color:#c05b4a" onclick="deleteTask(${t.id})">删除</button></div>
+    </div>`;
+  }).join('');
+  return `<div class="parent-grid">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head">
+        <div class="ic blue">${icon('list',20)}</div>
+        <div><h3>任务管理</h3><div class="sub">${parentTaskDate} · 内容审核与完成审核</div></div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn-ghost" onclick="approveAllTasks()">全部通过</button>
+          <button class="btn-primary" style="padding:8px 16px" onclick="showAddTask()">新增任务</button>
+        </div>
+      </div>
+      <div class="bd">
+        ${rows ? `<div class="goal-list">${rows}</div>` : '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无任务</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+async function approveTask(id){ await api(`/api/tasks/${id}/approve`,{method:'POST'}); await loadParentTasks(); render(); }
+async function approveAllTasks(){ await api(`/api/tasks/approve-all`,{method:'POST',body:{user_id:uid,date:parentTaskDate}}); await loadParentTasks(); render(); }
+async function deleteTask(id){ await api(`/api/tasks/${id}`,{method:'DELETE'}); await loadParentTasks(); render(); }
+async function confirmTask(id){ await api(`/api/tasks/${id}/confirm`,{method:'POST'}); toast('已确认，积分已发放'); await loadParentTasks(); render(); }
+async function showAddTask(){
+  const title = prompt('任务标题');
+  if(!title) return;
+  const subject = prompt('科目（语文/英语）', '语文') || '语文';
+  await api(`/api/tasks`,{method:'POST',body:{user_id:uid,date:parentTaskDate,task_type:'custom',subject:subject,title:title,detail:'',points:20}});
+  await loadParentTasks(); render();
+}
+
 function renderParent(){
-  const tabs = ['教材','知识点','题目','目标','报告','规则','设置'].map(t=>
+  const tabs = ['教材','知识点','题目','目标','报告','任务','规则','设置'].map(t=>
     `<button class="filter-btn ${parentTab===t?'active':''}" style="border-radius:10px;padding:8px 16px;font-size:13px;font-weight:600;color:${parentTab===t?'#3158e8':'#778079'};background:${parentTab===t?'#fff':'transparent'}" onclick="setParentTab('${t}')">${t}</button>`
   ).join('');
 
@@ -2089,6 +2165,7 @@ function renderParent(){
   else if(parentTab==='题目') body = renderQuestionTab();
   else if(parentTab==='目标') body = renderGoalsTab();
   else if(parentTab==='报告') body = renderReportTab();
+  else if(parentTab==='任务') body = renderTaskTab();
   else if(parentTab==='规则') body = renderRulesTab();
   else if(parentTab==='设置') body = renderSettingsTab();
 
