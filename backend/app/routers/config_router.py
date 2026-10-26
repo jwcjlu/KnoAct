@@ -21,6 +21,16 @@ class TestReq(BaseModel):
     api_key: str = ""
     base_url: str = ""
     kind: str = "chat"  # chat=语言模型, tts=语音模型
+    # 新增：按角色测试（llm/task/tts/embedding/stt/imagegen…）。
+    # 为空时退回旧的扁平配置行为，保证老前端可用。
+    role: str = ""
+
+
+class ProbeReq(BaseModel):
+    provider: str = "openai"
+    base_url: str = ""
+    api_key: str = ""
+    connection_id: int | None = None
 
 
 @router.post("")
@@ -76,27 +86,110 @@ def list_models(req: TestReq):
 
 @router.post("/test")
 def test_config(req: TestReq, db: Session = Depends(get_db)):
-    """用当前（或临时）配置真实调用一次模型，返回成功/失败与响应片段。"""
-    cfg = {r.key: r.value for r in db.query(ModelConfig).all()}
-    provider_name = req.provider or cfg.get("ai_provider", "fake")
-    model = req.model or cfg.get("ai_model", "")
-    api_key = req.api_key or cfg.get("ai_key", "")
-    base_url = req.base_url or cfg.get("ai_base_url", "")
+    """按角色分派真实调用测试；role 为空时退回旧的扁平配置行为。
 
-    if provider_name == "openai":
-        p = OpenAICompatibleProvider(model=model, api_key=api_key, base_url=base_url)
-    elif provider_name == "deepseek":
-        p = DeepSeekProvider(model=model, api_key=api_key)
-    elif provider_name == "glm":
-        p = GLMProvider(model=model, api_key=api_key)
-    else:
-        p = FakeProvider(model=model, api_key=api_key)
+    留意：请求体统一走 TestReq（JSON body），不要改成查询参数——
+    老前端和新前端都是 POST JSON。
+    """
+    if not req.role:
+        # ---- 旧行为：直接用传入的（或已保存的）扁平配置 ----
+        cfg = {r.key: r.value for r in db.query(ModelConfig).all()}
+        provider_name = req.provider or cfg.get("ai_provider", "fake")
+        model = req.model or cfg.get("ai_model", "")
+        api_key = req.api_key or cfg.get("ai_key", "")
+        base_url = req.base_url or cfg.get("ai_base_url", "")
 
+        if provider_name == "openai":
+            p = OpenAICompatibleProvider(model=model, api_key=api_key, base_url=base_url)
+        elif provider_name == "deepseek":
+            p = DeepSeekProvider(model=model, api_key=api_key)
+        elif provider_name == "glm":
+            p = GLMProvider(model=model, api_key=api_key)
+        else:
+            p = FakeProvider(model=model, api_key=api_key)
+
+        try:
+            reply = p.generate(prompt="请回复「连接成功」四个字，不要其他内容。",
+                               system="你是连通性测试助手。")
+            return {"ok": True, "provider": provider_name, "model": model,
+                    "sample": reply[:200]}
+        except Exception as e:
+            return {"ok": False, "provider": provider_name, "model": model,
+                    "error": str(e)[:300]}
+
+    # ---- 新行为：按角色测试 ----
+    role = req.role
+    if role == "stt":
+        return {"ok": True, "role": role, "note": "语音识别未实现，跳过"}
+    if role == "task":
+        binding = db.get(RoleBinding, "task")
+        if binding is None or binding.mode == "inherit" or not binding.profile_id:
+            return {"ok": True, "role": role, "note": "继承语言模型"}
+
+    r = resolve(db, role)
+    if role in ("llm", "task"):
+        cls = {"openai": OpenAICompatibleProvider, "deepseek": DeepSeekProvider,
+               "glm": GLMProvider}.get(r.provider, FakeProvider)
+        if cls is OpenAICompatibleProvider:
+            p = cls(model=r.model, api_key=r.api_key, base_url=r.base_url)
+        else:
+            p = cls(model=r.model, api_key=r.api_key)
+        try:
+            reply = p.generate(prompt="请回复「连接成功」四个字，不要其他内容。",
+                               system="你是连通性测试助手。")
+            return {"ok": True, "role": role, "provider": r.provider,
+                    "model": r.model, "sample": reply[:200]}
+        except Exception as e:
+            return {"ok": False, "role": role, "provider": r.provider,
+                    "model": r.model, "error": str(e)[:300]}
+    if role == "tts":
+        from ..services.tts import get_tts
+        try:
+            audio = get_tts(db).synthesize("测试")
+            return {"ok": True, "role": role, "bytes": len(audio)}
+        except Exception as e:
+            return {"ok": False, "role": role, "error": str(e)[:300]}
+    if role == "embedding":
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=r.api_key or "none", base_url=r.base_url or None)
+            resp = client.embeddings.create(model=r.model, input="测试")
+            return {"ok": True, "role": role,
+                    "dimension": len(resp.data[0].embedding)}
+        except Exception as e:
+            return {"ok": False, "role": role, "error": str(e)[:300]}
+    if role == "imagegen":
+        return {"ok": bool(r.api_key), "role": role, "note": "仅校验配置，不生成"}
+    return {"ok": True, "role": role, "note": "未实现，跳过"}
+
+
+@router.post("/probe")
+def probe(req: ProbeReq, db: Session = Depends(get_db)):
+    """凭据探针：GET {base_url}/models，不发推理、不计费。"""
+    api_key = req.api_key
+    if api_key == MASK and req.connection_id:
+        conn = db.get(ModelConnection, req.connection_id)
+        api_key = conn.api_key if conn else ""
+
+    if req.provider != "openai":
+        return {"status": "connected", "models": [],
+                "warning": "内置 provider，跳过探测"}
+    if not req.base_url:
+        return {"status": "invalid_url", "models": [],
+                "warning": "中转站需要 Base URL"}
+
+    p = OpenAICompatibleProvider(model="", api_key=api_key,
+                                 base_url=req.base_url)
     try:
-        reply = p.generate(prompt="请回复「连接成功」四个字，不要其他内容。", system="你是连通性测试助手。")
-        return {"ok": True, "provider": provider_name, "model": model, "sample": reply[:200]}
+        models = p.list_models()
     except Exception as e:
-        return {"ok": False, "provider": provider_name, "model": model, "error": str(e)[:300]}
+        msg = str(e)
+        if any(k in msg for k in ("401", "403", "Unauthorized", "invalid_api_key")):
+            return {"status": "auth_error", "models": []}
+        if "timed out" in msg.lower() or "timeout" in msg.lower():
+            return {"status": "timeout", "models": []}
+        return {"status": "unreachable", "models": []}
+    return {"status": "connected", "models": [{"id": m} for m in models]}
 
 
 # ---------------- 模型与服务（7 角色）----------------

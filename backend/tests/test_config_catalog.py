@@ -97,3 +97,55 @@ def test_deleting_connection_nulls_profile_reference(setup_db):
     assert prof is not None
     assert prof.connection_id is None
     db.close()
+
+
+def test_probe_requires_base_url_for_openai(setup_db):
+    c = _client()
+    r = c.post("/api/config/probe", json={
+        "provider": "openai", "base_url": "", "api_key": "sk-x"
+    }).json()
+    assert r["status"] == "invalid_url"
+
+
+def test_probe_restores_masked_key(setup_db):
+    db = SessionLocal(); _clear(db); db.close()
+    c = _client()
+    c.put("/api/config/catalog", json={
+        "connections": [{"id": None, "provider": "openai", "name": "a",
+                         "base_url": "http://127.0.0.1:1/v1", "api_key": "sk-real"}],
+        "services": {},
+    })
+    got = c.get("/api/config/catalog").json()
+    conn_id = got["connections"][0]["id"]
+    # 用 MASK 去探测，后端应换回真 key；连不上是预期的
+    r = c.post("/api/config/probe", json={
+        "provider": "openai", "base_url": "http://127.0.0.1:1/v1",
+        "api_key": "***", "connection_id": conn_id,
+    }).json()
+    assert r["status"] in ("unreachable", "timeout", "http_error", "auth_error")
+
+
+def test_test_endpoint_task_inherit_short_circuits(setup_db):
+    db = SessionLocal(); _clear(db); db.close()
+    c = _client()
+    r = c.post("/api/config/test", json={"role": "task"}).json()
+    assert r["ok"] is True
+    assert "继承" in r.get("note", "")
+
+
+def test_test_endpoint_stt_is_skipped(setup_db):
+    db = SessionLocal(); _clear(db); db.close()
+    c = _client()
+    r = c.post("/api/config/test", json={"role": "stt"}).json()
+    assert r["ok"] is True
+    assert "跳过" in r.get("note", "")
+
+
+def test_test_endpoint_old_payload_still_works(setup_db):
+    """旧前端只传 provider/model/api_key/base_url，必须还能用。"""
+    db = SessionLocal(); _clear(db); db.close()
+    c = _client()
+    r = c.post("/api/config/test", json={
+        "provider": "fake", "model": "", "api_key": "", "base_url": "",
+    }).json()
+    assert "ok" in r
