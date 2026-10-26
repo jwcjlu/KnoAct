@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz
 
 app = FastAPI(title="知学伴 API")
 
@@ -36,6 +36,7 @@ app.include_router(tts_router.router)
 app.include_router(annotations.router)
 app.include_router(home.router)
 app.include_router(tasks.router)
+app.include_router(quiz.router)
 
 # 每天 03:00 定时生成当天任务（模块级调度器，pytest 导入时不启动）
 import sys

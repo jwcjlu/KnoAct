@@ -41,3 +41,41 @@ def test_grade_answers_rejects_out_of_range_index():
     answers = [{"question_id": "q1", "selected_index": 9}]
     results = grade_answers(questions, answers)
     assert results[0]["is_correct"] is False
+
+
+import json
+from fastapi.testclient import TestClient
+from app.main import app
+from app.database import SessionLocal
+from app.models import User, PdfDocument, Lesson, Text, Quiz, ModelConfig
+
+client = TestClient(app)
+
+
+def _seed_lesson():
+    db = SessionLocal()
+    for m in (Quiz, Text, Lesson, PdfDocument, User, ModelConfig):
+        db.query(m).delete()
+    db.commit()
+    u = User(name="孩子", role="child")
+    db.add(u); db.flush()
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="")
+    db.add(doc); db.flush()
+    l = Lesson(document_id=doc.id, subject="语文", title="第1课",
+               start_page=1, end_page=2, extract_status="done", audit_status="approved")
+    db.add(l); db.flush()
+    db.add(Text(lesson_id=l.id, content="白鹭是一首精巧的诗。色素的配合，身段的大小，一切都很适宜。"))
+    db.add(ModelConfig(key="ai_provider", value="fake"))
+    db.commit()
+    return l.id
+
+
+def test_generate_quiz_returns_503_when_ai_unconfigured(setup_db):
+    lid = _seed_lesson()
+    r = client.post("/api/quiz/generate", json={"lesson_id": lid})
+    assert r.status_code == 503
+
+
+def test_submit_quiz_expired_returns_409(setup_db):
+    r = client.post("/api/quiz/submit", json={"quiz_id": 999999, "answers": []})
+    assert r.status_code == 409
