@@ -339,3 +339,61 @@ def test_migration_preserves_tts_options():
     assert tts.options.get("voice") == "female-shaonv"
     assert tts.options.get("speed") == "1.2"
     db.close()
+
+
+def test_migration_reuses_identical_connection_across_roles():
+    from migrate_model_catalog import migrate
+    db = SessionLocal()
+    _clear(db)
+    same = [
+        ("ai_provider", "openai"), ("ai_model", "glm-5.3-flash"),
+        ("ai_key", "sk-shared"), ("ai_base_url", "https://relay/v1"),
+        ("tts_provider", "openai"), ("tts_model", "speech-2.8-hd"),
+        ("tts_key", "sk-shared"), ("tts_base_url", "https://relay/v1"),
+    ]
+    for k, v in same:
+        db.add(ModelConfig(key=k, value=v))
+    db.commit()
+
+    migrate(db)
+
+    assert db.query(ModelConnection).count() == 1, "相同凭证应复用同一条连接"
+    assert db.query(ModelProfile).count() == 2, "两个角色各有一档，但共用一条连接"
+    db.close()
+
+
+def test_migration_keeps_distinct_connections_apart():
+    from migrate_model_catalog import migrate
+    db = SessionLocal()
+    _clear(db)
+    rows = [
+        ("ai_provider", "openai"), ("ai_key", "sk-llm"), ("ai_base_url", "https://a/v1"),
+        ("tts_provider", "openai"), ("tts_key", "sk-tts"), ("tts_base_url", "https://a/v1"),
+    ]
+    for k, v in rows:
+        db.add(ModelConfig(key=k, value=v))
+    db.commit()
+
+    migrate(db)
+
+    assert db.query(ModelConnection).count() == 2, "不同 key 必须分开"
+    db.close()
+
+
+def test_migration_connection_names_are_distinct():
+    from migrate_model_catalog import migrate
+    db = SessionLocal()
+    _clear(db)
+    rows = [
+        ("ai_provider", "openai"), ("ai_key", "sk-llm"), ("ai_base_url", "https://a/v1"),
+        ("tts_provider", "openai"), ("tts_key", "sk-tts"), ("tts_base_url", "https://a/v1"),
+    ]
+    for k, v in rows:
+        db.add(ModelConfig(key=k, value=v))
+    db.commit()
+
+    migrate(db)
+
+    names = [c.name for c in db.query(ModelConnection).all()]
+    assert len(names) == len(set(names)), f"连接名不能重复：{names}"
+    db.close()

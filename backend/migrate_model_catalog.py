@@ -21,14 +21,34 @@ def _cfg(db: Session) -> dict:
     return {r.key: r.value for r in db.query(ModelConfig).all()}
 
 
+ROLE_LABEL = {
+    "llm": "语言模型", "task": "后台任务模型", "embedding": "嵌入模型",
+    "search": "搜索", "tts": "语音", "stt": "语音识别", "imagegen": "多模态生成",
+}
+
+
+def _find_or_create_conn(db: Session, provider: str, base_url: str, api_key: str,
+                         role: str) -> ModelConnection:
+    """相同 provider+base_url+api_key 复用同一条连接，避免每个角色重复建。"""
+    for c in db.query(ModelConnection).all():
+        if (c.provider, c.base_url, c.api_key) == (provider, base_url, api_key):
+            return c
+    conn = ModelConnection(
+        provider=provider,
+        name=f"{provider} · {ROLE_LABEL.get(role, role)}",
+        base_url=base_url,
+        api_key=api_key,
+    )
+    db.add(conn)
+    db.flush()
+    return conn
+
+
 def _upsert(db: Session, role: str, provider: str, model: str, api_key: str,
             base_url: str, options: dict) -> None:
     if db.get(RoleBinding, role):
         return  # 已迁移过
-    conn = ModelConnection(provider=provider, name=f"{provider}（迁移）",
-                           base_url=base_url, api_key=api_key)
-    db.add(conn)
-    db.flush()
+    conn = _find_or_create_conn(db, provider, base_url, api_key, role)
     prof = ModelProfile(role=role, connection_id=conn.id, model=model,
                         options=json.dumps(options) if options else "")
     db.add(prof)
