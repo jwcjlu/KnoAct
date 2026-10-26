@@ -11,6 +11,7 @@ const ICONS = {
   gift:'<path d="M3 9h18v4H3zM5 13v8h14v-8M12 9v12"/><path d="M12 9H8.5A2.5 2.5 0 1 1 11 6.5ZM12 9h3.5A2.5 2.5 0 1 0 13 6.5Z"/>',
   star:'<path d="m12 2.5 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9Z"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  text:'<path d="M4 6h16M4 12h10M4 18h7"/>',
   arrow:'<path d="M5 12h14M14 7l5 5-5 5"/>',
   'arrow-left':'<path d="M19 12H5M10 7l-5 5 5 5"/>',
   grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -2463,8 +2464,191 @@ function renderRulesTab(){
   </div>`;
 }
 
-// ---- 设置 ----
+// ---- 模型与服务（7 角色）----
+let msCatalog = null;
+let msRoleTab = 'llm';
+let msProbe = {};
+let msConnEdit = null;
+let msSaving = false;
+let msLegacyView = false;
+let msModelsByConn = {};
+
+const MS_ROLES = [
+  {id:'llm',       name:'语言模型',     icon:'brain',      color:'purple', wired:true,  desc:'对话、追问、讲解、出题', model:true},
+  {id:'task',      name:'后台任务模型', icon:'clock',      color:'blue',   wired:true,  desc:'任务生成、课文提取、批量出题', model:true},
+  {id:'embedding', name:'嵌入模型',     icon:'text',       color:'green',  wired:false, desc:'课文语义检索（为引用定位预留）', model:true},
+  {id:'search',    name:'搜索',         icon:'chart',      color:'orange', wired:false, desc:'联网查资料（暂未接入）', model:false},
+  {id:'tts',       name:'语音',         icon:'headphones', color:'orange', wired:true,  desc:'听写朗读、课文朗读', model:true},
+  {id:'stt',       name:'语音识别',     icon:'headphones', color:'blue',   wired:false, desc:'跟读评测（暂未接入）', model:true},
+  {id:'imagegen',  name:'多模态生成',   icon:'sparkles',   color:'green',  wired:false, desc:'课文配图与示意动画（暂未接入）', model:true}
+];
+
+async function loadModelCatalog(){
+  msCatalog = await api('/api/config/catalog');
+  return msCatalog;
+}
+function msSvc(role){ return (msCatalog && msCatalog.services && msCatalog.services[role]) || {}; }
+function msConns(){ return (msCatalog && msCatalog.connections) || []; }
+function msConnAt(i){ const c = msConns(); return (typeof i === 'number' && i >= 0 && i < c.length) ? c[i] : null; }
+function msRoleMeta(id){ return MS_ROLES.find(r => r.id === id) || MS_ROLES[0]; }
+function msStatus(role){
+  const svc = msSvc(role);
+  if(role === 'task' && (svc.mode || 'inherit') === 'inherit') return 'ok';
+  if(svc.connection_index === null || svc.connection_index === undefined) return 'off';
+  return svc.model ? 'ok' : 'warn';
+}
+function msOpts(role){
+  const raw = msSvc(role).options || '';
+  try { return raw ? JSON.parse(raw) : {}; } catch(e){ return {}; }
+}
+
 function renderSettingsTab(){
+  if(msLegacyView){ return renderSettingsTabLegacy(); }
+  if(!msCatalog){
+    loadModelCatalog().then(()=>render()).catch(()=>{ msCatalog = {registry:{}, connections:[], services:{}}; render(); });
+    return `<div class="ms-empty" style="margin-top:24px">正在加载模型配置…</div>`;
+  }
+  return `<div style="display:flex;justify-content:flex-end;margin-bottom:-8px">
+      <button class="btn-ghost" onclick="msLegacyView=true;render()">切换到旧版设置</button>
+    </div>
+    <div class="ms-wrap">${msNavHtml()}${msRoleTab==='connections' ? msConnectionsHtml() : msRoleHtml()}</div>`;
+}
+
+function msNavHtml(){
+  const items = MS_ROLES.map(r=>{
+    const st = msStatus(r.id);
+    return `<button class="ms-item ${msRoleTab===r.id?'on':''}" onclick="msSelectRole('${r.id}')">
+      ${icon(r.icon,16)}<span>${r.name}</span>
+      ${r.wired ? `<span class="dot ${st}"></span>` : `<span class="off-tag">未接入</span>`}
+    </button>`;
+  }).join('');
+  return `<aside class="ms-nav">
+    <div class="nav-title">模型与服务</div>
+    ${items}
+    <div style="border-top:1px solid #eef1ec;margin:10px 0 4px"></div>
+    <button class="ms-item ${msRoleTab==='connections'?'on':''}" onclick="msSelectRole('connections')">
+      ${icon('book',16)}<span>提供方</span>
+    </button>
+  </aside>`;
+}
+
+function msConnectionsHtml(){
+  const cards = msConns().map((c,i)=>{
+    const editing = msConnEdit === i;
+    return `<div class="ms-card" style="align-items:flex-start">
+      <div class="c-l">
+        <div class="c-name">${escapeAttr(c.name||'未命名')}<span class="ms-badge idle">${escapeAttr(c.provider)}</span></div>
+        <div class="c-meta">${escapeAttr(c.base_url||'默认端点')} · <span class="c-k">${escapeAttr(c.api_key||'未配置')}</span></div>
+        ${editing ? `
+          <div class="ms-field"><div class="ms-label">名称</div>
+            <input class="ms-input" value="${escapeAttr(c.name||'')}" oninput="msConnField(${i},'name',this.value)"></div>
+          <div class="ms-field"><div class="ms-label">Base URL</div>
+            <input class="ms-input" value="${escapeAttr(c.base_url||'')}" placeholder="留空使用默认端点" oninput="msConnField(${i},'base_url',this.value)"></div>
+          <div class="ms-field"><div class="ms-label">API Key</div>
+            <input class="ms-input" type="password" value="" placeholder="${c.api_key?'已保存，留空则不修改':'sk-...'}" oninput="msConnField(${i},'_newKey',this.value)">
+            <div class="ms-hint">密钥只在提供方录一次，所有角色共用。</div></div>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+        <button class="btn-ghost" onclick="msToggleConnEdit(${i})">${editing?'收起':'编辑'}</button>
+        <button class="btn-ghost" style="color:#c05b4a" onclick="msRemoveConn(${i})">删除</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<section class="ms-main">
+    <div class="head"><div class="ic blue">${icon('book',20)}</div>
+      <div><h3>提供方</h3><div class="sub">添加提供方与认证信息，然后测试连接</div></div></div>
+    <div style="margin-top:18px">${cards || `<div class="ms-empty">还没有提供方，先添加一个吧</div>`}</div>
+    <div class="ms-actions">
+      <button class="btn-ghost" style="padding:10px 20px" onclick="msAddConn()">＋ 添加提供方</button>
+      <button class="btn-primary" style="padding:10px 24px" onclick="msSaveAll()" ${msSaving?'disabled':''}>保存配置</button>
+    </div>
+  </section>`;
+}
+
+function msRoleHtml(){
+  const r = msRoleMeta(msRoleTab);
+  const svc = msSvc(r.id);
+  const st = msStatus(r.id);
+  const stText = st==='ok'?'已配置':st==='warn'?'待选模型':'未配置';
+  const inherit = r.id==='task' && (svc.mode||'inherit')==='inherit';
+  const connOpts = `<option value="">— 不使用连接 —</option>` + msConns().map((c,i)=>
+    `<option value="${i}" ${svc.connection_index===i?'selected':''}>${escapeAttr(c.name||c.provider)}</option>`).join('');
+  const models = msModelsByConn[svc.connection_index] || [];
+  const opts = msOpts(r.id);
+
+  const summary = MS_ROLES.filter(x=>x.wired).map(x=>{
+    const s = msSvc(x.id);
+    const inh = x.id==='task' && (s.mode||'inherit')==='inherit';
+    const eff = s.effective || {};
+    const val = inh ? '跟随语言模型' : (eff.provider ? `${eff.provider} · ${eff.model||'未选模型'}` : '未配置');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f1f4ef">
+      <span style="font-size:12px;color:var(--gray2);width:88px;flex-shrink:0">${x.name}</span>
+      <span style="font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeAttr(val)}</span>
+    </div>`;
+  }).join('');
+
+  return `<section class="ms-main">
+    <div class="head">
+      <div class="ic ${r.color}">${icon(r.icon,20)}</div>
+      <div><h3>${r.name}</h3><div class="sub">${r.desc}</div></div>
+      <span class="ms-badge ${st}">${stText}</span>
+    </div>
+    ${!r.wired ? `<div class="ms-hint" style="margin-top:14px;background:#f7f8f6;border-radius:12px;padding:10px 12px">
+      该角色暂未接入业务，配置会保存，但不会影响现有功能。</div>` : ''}
+    ${r.id==='task' ? `<div class="ms-field">
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;cursor:pointer">
+        <input type="checkbox" ${inherit?'checked':''} onchange="msToggleInherit(this.checked)">
+        跟随语言模型（推荐）
+      </label>
+      <div class="ms-hint">开启后后台任务沿用语言模型的配置；只有在想用更便宜 / 更快的模型时才需要单独配置。</div>
+    </div>` : ''}
+    ${inherit ? '' : `
+      <div class="ms-field"><div class="ms-label">提供方</div>
+        <select class="ms-select" onchange="msSetConn(this.value)">${connOpts}</select>
+        ${msConns().length ? '' : `<div class="ms-hint">先到「提供方」里添加一套凭证，再回到这里选择。</div>`}
+      </div>
+      ${r.model ? `<div class="ms-field"><div class="ms-label">模型</div>
+        <div class="ms-row">
+          ${models.length
+            ? `<select class="ms-select" onchange="msSetModel(this.value)">
+                 <option value="">— 选择模型 —</option>
+                 ${models.map(m=>`<option value="${escapeAttr(m)}" ${svc.model===m?'selected':''}>${escapeAttr(m)}</option>`).join('')}
+               </select>`
+            : `<input class="ms-input" value="${escapeAttr(svc.model||'')}" placeholder="填模型名，或点右侧拉取" oninput="msSetModel(this.value)">`}
+          <button class="btn-ghost" style="white-space:nowrap" onclick="msFetchModels()">拉取模型</button>
+        </div>
+        <div class="ms-hint">${escapeAttr(msProbe[r.id]||'选择提供方后，可拉取该账号下可用的模型列表。')}</div>
+      </div>` : ''}
+      ${r.id==='tts' ? `<div class="ms-field"><div class="ms-label">音色</div>
+        <select class="ms-select" onchange="msSetOption('voice',this.value)">
+          ${['male-qn-qingse','female-shaonv','presenter_male','alloy','nova'].map(v=>
+            `<option value="${v}" ${(opts.voice||'')===v?'selected':''}>${v}</option>`).join('')}
+        </select></div>
+        <div class="ms-field">
+          <div class="ms-row"><span class="ms-label" style="margin:0;white-space:nowrap">语速</span>
+            <input type="range" min="0.5" max="2" step="0.1" value="${opts.speed||1}" style="flex:1"
+              oninput="msSetOption('speed',this.value);this.nextElementSibling.textContent=this.value">
+            <span style="font-size:13px;width:34px;text-align:right">${opts.speed||1}</span>
+          </div>
+        </div>` : ''}
+      ${r.id==='embedding' ? `<div class="ms-field"><div class="ms-label">向量维度</div>
+        <input class="ms-input" value="${escapeAttr(opts.dimension||'')}" placeholder="如 1536"
+          oninput="msSetOption('dimension',this.value)"></div>` : ''}
+    `}
+    <div class="ms-actions">
+      ${r.id==='tts' ? `<button class="btn-ghost" style="padding:10px 20px" onclick="testVoice()">试听语音</button>` : ''}
+      <button class="btn-ghost" style="padding:10px 20px" onclick="msTestRole('${r.id}')">测试连接</button>
+      <button class="btn-primary" style="padding:10px 24px" onclick="msSaveAll()" ${msSaving?'disabled':''}>保存配置</button>
+    </div>
+    <div style="margin-top:22px;padding-top:18px;border-top:1px solid #eef1ec">
+      <div style="font-size:12px;font-weight:700;color:var(--gray2);letter-spacing:.04em;margin-bottom:4px">当前生效配置</div>
+      ${summary}
+    </div>
+  </section>`;
+}
+
+// ---- 设置（旧版，保留作为回滚路径）----
+function renderSettingsTabLegacy(){
   const aiOpts = aiProviders.map(p=>{
     // 中转站：模型动态拉取；其他 provider 用内置固定列表
     let modelField = '';
@@ -2504,7 +2688,7 @@ function renderSettingsTab(){
       ${ttsConfig.provider===p.id?voiceModelField:''}
     </div>`;
   }).join('');
-  return `<div class="parent-grid">
+  const legacyBody = `<div class="parent-grid">
     <div class="parent-panel">
       <div class="head"><div class="ic purple">${icon('brain',20)}</div><div><h3>AI 大模型配置</h3><div class="sub">选择出题 / 批改 / 对话用的默认模型</div></div></div>
       <div class="bd">
@@ -2540,9 +2724,108 @@ function renderSettingsTab(){
       <button class="btn-primary" style="padding:10px 24px" onclick="saveConfig()">保存配置</button>
     </div>
   </div>`;
+  return `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <button class="btn-ghost" onclick="msLegacyView=false;render()">切换到新版设置</button>
+    </div>` + legacyBody;
 }
 function setAiProvider(id){ aiConfig.provider=id; aiConfig.model=aiProviders.find(p=>p.id===id).models[0]; render(); }
 function setTtsProvider(id){ ttsConfig.provider=id; ttsConfig.voice=ttsProviders.find(p=>p.id===id).voices[0]; render(); }
+
+// ---- 模型与服务：交互 ----
+function msSelectRole(id){ msRoleTab = id; msConnEdit = null; render(); }
+function msToggleConnEdit(i){ msConnEdit = msConnEdit === i ? null : i; render(); }
+function msConnField(i, field, val){
+  const c = msConns()[i]; if(!c) return;
+  if(field === '_newKey'){ c._newKey = val; return; }
+  c[field] = val;
+}
+function msAddConn(){
+  msCatalog.connections.push({id:null, provider:'openai', name:'新提供方',
+    base_url:'', api_key:'', extra_headers:''});
+  msConnEdit = msConns().length - 1;
+  msRoleTab = 'connections'; render();
+}
+function msRemoveConn(i){
+  msCatalog.connections.splice(i, 1);
+  Object.keys(msCatalog.services||{}).forEach(role=>{
+    const s = msCatalog.services[role];
+    if(s.connection_index === i){ s.connection_index = null; s.model = ''; }
+    else if(typeof s.connection_index === 'number' && s.connection_index > i){ s.connection_index -= 1; }
+  });
+  if(msConnEdit === i) msConnEdit = null;
+  else if(msConnEdit !== null && msConnEdit > i) msConnEdit -= 1;
+  render();
+}
+function msSetConn(val){
+  const s = msSvc(msRoleTab);
+  s.connection_index = val === '' ? null : parseInt(val);
+  s.model = '';
+  render();
+}
+function msSetModel(val){ msSvc(msRoleTab).model = val; }
+function msSetOption(key, val){
+  const s = msSvc(msRoleTab);
+  let o = msOpts(msRoleTab);
+  o[key] = val;
+  s.options = JSON.stringify(o);
+}
+async function msToggleInherit(on){
+  msSvc('task').mode = on ? 'inherit' : 'reference';
+  await msSaveAll();
+}
+async function msFetchModels(){
+  const s = msSvc(msRoleTab);
+  const conn = msConnAt(s.connection_index);
+  if(!conn){ msProbe[msRoleTab] = '请先选择提供方。'; render(); return; }
+  msProbe[msRoleTab] = '正在拉取…'; render();
+  const r = await api('/api/config/probe', {method:'POST', body:{
+    provider: conn.provider, base_url: conn.base_url,
+    api_key: conn.api_key, connection_id: conn.id || null
+  }});
+  if(r.status === 'connected' && r.models && r.models.length){
+    msProbe[msRoleTab] = `连接成功 · 可用模型 ${r.models.length} 个`;
+    msModelsByConn[s.connection_index] = r.models.map(m=>m.id);
+  } else if(r.status === 'connected'){
+    msProbe[msRoleTab] = '连接成功，但该提供方没有返回模型列表，请手动填写。';
+  } else {
+    msProbe[msRoleTab] = `连接失败：${r.status}${r.warning?' · '+r.warning:''}`;
+  }
+  render();
+}
+async function msTestRole(role){
+  msProbe[role] = '正在测试…'; render();
+  const r = await api('/api/config/test', {method:'POST', body:{role}});
+  msProbe[role] = r.ok
+    ? `测试通过${r.note?'（'+r.note+'）':''}${r.sample?'：'+r.sample.slice(0,30):''}`
+    : `测试失败：${r.error||'未知错误'}`;
+  render();
+}
+async function msSaveAll(){
+  if(msSaving) return;
+  msSaving = true; render();
+  const payload = {
+    connections: msConns().map(c=>({
+      id: c.id || null, provider: c.provider, name: c.name,
+      base_url: c.base_url, api_key: c._newKey || c.api_key || '',
+      extra_headers: c.extra_headers || ''
+    })),
+    services: {}
+  };
+  Object.keys(msCatalog.services||{}).forEach(role=>{
+    const s = msCatalog.services[role];
+    payload.services[role] = {
+      connection_index: s.connection_index === undefined ? null : s.connection_index,
+      model: s.model || '', options: s.options || '', mode: s.mode || 'inherit'
+    };
+  });
+  try{
+    const r = await api('/api/config/catalog', {method:'PUT', body:payload});
+    if(r && r.ok){ await loadModelCatalog(); toast('模型与服务配置已保存'); }
+    else { toast('保存失败'); }
+  }catch(e){ toast('保存失败：' + e.message); }
+  msSaving = false;
+  render();
+}
 async function saveConfig(){
   const kv = [
     ['ai_provider', aiConfig.provider], ['ai_model', aiConfig.model], ['ai_key', aiConfig.key],
