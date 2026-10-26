@@ -49,20 +49,8 @@ def dictation_grade(req: GradeReq, db: Session = Depends(get_db)):
     else:
         w = db.query(WordBank).filter_by(word=req.word).first()
     if w:
-        m = db.query(WordMastery).filter_by(word_bank_id=w.id).first()
-        if not m:
-            m = WordMastery(word_bank_id=w.id, correct_count=0, mistake_count=0, is_weak=False)
-            db.add(m)
-        if correct:
-            m.correct_count += 1
-            m.is_weak = False
-            m.next_review_at = next_review_after(m.correct_count, datetime.utcnow())
-        else:
-            m.mistake_count += 1
-            m.is_weak = True
-            m.correct_count = 0
-            m.next_review_at = datetime.utcnow()  # 答错当天就需再复习
-        db.commit()
+        from ..services.mastery import record_attempt as record_mastery
+        record_mastery(db, req.user_id, "word", w.id, correct)
     return {"correct": correct}
 
 class WrongWord(BaseModel):
@@ -130,27 +118,39 @@ def listening_material(user_id: int, db: Session = Depends(get_db)):
     provider = get_provider(db)
     try:
         text = provider.generate(
-            prompt="用小学生已学单词编一段 3 句的英语对话，并出 1 道理解题（题目||答案）。",
+            prompt='用小学生已学单词编一段 3 句的英语对话，并出 1 道理解题。'
+                   '只返回 JSON，格式：{"dialogue":"对话内容","question":"题目","answer":"答案"}',
             system="你是英语老师。",
+            json_mode=True,
         )
+        import json as _json
+        try:
+            data = _json.loads(text)
+        except Exception:
+            # 兜底：尝试用 || 切分（旧格式）
+            stem, _, ans = text.partition("||")
+            return {"text": stem.strip(), "questions": [{"question": ans.strip(), "answer": ans.strip()}]}
+        dialogue = (data.get("dialogue") or "").strip()
+        question = (data.get("question") or "").strip()
+        answer = (data.get("answer") or "").strip()
+        return {"text": dialogue, "questions": [{"question": question, "answer": answer}]}
     except Exception:
-        text = "A: What can you do? B: I can sing. || 对话里 B 会做什么？|| 唱歌"
-    stem, _, ans = text.partition("||")
-    return {"text": stem, "questions": [{"question": ans, "answer": ans}]}
+        text = "A: What can you do? B: I can sing."
+        return {"text": text, "questions": [{"question": "对话里 B 会做什么？", "answer": "唱歌"}]}
 
 @router.get("/api/reading/material")
 def reading_material(lesson_id: int, db: Session = Depends(get_db)):
-    from ..models import Text
+    from ..models import Text, Question
+    from ..services.question_gen import generate_reading_questions
     t = db.query(Text).filter_by(lesson_id=lesson_id).first()
-    provider = get_provider(db)
     if not t:
         return {"text": "", "questions": []}
-    try:
-        q = provider.generate(
-            prompt=f"针对课文「{t.content}」出 1 道阅读理解题，格式：题目||答案",
-            system="你是语文老师。",
-        )
-        stem, _, ans = q.partition("||")
-    except Exception:
-        stem, ans = "文中作者表达了什么感情？", "对故乡的喜爱"
-    return {"text": t.content, "questions": [{"question": stem, "answer": ans}]}
+    qs = db.query(Question).filter_by(lesson_id=lesson_id, qtype="reading").order_by(Question.id).all()
+    if not qs:
+        # 兼容历史数据：无预生成题时现场生成并落库（首次仍慢一次，之后命中缓存）
+        gen = generate_reading_questions(db, t.content, n=1)
+        for q in gen:
+            db.add(Question(lesson_id=lesson_id, qtype="reading", question=q["question"], answer=q["answer"]))
+        db.commit()
+        qs = db.query(Question).filter_by(lesson_id=lesson_id, qtype="reading").order_by(Question.id).all()
+    return {"text": t.content, "questions": [{"question": q.question, "answer": q.answer} for q in qs]}

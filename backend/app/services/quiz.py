@@ -39,7 +39,7 @@ class QuizGenerationError(Exception):
     """出题失败（AI 未配置 / 返回无法解析 / 证据校验不过）。"""
 
 
-def generate_quiz(db: Session, text: str, n: int = 3) -> list[dict]:
+def generate_quiz(db: Session, text: str, n: int = 3, knowledge_points: list[dict] | None = None) -> list[dict]:
     """针对课文出 n 道选择题，返回 [{id, prompt, choices, correct_index, evidence}]。
 
     校验：每题 evidence 归一化后必须是课文归一化后的子串，否则整卷拒绝。
@@ -51,6 +51,12 @@ def generate_quiz(db: Session, text: str, n: int = 3) -> list[dict]:
         raise QuizGenerationError("AI 未配置")
 
     prompt = f"阅读上下文：\n{text[:6000]}"
+    if knowledge_points:
+        prompt += (
+            "\n本课的知识点列表（JSON，含 id / category / content）：\n"
+            f"{json.dumps(knowledge_points, ensure_ascii=False)}\n"
+            '每道题额外返回 "knowledge_point_id"：从上面列表里选最相关的一个知识点 id；若都不匹配则填 null。'
+        )
     raw = provider.generate(prompt=prompt, system=_SYSTEM_ZH, json_mode=True)
     data = _parse(raw)
     questions = _validate(data.get("questions") or [], text)
@@ -81,19 +87,24 @@ def _validate(questions: list, text: str) -> list[dict]:
             continue
         if evidence_key(evidence) not in context_key:
             raise QuizGenerationError("证据必须出自课文")
+        kpid = q.get("knowledge_point_id")
+        if not isinstance(kpid, int):
+            kpid = None
         out.append({
             "id": f"q{i + 1}",
             "prompt": prompt,
             "choices": [str(c).strip() for c in choices],
             "correct_index": ci,
             "evidence": evidence,
+            "knowledge_point_id": kpid,
         })
     return out
 
 
 def strip_key(questions: list[dict]) -> list[dict]:
     """出题返回前剥离答案与证据。"""
-    return [{"id": q["id"], "prompt": q["prompt"], "choices": q["choices"]}
+    return [{"id": q["id"], "prompt": q["prompt"], "choices": q["choices"],
+             "knowledge_point_id": q.get("knowledge_point_id")}
             for q in questions]
 
 

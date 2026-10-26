@@ -1,7 +1,7 @@
 """初始化示例数据：默认用户、示例教材、词库、知识点。幂等：重复执行不产生重复数据。"""
 from .database import SessionLocal, Base, engine
 from .models import User, Lesson, PdfDocument, WordBank, KnowledgePoint, Text, Question, ModelConfig
-from .models import ModelConnection, ModelProfile, RoleBinding, Quiz  # 注册到 Base.metadata，保证 create_all 建表
+from .models import ModelConnection, ModelProfile, RoleBinding, Quiz, KnowledgeMastery  # 注册到 Base.metadata，保证 create_all 建表
 
 # 生词：word -> (拼音, 释义)
 SEED_WORDS = {

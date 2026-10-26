@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Quiz, Text
+from ..models import Quiz, Text, KnowledgePoint
 from ..services.quiz import (
     QuizGenerationError, generate_quiz, grade_answers, strip_key,
 )
@@ -46,7 +46,9 @@ def quiz_generate(req: QuizGenerateReq, db: Session = Depends(get_db)):
     if not text:
         raise HTTPException(status_code=400, detail="该课文暂无内容，无法出题")
     try:
-        questions = generate_quiz(db, text, n=3)
+        kps = [{"id": k.id, "category": k.category, "content": k.content}
+               for k in db.query(KnowledgePoint).filter_by(lesson_id=req.lesson_id).all()]
+        questions = generate_quiz(db, text, n=3, knowledge_points=kps)
     except QuizGenerationError as e:
         raise HTTPException(status_code=503, detail=str(e))
     quiz = Quiz(lesson_id=req.lesson_id, user_id=req.user_id,
@@ -70,6 +72,12 @@ def quiz_submit(req: QuizSubmitReq, db: Session = Depends(get_db)):
         if not isinstance(a.get("selected_index"), int):
             raise HTTPException(status_code=422, detail="选项无效")
     results = grade_answers(questions, req.answers)
+    if quiz.user_id:
+        from ..services.mastery import record_attempt as record_mastery
+        for q, r in zip(questions, results):
+            kpid = q.get("knowledge_point_id")
+            if kpid is not None:
+                record_mastery(db, quiz.user_id, "knowledge", kpid, r["is_correct"])
     score = sum(1 for r in results if r["is_correct"])
     quiz.score = score
     db.commit()
