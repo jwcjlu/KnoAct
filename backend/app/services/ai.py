@@ -19,10 +19,11 @@ class DeepSeekProvider(AIProvider):
         if not self.api_key:
             raise RuntimeError("DeepSeek API Key 未配置")
         client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com")
-        resp = client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        )
+        kwargs = {"model": self.model,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        resp = client.chat.completions.create(**kwargs)
         return resp.choices[0].message.content
 
 class GLMProvider(AIProvider):
@@ -32,11 +33,49 @@ class GLMProvider(AIProvider):
         if not self.api_key:
             raise RuntimeError("GLM API Key 未配置")
         client = OpenAI(api_key=self.api_key, base_url="https://open.bigmodel.cn/api/paas/v4")
-        resp = client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        )
+        kwargs = {"model": self.model,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        resp = client.chat.completions.create(**kwargs)
         return resp.choices[0].message.content
+
+class OpenAICompatibleProvider(AIProvider):
+    """自定义中转站 / 任意 OpenAI 兼容服务：base_url 可配置。
+
+    用于接入如 CloudSky 等 API 中转站（算力调度平台），走 OpenAI Chat Completions 协议。
+    """
+    name = "openai"
+
+    def __init__(self, model: str = "", api_key: str = "", base_url: str = ""):
+        super().__init__(model=model, api_key=api_key)
+        self.base_url = base_url
+
+    def generate(self, prompt, system="", json_mode=False):
+        from openai import OpenAI
+        if not self.api_key:
+            raise RuntimeError("API Key 未配置")
+        if not self.base_url:
+            raise RuntimeError("中转站 Base URL 未配置")
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        kwargs = {"model": self.model,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        resp = client.chat.completions.create(**kwargs)
+        return resp.choices[0].message.content
+
+    def list_models(self) -> list[str]:
+        """调中转站 /models 接口，返回模型 id 列表。"""
+        from openai import OpenAI
+        if not self.api_key:
+            raise RuntimeError("API Key 未配置")
+        if not self.base_url:
+            raise RuntimeError("中转站 Base URL 未配置")
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        models = client.models.list()
+        return [m.id for m in models.data]
+
 
 class FakeProvider(AIProvider):
     """本地兜底/测试用：不调外部 API，返回固定可预测文本。"""
@@ -44,16 +83,41 @@ class FakeProvider(AIProvider):
     def generate(self, prompt, system="", json_mode=False):
         return f"[fake] {prompt[:20]}"
 
-PROVIDERS = {"deepseek": DeepSeekProvider, "glm": GLMProvider, "fake": FakeProvider}
-
-def _cfg(db: Session) -> dict:
-    rows = {r.key: r.value for r in db.query(ModelConfig).all()}
-    return rows
+PROVIDERS = {"deepseek": DeepSeekProvider, "glm": GLMProvider, "openai": OpenAICompatibleProvider, "fake": FakeProvider}
 
 def get_provider(db: Session) -> AIProvider:
-    cfg = _cfg(db)
-    provider_name = cfg.get("ai_provider", "fake")
-    model = cfg.get("ai_model", "deepseek-chat" if provider_name == "deepseek" else "glm-4-flash")
-    api_key = cfg.get("ai_key", "")
-    cls = PROVIDERS.get(provider_name, FakeProvider)
-    return cls(model=model, api_key=api_key)
+    from .model_config import resolve
+    r = resolve(db, "llm")
+    cls = PROVIDERS.get(r.provider, FakeProvider)
+    if cls is OpenAICompatibleProvider:
+        return cls(model=r.model, api_key=r.api_key, base_url=r.base_url)
+    return cls(model=r.model, api_key=r.api_key)
+
+
+def ocr_image(db: Session, image_bytes: bytes, instruction: str = "识别图片中的全部文字，原样输出，不要解释。") -> str:
+    """用视觉模型对扫描版教材页面做 OCR。
+
+    视觉模型取自 llm 档位的 options.vision_model，未设则回落老键，再没有则用默认值。
+    """
+    from openai import OpenAI
+    import base64
+    from .model_config import resolve
+
+    r = resolve(db, "llm")
+    vision_model = r.options.get("vision_model", "")
+    if not vision_model:
+        from ..models import ModelConfig
+        row = db.query(ModelConfig).filter_by(key="vision_model").first()
+        vision_model = row.value if row else "qwen3-vl-plus"
+    if not r.api_key or not r.base_url:
+        raise RuntimeError("中转站 API Key / Base URL 未配置，无法 OCR")
+    client = OpenAI(api_key=r.api_key, base_url=r.base_url)
+    b64 = base64.b64encode(image_bytes).decode()
+    resp = client.chat.completions.create(
+        model=vision_model,
+        messages=[{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            {"type": "text", "text": instruction},
+        ]}],
+    )
+    return resp.choices[0].message.content or ""

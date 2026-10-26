@@ -60,8 +60,38 @@ class XunfeiTTS(TTSProvider):
     def synthesize(self, text, voice="", speed=1.0):
         if not self.api_key:
             raise RuntimeError("讯飞 API Key 未配置")
-        # 讯飞在线语音合成需 WebSocket + 鉴权签名，此处留待接入（前端用浏览器 speechSynthesis 兜底）
+        # TODO: 讯飞在线语音合成需 WebSocket + 鉴权签名，未实现（前端用浏览器 speechSynthesis 兜底）
         raise NotImplementedError("讯飞 TTS 待接入")
+
+
+class OpenAITTS(TTSProvider):
+    """中转站 / OpenAI 兼容 TTS：走 /v1/audio/speech 标准接口。
+
+    base_url 指向中转站地址（如 https://aiapi.icloudsky.com/v1），
+    voice 用 OpenAI 标准音色（alloy/echo/fable/onyx/nova/shimmer）或中转站自定义音色。
+    """
+    name = "openai"
+
+    def __init__(self, voice: str = "", api_key: str = "", base_url: str = "", model: str = ""):
+        super().__init__(voice=voice, api_key=api_key)
+        self.base_url = base_url
+        self.model = model or "speech-2.8-hd"
+
+    def synthesize(self, text, voice="", speed=1.0):
+        from openai import OpenAI
+        if not self.api_key:
+            raise RuntimeError("API Key 未配置")
+        if not self.base_url:
+            raise RuntimeError("中转站 Base URL 未配置")
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        voice = voice or self.voice or "alloy"
+        resp = client.audio.speech.create(
+            model=self.model,
+            voice=voice,
+            input=text,
+            speed=speed,
+        )
+        return resp.content
 
 
 class FakeTTS(TTSProvider):
@@ -72,14 +102,14 @@ class FakeTTS(TTSProvider):
         return text.encode("utf-8")
 
 
-PROVIDERS = {"minimax": MiniMaxTTS, "xunfei": XunfeiTTS, "fake": FakeTTS}
+PROVIDERS = {"minimax": MiniMaxTTS, "xunfei": XunfeiTTS, "openai": OpenAITTS, "fake": FakeTTS}
 
 
 def get_tts(db: Session) -> TTSProvider:
-    from ..models import ModelConfig
-    cfg = {r.key: r.value for r in db.query(ModelConfig).all()}
-    provider_name = cfg.get("tts_provider", "fake")
-    voice = cfg.get("tts_voice", "")
-    api_key = cfg.get("tts_key", "")
-    cls = PROVIDERS.get(provider_name, FakeTTS)
-    return cls(voice=voice, api_key=api_key)
+    from .model_config import resolve
+    r = resolve(db, "tts")
+    voice = r.options.get("voice", "")
+    cls = PROVIDERS.get(r.provider, FakeTTS)
+    if cls is OpenAITTS:
+        return cls(voice=voice, api_key=r.api_key, base_url=r.base_url, model=r.model)
+    return cls(voice=voice, api_key=r.api_key)

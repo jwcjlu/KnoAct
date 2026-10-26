@@ -190,3 +190,82 @@ def test_restore_updates_when_new_key_given():
 def test_new_row_with_mask_becomes_empty():
     out = restore([], [{"api_key": MASK, "name": "新建"}])
     assert out[0]["api_key"] == ""
+
+
+def test_get_provider_uses_highest_priority_source():
+    from app.services.ai import get_provider
+    db = SessionLocal()
+    _clear(db)
+    conn = ModelConnection(provider="deepseek", name="ds", api_key="sk-binding")
+    db.add(conn); db.flush()
+    prof = ModelProfile(role="llm", connection_id=conn.id, model="deepseek-reasoner")
+    db.add(prof); db.flush()
+    db.add(RoleBinding(role="llm", profile_id=prof.id))
+    db.commit()
+
+    p = get_provider(db)
+    assert p.name == "deepseek"
+    assert p.model == "deepseek-reasoner"
+    assert p.api_key == "sk-binding"
+    db.close()
+
+
+def test_get_provider_falls_back_to_fake_without_config():
+    from app.services.ai import get_provider
+    db = SessionLocal()
+    _clear(db)
+    p = get_provider(db)
+    assert p.name == "fake"
+    db.close()
+
+
+def test_get_provider_legacy_openai_keeps_base_url():
+    from app.services.ai import get_provider, OpenAICompatibleProvider
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="ai_provider", value="openai"))
+    db.add(ModelConfig(key="ai_model", value="gpt-4o"))
+    db.add(ModelConfig(key="ai_key", value="sk-relay"))
+    db.add(ModelConfig(key="ai_base_url", value="https://relay/v1"))
+    db.commit()
+
+    p = get_provider(db)
+    assert isinstance(p, OpenAICompatibleProvider)
+    assert p.base_url == "https://relay/v1"
+    assert p.model == "gpt-4o"
+    db.close()
+
+
+def test_get_tts_uses_binding():
+    from app.services.tts import get_tts
+    db = SessionLocal()
+    _clear(db)
+    conn = ModelConnection(provider="minimax", name="mm", api_key="mm-key")
+    db.add(conn); db.flush()
+    prof = ModelProfile(role="tts", connection_id=conn.id, model="speech-01-turbo",
+                        options='{"voice": "female-shaonv"}')
+    db.add(prof); db.flush()
+    db.add(RoleBinding(role="tts", profile_id=prof.id))
+    db.commit()
+
+    t = get_tts(db)
+    assert t.name == "minimax"
+    assert t.api_key == "mm-key"
+    assert t.voice == "female-shaonv"
+    db.close()
+
+
+def test_get_tts_legacy_still_works():
+    from app.services.tts import get_tts
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="tts_provider", value="minimax"))
+    db.add(ModelConfig(key="tts_key", value="mm-legacy"))
+    db.add(ModelConfig(key="tts_voice", value="male-qn-qingse"))
+    db.commit()
+
+    t = get_tts(db)
+    assert t.name == "minimax"
+    assert t.api_key == "mm-legacy"
+    assert t.voice == "male-qn-qingse"
+    db.close()
