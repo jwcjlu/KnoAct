@@ -150,3 +150,43 @@ def test_task_reference_with_broken_profile_falls_back_to_llm():
     assert r.model == "deepseek-chat"
     assert r.source != "binding"
     db.close()
+
+
+from app.services.model_config import MASK, redact, restore
+
+
+def test_redact_masks_non_empty_keys_only():
+    rows = [
+        {"id": 1, "api_key": "sk-secret"},
+        {"id": 2, "api_key": ""},
+    ]
+    out = redact(rows)
+    assert out[0]["api_key"] == MASK
+    assert out[1]["api_key"] == ""
+    # 原对象不被修改
+    assert rows[0]["api_key"] == "sk-secret"
+
+
+def test_restore_keeps_stored_key_when_masked():
+    old = [{"id": 1, "api_key": "sk-secret"}]
+    new = [{"id": 1, "api_key": MASK, "name": "改个名"}]
+    out = restore(old, new)
+    assert out[0]["api_key"] == "sk-secret"
+    assert out[0]["name"] == "改个名"
+
+
+def test_restore_clears_when_empty_string():
+    old = [{"id": 1, "api_key": "sk-secret"}]
+    new = [{"id": 1, "api_key": ""}]
+    assert restore(old, new)[0]["api_key"] == ""
+
+
+def test_restore_updates_when_new_key_given():
+    old = [{"id": 1, "api_key": "sk-secret"}]
+    new = [{"id": 1, "api_key": "sk-brand-new"}]
+    assert restore(old, new)[0]["api_key"] == "sk-brand-new"
+
+
+def test_new_row_with_mask_becomes_empty():
+    out = restore([], [{"api_key": MASK, "name": "新建"}])
+    assert out[0]["api_key"] == ""

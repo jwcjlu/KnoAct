@@ -122,18 +122,23 @@ def resolve(db: Session, role: str) -> Resolved:
     return Resolved(role=role, provider="fake", source="default")
 
 
-def redact(obj):
-    """深拷贝并把非空 api_key 换成 MASK。"""
-    out = copy.deepcopy(obj)
-    if isinstance(out, dict):
-        if out.get("api_key"):
-            out["api_key"] = MASK
-        for v in out.values():
+def _redact_inplace(obj):
+    if isinstance(obj, dict):
+        if obj.get("api_key"):
+            obj["api_key"] = MASK
+        for v in obj.values():
             if isinstance(v, (dict, list)):
-                redact(v)
-    elif isinstance(out, list):
-        for item in out:
-            redact(item)
+                _redact_inplace(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            if isinstance(item, (dict, list)):
+                _redact_inplace(item)
+
+
+def redact(obj):
+    """深拷贝并把非空 api_key 换成 MASK（递归到嵌套 dict/list）。"""
+    out = copy.deepcopy(obj)
+    _redact_inplace(out)
     return out
 
 
