@@ -498,6 +498,15 @@
   .ms-empty{border:1px dashed #dfe4dd;border-radius:16px;padding:28px 16px;text-align:center;font-size:13px;color:var(--gray3)}
   .ms-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px;padding-top:18px;border-top:1px solid #eef1ec}
   @media(max-width:820px){ .ms-wrap{grid-template-columns:1fr} .ms-nav{position:static} }
+  .quiz-card{border:1px solid var(--line3);border-radius:16px;padding:14px;margin:10px 0;background:var(--card)}
+  .quiz-q{margin-bottom:14px}
+  .qq-prompt{font-size:14px;font-weight:600;margin-bottom:8px}
+  .qq-choice{display:block;padding:9px 12px;border:1px solid var(--line3);border-radius:10px;margin-top:6px;font-size:13px;cursor:pointer;transition:.12s}
+  .qq-choice:hover{background:#f5f6f4}
+  .qq-choice.on{border-color:var(--blue-border);background:var(--blue-soft);color:var(--blue)}
+  .qq-choice.ok{border-color:var(--green2);background:var(--green-soft)}
+  .qq-choice.bad{border-color:#c05b4a;background:#fdf0ee}
+  .quiz-foot{margin-top:12px;display:flex;justify-content:flex-end;align-items:center;gap:10px;font-size:13px;font-weight:600}
 </style>
 </head>
 <body>

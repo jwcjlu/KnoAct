@@ -179,8 +179,11 @@ const ttsProviders = [
 // 聊天模式（能力）列表 —— 对齐 DeepTutor 的 capability chip
 const CHAT_MODES = [
   {id:'chat', name:'对话', icon:'sparkles', desc:'普通问答'},
+  {id:'quiz', name:'测验', icon:'list', desc:'3 道理解题'},
+  {id:'questions', name:'主动提问', icon:'sparkles', desc:'AI 考考你'},
   {id:'visualize', name:'可视化', icon:'grid', desc:'思维导图 / 流程图'},
   {id:'solve', name:'解题', icon:'pen', desc:'分步骤讲解'},
+  {id:'more', name:'更多', icon:'menu', desc:'更多能力'},
 ];
 
 // 当前 provider 下可选的模型列表（内置固定列表 + 中转站动态拉取）
@@ -1200,7 +1203,8 @@ async function renderPersonalized(){
         <button class="im-tool" onclick="chooseReadMode('${isBook?'lesson':'book'}')" title="${isBook?'切到分课时':'切到整本'}">${icon('grid',18)}</button>
         <span class="im-divider"></span>
         <button class="im-tool" onclick="speakLesson()" title="朗读">${icon('volume',18)}</button>
-        <button class="im-tool" onclick="toast('出题功能开发中')" title="测验">${icon('list',18)}</button>
+        <button class="im-tool" onclick="startQuiz()" title="测验">${icon('list',18)}</button>
+        <button class="im-tool" onclick="startAskQuestions()" title="主动提问">${icon('sparkles',18)}</button>
         <button class="im-tool" onclick="exitImmersive()" title="退出全屏">${icon('expand',18)}</button>
         <button class="im-tool" onclick="toast('更多功能开发中')" title="菜单">${icon('menu',18)}</button>
         <span class="im-divider"></span>
@@ -1899,6 +1903,54 @@ async function ask(preset){
 function imInputKey(e){
   if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); chatAsk(); }
 }
+let quizState = {quiz_id:null, questions:[], answers:{}, submitted:false, results:[]};
+let askState  = {questions:[], replies:{}};
+
+async function startQuiz(){
+  chatOpen = true;
+  chatBusy = true; renderImmersiveChat();
+  try{
+    const d = await api('/api/quiz/generate', {method:'POST', body:{lesson_id:currentLessonId}});
+    quizState = {quiz_id:d.quiz_id, questions:d.questions||[], answers:{}, submitted:false, results:[]};
+  }catch(e){
+    toast('出题失败，请确认已配置 AI');
+    quizState = {quiz_id:null, questions:[], answers:{}, submitted:false, results:[]};
+  }
+  chatBusy = false; renderImmersiveChat();
+}
+function pickQuizAnswer(qid, idx){ quizState.answers[qid] = idx; renderImmersiveChat(); }
+async function submitQuiz(){
+  const answers = quizState.questions.map(q=>({question_id:q.id, selected_index:quizState.answers[q.id]}));
+  try{
+    const d = await api('/api/quiz/submit', {method:'POST', body:{quiz_id:quizState.quiz_id, answers}});
+    quizState.results = d.answers; quizState.submitted = true;
+  }catch(e){ toast('提交失败，测验可能已过期'); }
+  renderImmersiveChat();
+}
+async function startAskQuestions(){
+  chatOpen = true;
+  const ctx = excerpt && excerpt.trim() ? excerpt.trim() : currentText;
+  chatBusy = true; renderImmersiveChat();
+  try{
+    const d = await api('/api/ask/questions', {method:'POST', body:{lesson_id:currentLessonId, context:ctx}});
+    askState = {questions:d.questions||[], replies:{}};
+  }catch(e){
+    toast('提问失败，请确认已配置 AI');
+    askState = {questions:[], replies:{}};
+  }
+  chatBusy = false; renderImmersiveChat();
+}
+function pickAskAnswer(qid, val){ askState.replies[qid] = val; renderImmersiveChat(); }
+async function submitAskReplies(){
+  chatMessages.push({role:'user', text:'（回答了诊断性问题）'});
+  chatBusy = true; renderImmersiveChat();
+  try{
+    const d = await api('/api/ask/reply', {method:'POST', body:{lesson_id:currentLessonId, context:currentText, replies:askState.replies}});
+    chatMessages.push({role:'ai', text:d.answer||'（暂无回答）', citations:d.citations||[], mode:'chat'});
+  }catch(e){ chatMessages.push({role:'ai', text:'抱歉，回答出错了。', citations:[]}); }
+  askState = {questions:[], replies:{}};
+  chatBusy = false; renderImmersiveChat();
+}
 async function chatAsk(preset){
   const q = (preset || question || '').trim();
   if(!q || chatBusy) return;
@@ -1932,8 +1984,9 @@ function renderImmersiveChat(){
         return `<div class="im-msg ai" data-i="${i}">${modeTag}<div class="bubble">${renderAnswer(m.text)}</div>${m.citations&&m.citations.length?`<div class="meta">出处：第 ${m.citations.join('、')} 句</div>`:''}</div>`;
       }).join('')
     : `<div class="im-empty"><div class="mark">${welcomeMark()}</div><div class="big">边读边问，随时解惑</div><div class="hint">选中正文里任意一段，就能追问、解释或翻译它；AI 的回答会指明出自原文的哪一处。</div></div>`;
+  const cards = quizCardHtml() + askCardHtml();
   if(chatBusy) list += `<div class="im-msg ai"><div class="bubble" style="color:#aab1ab">正在思考…</div></div>`;
-  body.innerHTML = list;
+  body.innerHTML = list + cards;
   body.scrollTop = body.scrollHeight;
   renderMermaids(body);
   // 同步发送按钮状态
@@ -1942,6 +1995,43 @@ function renderImmersiveChat(){
   // 清空输入框
   const inp = document.getElementById('im-input');
   if(inp) inp.value = '';
+}
+function quizCardHtml(){
+  if(!quizState.questions.length) return '';
+  return `<div class="quiz-card">
+    ${quizState.questions.map(q=>{
+      const chosen = quizState.answers[q.id];
+      const r = quizState.submitted ? quizState.results.find(x=>x.question_id===q.id) : null;
+      return `<div class="quiz-q">
+        <div class="qq-prompt">${escapeAttr(q.prompt)}</div>
+        ${q.choices.map((c,i)=>`
+          <label class="qq-choice ${chosen===i?'on':''} ${r?(r.is_correct?'ok':'bad'):''}" onclick="pickQuizAnswer('${q.id}',${i})">
+            ${String.fromCharCode(65+i)}. ${escapeAttr(c)}
+            ${quizState.submitted && r ? (r.is_correct?' ✓':' ✗') : ''}
+          </label>`).join('')}
+      </div>`;
+    }).join('')}
+    <div class="quiz-foot">
+      ${quizState.submitted
+        ? `答对 ${quizState.results.filter(r=>r.is_correct).length}/${quizState.questions.length}`
+        : `<button class="btn-primary" onclick="submitQuiz()">提交答案</button>`}
+    </div>
+  </div>`;
+}
+function askCardHtml(){
+  if(!askState.questions.length) return '';
+  return `<div class="quiz-card">
+    ${askState.questions.map(q=>{
+      const opts = q.options || [];
+      return `<div class="quiz-q">
+        <div class="qq-prompt">${escapeAttr(q.prompt||'')}</div>
+        ${opts.length
+          ? opts.map(o=>`<label class="qq-choice ${askState.replies[q.id]===o.label?'on':''}" onclick="pickAskAnswer('${q.id}','${escapeAttr(o.label)}')">${escapeAttr(o.label)}</label>`).join('')
+          : `<input class="ms-input" placeholder="你的回答…" oninput="pickAskAnswer('${q.id}',this.value)">`}
+      </div>`;
+    }).join('')}
+    <div class="quiz-foot"><button class="btn-primary" onclick="submitAskReplies()">继续</button></div>
+  </div>`;
 }
 // 朗读当前课文全文
 function speakLesson(){
