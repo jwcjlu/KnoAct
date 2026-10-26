@@ -83,10 +83,11 @@ def resolve(db: Session, role: str) -> Resolved:
     """三级降级：binding → legacy → default。绝不抛异常。"""
     binding = db.get(RoleBinding, role)
 
-    # task 默认跟随 llm
-    if role == "task" and (binding is None or binding.mode == "inherit"):
-        inherited = resolve(db, "llm")
-        return dc_replace(inherited, role="task", source=inherited.source)
+    # task 默认跟随 llm；reference 模式配了 profile 才用自己那份
+    if role == "task":
+        if binding is None or binding.mode == "inherit" or not binding.profile_id:
+            inherited = resolve(db, "llm")
+            return dc_replace(inherited, role="task", source=inherited.source)
 
     if binding is not None and binding.profile_id:
         prof = db.get(ModelProfile, binding.profile_id)
@@ -112,6 +113,11 @@ def resolve(db: Session, role: str) -> Resolved:
         inherited = resolve(db, "llm")
         if inherited.source != "default":
             return dc_replace(inherited, role=role, source="legacy")
+
+    # task 永远不低于 llm：profile/连接坏了也退到 llm，不退 fake
+    if role == "task":
+        inherited = resolve(db, "llm")
+        return dc_replace(inherited, role="task", source=inherited.source)
 
     return Resolved(role=role, provider="fake", source="default")
 

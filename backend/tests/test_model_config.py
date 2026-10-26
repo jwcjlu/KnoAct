@@ -109,3 +109,44 @@ def test_llm_options_carry_vision_model_from_legacy():
     r = resolve(db, "llm")
     assert r.options.get("vision_model") == "qwen3-vl-plus"
     db.close()
+
+
+def test_task_reference_without_profile_falls_back_to_llm():
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="ai_provider", value="deepseek"))
+    db.add(ModelConfig(key="ai_model", value="deepseek-chat"))
+    db.add(ModelConfig(key="ai_key", value="sk-legacy"))
+    db.add(RoleBinding(role="task", profile_id=None, mode="reference"))
+    db.commit()
+
+    r = resolve(db, "task")
+    assert r.provider == "deepseek"
+    assert r.model == "deepseek-chat"
+    assert r.api_key == "sk-legacy"
+    assert r.role == "task"
+    db.close()
+
+
+def test_task_reference_with_broken_profile_falls_back_to_llm():
+    """profile 指向不存在的连接时也不能退化成 fake。"""
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="ai_provider", value="deepseek"))
+    db.add(ModelConfig(key="ai_model", value="deepseek-chat"))
+    conn = ModelConnection(provider="openai", name="c", api_key="sk-old")
+    db.add(conn); db.flush()
+    prof = ModelProfile(role="task", connection_id=conn.id, model="gpt-4o-mini")
+    db.add(prof); db.flush()
+    db.add(RoleBinding(role="task", profile_id=prof.id, mode="reference"))
+    db.commit()
+
+    # 删掉连接，模拟「引用的连接被删掉了」
+    db.delete(conn)
+    db.commit()
+
+    r = resolve(db, "task")
+    assert r.provider == "deepseek"
+    assert r.model == "deepseek-chat"
+    assert r.source != "binding"
+    db.close()
