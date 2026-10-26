@@ -292,6 +292,54 @@
   .switch-role{display:inline-flex;align-items:center;gap:8px;border-radius:12px;background:var(--orange);color:#fff;padding:10px 18px;font-size:14px;font-weight:700}
   .parent-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:24px}
   .parent-panel{border:1px solid var(--line3);background:var(--card);border-radius:24px;padding:24px}
+
+  /* 模型与服务：左角色导航 + 右配置面板 */
+  .ms-wrap{display:grid;grid-template-columns:236px minmax(0,1fr);gap:20px;margin-top:24px;align-items:start}
+  .ms-nav{border:1px solid var(--line3);background:var(--card);border-radius:20px;padding:12px;position:sticky;top:24px}
+  .ms-nav .nav-title{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--gray3);padding:8px 10px 10px}
+  .ms-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 10px;border-radius:12px;font-size:13px;font-weight:600;color:var(--ink3);text-align:left;transition:.15s}
+  .ms-item:hover{background:#f5f6f4}
+  .ms-item.on{background:var(--blue-soft);color:var(--blue)}
+  .ms-item .dot{width:6px;height:6px;border-radius:50%;margin-left:auto;flex-shrink:0}
+  .ms-item .dot.ok{background:var(--green2)}
+  .ms-item .dot.warn{background:var(--gold2)}
+  .ms-item .dot.off{background:#d7dcd6}
+  .ms-item .off-tag{margin-left:auto;font-size:10px;color:var(--gray3);font-weight:500;background:#f3f5f2;border-radius:6px;padding:2px 6px}
+
+  .ms-main{border:1px solid var(--line3);background:var(--card);border-radius:24px;padding:24px}
+  .ms-main .head{display:flex;align-items:center;gap:12px}
+  .ms-main .head .ic{width:40px;height:40px;border-radius:12px;display:grid;place-items:center}
+  .ms-main .head .ic.blue{background:var(--blue-soft);color:var(--blue2)}
+  .ms-main .head .ic.green{background:var(--green-soft);color:var(--green2)}
+  .ms-main .head .ic.purple{background:var(--purple-soft);color:var(--purple)}
+  .ms-main .head .ic.orange{background:var(--orange-soft);color:var(--orange2)}
+  .ms-main .head h3{font-size:16px;font-weight:700}
+  .ms-main .head .sub{margin-top:2px;font-size:12px;color:#8e9691}
+
+  .ms-field{margin-top:18px;max-width:560px}
+  .ms-label{font-size:13px;color:var(--gray2);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+  .ms-input,.ms-select{width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px;font-family:inherit;background:var(--card);color:var(--ink)}
+  .ms-input:focus,.ms-select:focus{outline:none;border-color:var(--blue-border);box-shadow:0 0 0 3px rgba(49,88,232,.08)}
+  .ms-input:disabled,.ms-select:disabled{background:#f7f8f6;color:var(--gray3)}
+  .ms-row{display:flex;gap:10px;align-items:center}
+  .ms-hint{font-size:12px;color:var(--gray3);margin-top:6px;line-height:19px}
+
+  .ms-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;border-radius:999px;padding:3px 9px;margin-left:auto}
+  .ms-badge.ok{background:var(--green-soft);color:var(--green)}
+  .ms-badge.idle{background:#f3f5f2;color:var(--gray3)}
+  .ms-badge.warn{background:var(--orange-soft);color:var(--orange2)}
+
+  .ms-card{border:1px solid #e7e9e6;border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:12px}
+  .ms-card+.ms-card{margin-top:10px}
+  .ms-card .c-l{min-width:0;flex:1}
+  .ms-card .c-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .ms-card .c-meta{margin-top:3px;font-size:12px;color:#8e9691;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ms-card .c-k{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--gray3)}
+
+  .ms-empty{border:1px dashed #dfe4dd;border-radius:16px;padding:28px 16px;text-align:center;font-size:13px;color:var(--gray3)}
+
+  .ms-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px;padding-top:18px;border-top:1px solid #eef1ec}
+
   .parent-panel .head{display:flex;align-items:center;gap:12px}
   .parent-panel .head .ic{width:40px;height:40px;border-radius:12px;display:grid;place-items:center}
   .parent-panel .head .ic.blue{background:var(--blue-soft);color:var(--blue2)}
@@ -480,9 +528,9 @@
       <p>每天坚持 30 分钟，学习效果会更好哦。</p>
     </div>
     <div class="user-row">
-      <div class="avatar" id="userAvatar">晨</div>
+      <div class="avatar" id="userAvatar">轩</div>
       <div style="flex:1">
-        <div class="user-name" id="userName">林晨</div>
+        <div class="user-name" id="userName">金宇轩</div>
         <div class="user-grade" id="userGrade">五年级</div>
       </div>
       <button onclick="toggleRole()" id="roleSwitch" style="font-size:11px;font-weight:700;color:var(--blue2);white-space:nowrap">家长端</button>
@@ -583,6 +631,36 @@ const ttsProviders = [
 let aiConfig = {provider:'deepseek', model:'deepseek-chat', key:''};
 let ttsConfig = {provider:'minimax', voice:'清澈男声', key:'', speed:1.0, repeat:2};
 
+// ===== 模型与服务（7 角色）=====
+// 一套连接可被多个角色复用，密钥只在「提供方」里录一次
+const MODEL_CONNECTIONS = [
+  {id:'c1', provider:'openai', name:'中转站主账号', baseUrl:'https://aiapi.icloudsky.com/v1', key:'sk-••••••••3f2a', models:['gpt-4o','gpt-4o-mini','qwen3-vl-plus','text-embedding-3-small','speech-2.8-hd','seedream-4']},
+  {id:'c2', provider:'deepseek', name:'DeepSeek 官方', baseUrl:'', key:'sk-••••••••8b71', models:['deepseek-chat','deepseek-reasoner']},
+  {id:'c3', provider:'minimax', name:'MiniMax 语音', baseUrl:'', key:'••••••••7c19', models:['speech-01-turbo']}
+];
+// 角色定义：顺序即左侧导航顺序；wired=false 表示暂未接入业务
+const MODEL_ROLES = [
+  {id:'llm',       name:'语言模型',     icon:'brain',      color:'purple', wired:true,  desc:'对话、追问、讲解、出题', model:true},
+  {id:'task',      name:'后台任务模型', icon:'clock',      color:'blue',   wired:true,  desc:'任务生成、课文提取、批量出题', model:true},
+  {id:'embedding', name:'嵌入模型',     icon:'text',       color:'green',  wired:false, desc:'课文语义检索（为引用定位预留）', model:true},
+  {id:'search',    name:'搜索',         icon:'chart',      color:'orange', wired:false, desc:'联网查资料（暂未接入）', model:false},
+  {id:'tts',       name:'语音',         icon:'headphones', color:'orange', wired:true,  desc:'听写朗读、课文朗读', model:true},
+  {id:'stt',       name:'语音识别',     icon:'headphones', color:'blue',   wired:false, desc:'跟读评测（暂未接入）', model:true},
+  {id:'imagegen',  name:'多模态生成',   icon:'sparkles',   color:'green',  wired:false, desc:'课文配图与示意动画（暂未接入）', model:true}
+];
+let modelServices = {
+  llm:       {connectionId:'c2', model:'deepseek-chat',            options:{}},
+  task:      {connectionId:null, model:'',                          options:{}, mode:'inherit'},
+  embedding: {connectionId:'c1', model:'text-embedding-3-small',    options:{dimension:1536}},
+  search:    {connectionId:'c1', model:'',                          options:{}},
+  tts:       {connectionId:'c3', model:'speech-01-turbo',           options:{voice:'male-qn-qingse', speed:1.0, repeat:2}},
+  stt:       {connectionId:null, model:'',                          options:{}},
+  imagegen:  {connectionId:'c1', model:'seedream-4',                options:{size:'1024x1024'}}
+};
+let modelRoleTab = 'llm';      // 设置页当前选中的角色
+let probeState = {};           // role -> {status, msg, models}
+let connEditing = null;        // 正在编辑的连接 id，'new' 表示新建
+
 // ===== 学习进度推进（孩子触发为主）=====
 let lessonProgress = {current:12, total:28, mastered:11}; // 已学到第12课，11课已掌握
 const newLesson = { // 第13课待学内容
@@ -677,7 +755,7 @@ function renderHome(){
   <header class="page-head">
     <div>
       <div class="date">4 月 18 日，星期五</div>
-      <h1>下午好，林晨</h1>
+      <h1>下午好，金宇轩</h1>
     </div>
     <div class="head-right">
       <div class="points-pill"><span class="star">${icon('star',18)}</span>${points.toLocaleString()}<span style="font-size:12px;font-weight:400;color:#8a928d">积分</span></div>
@@ -1126,8 +1204,8 @@ function markMastered(id){ mastered.push(id); render(); toast('已标记掌握�
 function toggleRole(){
   isParent = !isParent;
   if(isParent){ parentTab='教材'; }
-  document.getElementById('userAvatar').textContent = isParent?'林':'晨';
-  document.getElementById('userName').textContent = isParent?'林爸爸':'林晨';
+  document.getElementById('userAvatar').textContent = isParent?'金':'轩';
+  document.getElementById('userName').textContent = isParent?'金爸爸':'金宇轩';
   document.getElementById('userGrade').textContent = isParent?'家长':'五年级';
   document.getElementById('roleSwitch').textContent = isParent?'孩子端':'家长端';
   renderNav(); render();
@@ -1190,47 +1268,7 @@ function renderParent(){
       </div>
     </div>`;
   } else if(parentTab==='设置'){
-    const aiOpts = aiProviders.map(p=>{
-      const models = p.models.map(m=>`<option value="${m}" ${aiConfig.provider===p.id&&aiConfig.model===m?'selected':''}>${m}</option>`).join('');
-      return `<div class="rule-row" style="flex-direction:column;align-items:stretch;gap:10px">
-        <label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:700;cursor:pointer"><input type="radio" name="aiProvider" value="${p.id}" ${aiConfig.provider===p.id?'checked':''} onchange="setAiProvider('${p.id}')">${p.name}</label>
-        ${aiConfig.provider===p.id?`<div style="display:flex;gap:10px;align-items:center"><span style="font-size:13px;color:var(--gray2)">模型</span><select style="flex:1;border:1px solid var(--line3);border-radius:10px;padding:8px 10px;font-size:13px;font-family:inherit" onchange="aiConfig.model=this.value">${models}</select></div>`:''}
-      </div>`;
-    }).join('');
-    const ttsOpts = ttsProviders.map(p=>{
-      const voices = p.voices.map(v=>`<option value="${v}" ${ttsConfig.provider===p.id&&ttsConfig.voice===v?'selected':''}>${v}</option>`).join('');
-      return `<div class="rule-row" style="flex-direction:column;align-items:stretch;gap:10px">
-        <label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:700;cursor:pointer"><input type="radio" name="ttsProvider" value="${p.id}" ${ttsConfig.provider===p.id?'checked':''} onchange="setTtsProvider('${p.id}')">${p.name}</label>
-        ${ttsConfig.provider===p.id?`<div style="display:flex;gap:10px;align-items:center"><span style="font-size:13px;color:var(--gray2)">音色</span><select style="flex:1;border:1px solid var(--line3);border-radius:10px;padding:8px 10px;font-size:13px;font-family:inherit" onchange="ttsConfig.voice=this.value">${voices}</select></div>`:''}
-      </div>`;
-    }).join('');
-    body = `<div class="parent-grid">
-      <div class="parent-panel">
-        <div class="head"><div class="ic purple">${icon('brain',20)}</div><div><h3>AI 大模型配置</h3><div class="sub">选择出题 / 批改 / 对话用的默认模型</div></div></div>
-        <div class="bd">
-          <div class="redeem-rule">${aiOpts}</div>
-          <div style="margin-top:16px">
-            <div style="font-size:13px;color:var(--gray2);margin-bottom:8px">API Key（DeepSeek / GLM 各自独立）</div>
-            <input type="password" placeholder="sk-..." value="${aiConfig.key}" oninput="aiConfig.key=this.value" style="width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px;font-family:inherit">
-          </div>
-        </div>
-      </div>
-      <div class="parent-panel">
-        <div class="head"><div class="ic orange">${icon('headphones',20)}</div><div><h3>语音合成配置</h3><div class="sub">选择听写朗读用的默认语音</div></div></div>
-        <div class="bd">
-          <div class="redeem-rule">${ttsOpts}</div>
-          <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px">
-            <div><div style="font-size:13px;color:var(--gray2);margin-bottom:8px">API Key</div><input type="password" placeholder="语音服务 Key" value="${ttsConfig.key}" oninput="ttsConfig.key=this.value" style="width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px;font-family:inherit"></div>
-            <div style="display:flex;gap:10px;align-items:center"><span style="font-size:13px;color:var(--gray2);white-space:nowrap">语速</span><input type="range" min="0.5" max="2" step="0.1" value="${ttsConfig.speed}" oninput="ttsConfig.speed=this.value;this.nextElementSibling.textContent=this.value" style="flex:1"><span style="font-size:13px;width:32px;text-align:right">${ttsConfig.speed}</span></div>
-            <div style="display:flex;gap:10px;align-items:center"><span style="font-size:13px;color:var(--gray2);white-space:nowrap">重复次数</span><input type="range" min="1" max="3" step="1" value="${ttsConfig.repeat}" oninput="ttsConfig.repeat=this.value;this.nextElementSibling.textContent=this.value+' 次'" style="flex:1"><span style="font-size:13px;width:44px;text-align:right">${ttsConfig.repeat} 次</span></div>
-          </div>
-        </div>
-      </div>
-      <div style="grid-column:1/-1;display:flex;justify-content:flex-end;gap:10px">
-        <button class="btn-ghost" style="padding:10px 20px" onclick="testVoice()">试听语音</button>
-        <button class="btn-primary" style="padding:10px 24px" onclick="saveConfig()">保存配置</button>
-      </div>
-    </div>`;
+    body = renderModelServices();
   }
 
   return `<div class="parent-banner">
@@ -1347,9 +1385,238 @@ function auditLesson(no, action){
   const l = sampleLessons.find(x=>x.no===no);
   if(l){ l.audit = action==='通过'?'已通过':'已驳回'; render(); toast('第 '+no+' 课已'+(action==='通过'?'审核通过、入库':'驳回，待重新提取')); }
 }
-function setAiProvider(id){ aiConfig.provider=id; aiConfig.model=aiProviders.find(p=>p.id===id).models[0]; render(); }
-function setTtsProvider(id){ ttsConfig.provider=id; ttsConfig.voice=ttsProviders.find(p=>p.id===id).voices[0]; render(); }
-function saveConfig(){ toast('模型配置已保存（原型演示）'); }
+// ===== 模型与服务（设置页）=====
+function msRole(){ return MODEL_ROLES.find(r => r.id === modelRoleTab) || MODEL_ROLES[0]; }
+function msConn(id){ return MODEL_CONNECTIONS.find(c => c.id === id) || null; }
+function msConnName(id){ const c = msConn(id); return c ? c.name : '未选择连接'; }
+function msRoleStatus(role){
+  // 已接线角色：有连接且有模型才算配好
+  const s = modelServices[role.id];
+  if(role.id === 'task' && s.mode === 'inherit') return 'ok';
+  if(!s.connectionId) return 'off';
+  if(role.model && s.model) return 'ok';
+  return 'warn';
+}
+function msModelsFor(connectionId){
+  const c = msConn(connectionId);
+  return c ? c.models : [];
+}
+function renderMsNav(){
+  return `<aside class="ms-nav">
+    <div class="nav-title">模型与服务</div>
+    ${MODEL_ROLES.map(r=>{
+      const st = msRoleStatus(r);
+      return `<button class="ms-item ${modelRoleTab===r.id?'on':''}" onclick="selectModelRole('${r.id}')">
+        ${icon(r.icon,16)}<span>${r.name}</span>
+        ${r.wired ? `<span class="dot ${st}"></span>` : `<span class="off-tag">未接入</span>`}
+      </button>`;
+    }).join('')}
+    <div style="border-top:1px solid #eef1ec;margin:10px 0 4px"></div>
+    <button class="ms-item ${modelRoleTab==='connections'?'on':''}" onclick="selectModelRole('connections')">
+      ${icon('book',16)}<span>提供方</span>
+    </button>
+  </aside>`;
+}
+
+function renderMsConnections(){
+  const cards = MODEL_CONNECTIONS.map(c=>{
+    const editing = connEditing === c.id;
+    return `<div class="ms-card" style="align-items:flex-start">
+      <div class="c-l">
+        <div class="c-name">${c.name}<span class="ms-badge idle">${c.provider}</span></div>
+        <div class="c-meta">${c.baseUrl || '默认端点'} · <span class="c-k">${c.key}</span></div>
+        ${editing ? `
+          <div class="ms-field">
+            <div class="ms-label">名称</div>
+            <input class="ms-input" value="${c.name}" oninput="connField('${c.id}','name',this.value)">
+          </div>
+          <div class="ms-field">
+            <div class="ms-label">Base URL</div>
+            <input class="ms-input" value="${c.baseUrl}" placeholder="留空使用默认端点" oninput="connField('${c.id}','baseUrl',this.value)">
+          </div>
+          <div class="ms-field">
+            <div class="ms-label">API Key</div>
+            <input class="ms-input" type="password" value="" placeholder="${c.key ? '已保存，留空则不修改' : 'sk-...'}" oninput="connField('${c.id}','newKey',this.value)">
+            <div class="ms-hint">密钥只在提供方录一次，所有角色共用。</div>
+          </div>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+        <button class="btn-ghost" onclick="toggleConnEdit('${c.id}')">${editing?'收起':'编辑'}</button>
+        <button class="btn-ghost" style="color:#c05b4a" onclick="removeConn('${c.id}')">删除</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<section class="ms-main">
+    <div class="head"><div class="ic blue">${icon('book',20)}</div>
+      <div><h3>提供方</h3><div class="sub">添加提供方与认证信息，然后测试连接</div></div>
+    </div>
+    <div style="margin-top:18px">${cards || `<div class="ms-empty">还没有提供方，先添加一个吧</div>`}</div>
+    <div class="ms-actions">
+      <button class="btn-ghost" style="padding:10px 20px" onclick="addConn()">＋ 添加提供方</button>
+      <button class="btn-primary" style="padding:10px 24px" onclick="saveModelServices()">保存配置</button>
+    </div>
+  </section>`;
+}
+
+function renderMsRole(){
+  const r = msRole();
+  const s = modelServices[r.id];
+  const conn = msConn(s.connectionId);
+  const models = msModelsFor(s.connectionId);
+  const st = msRoleStatus(r);
+  const stText = st==='ok' ? '已配置' : st==='warn' ? '待选模型' : '未配置';
+  const stCls = st==='ok' ? 'ok' : st==='warn' ? 'warn' : 'idle';
+
+  // 右侧摘要：每个已接线角色当前用哪个提供方/模型
+  const summaryRows = MODEL_ROLES.filter(x=>x.wired).map(x=>{
+    const xs = modelServices[x.id];
+    const inherit = x.id==='task' && xs.mode==='inherit';
+    const xc = msConn(xs.connectionId);
+    const val = inherit ? '跟随语言模型' : (xc ? `${xc.name} · ${xs.model || '未选模型'}` : '未配置');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f1f4ef">
+      <span style="font-size:12px;color:var(--gray2);width:88px;flex-shrink:0">${x.name}</span>
+      <span style="font-size:12px;color:${inherit?'var(--gray3)':(xc?'var(--ink3)':'var(--gray3)')};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${val}</span>
+    </div>`;
+  }).join('');
+
+  const inherit = r.id === 'task' && s.mode === 'inherit';
+  const connOptions = `<option value="">— 不使用连接 —</option>` + MODEL_CONNECTIONS.map(c=>
+    `<option value="${c.id}" ${s.connectionId===c.id?'selected':''}>${c.name}</option>`).join('');
+
+  const modelField = !r.model ? '' : inherit ? '' : `
+    <div class="ms-field">
+      <div class="ms-label">模型</div>
+      <div class="ms-row">
+        ${models.length
+          ? `<select class="ms-select" onchange="setRoleModel('${r.id}', this.value)">
+               <option value="">— 选择模型 —</option>
+               ${models.map(m=>`<option value="${m}" ${s.model===m?'selected':''}>${m}</option>`).join('')}
+             </select>`
+          : `<input class="ms-input" value="${s.model}" placeholder="先选提供方，或手填模型名" oninput="setRoleModel('${r.id}', this.value)">`}
+        <button class="btn-ghost" style="white-space:nowrap" onclick="probeRole('${r.id}')">拉取模型</button>
+      </div>
+      <div class="ms-hint">${probeState[r.id] ? probeState[r.id].msg : '选择提供方后，可拉取该账号下可用的模型列表。'}</div>
+    </div>`;
+
+  const ttsExtra = r.id === 'tts' ? `
+    <div class="ms-field">
+      <div class="ms-label">音色</div>
+      <select class="ms-select" onchange="setRoleOption('tts','voice',this.value)">
+        ${['male-qn-qingse','female-shaonv','presenter_male','alloy','nova'].map(v=>
+          `<option value="${v}" ${s.options.voice===v?'selected':''}>${v}</option>`).join('')}
+      </select>
+    </div>
+    <div class="ms-field">
+      <div class="ms-row"><span class="ms-label" style="margin:0;white-space:nowrap">语速</span>
+        <input type="range" min="0.5" max="2" step="0.1" value="${s.options.speed||1}" style="flex:1"
+          oninput="setRoleOption('tts','speed',this.value);this.nextElementSibling.textContent=this.value">
+        <span style="font-size:13px;width:34px;text-align:right">${s.options.speed||1}</span>
+      </div>
+    </div>` : '';
+
+  const embExtra = r.id === 'embedding' ? `
+    <div class="ms-field">
+      <div class="ms-label">向量维度</div>
+      <input class="ms-input" value="${s.options.dimension||''}" placeholder="如 1536" oninput="setRoleOption('embedding','dimension',this.value)">
+    </div>` : '';
+
+  return `<section class="ms-main">
+    <div class="head">
+      <div class="ic ${r.color}">${icon(r.icon,20)}</div>
+      <div><h3>${r.name}</h3><div class="sub">${r.desc}</div></div>
+      <span class="ms-badge ${stCls}">${stText}</span>
+    </div>
+    ${!r.wired ? `<div class="ms-hint" style="margin-top:14px;background:#f7f8f6;border-radius:12px;padding:10px 12px">
+      该角色暂未接入业务，配置会保存，但不会影响现有功能。
+    </div>` : ''}
+    ${r.id==='task' ? `
+      <div class="ms-field">
+        <label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;cursor:pointer">
+          <input type="checkbox" ${s.mode==='inherit'?'checked':''} onchange="toggleTaskInherit(this.checked)">
+          跟随语言模型（推荐）
+        </label>
+        <div class="ms-hint">开启后后台任务沿用语言模型的配置；只有在想用更便宜 / 更快的模型时才需要单独配置。</div>
+      </div>` : ''}
+    ${inherit ? '' : `
+      <div class="ms-field">
+        <div class="ms-label">提供方</div>
+        <select class="ms-select" onchange="setRoleConn('${r.id}', this.value)">${connOptions}</select>
+        ${!conn ? `<div class="ms-hint">先到「提供方」里添加一套凭证，再回到这里选择。</div>` : ''}
+      </div>
+      ${modelField}
+      ${ttsExtra}
+      ${embExtra}
+    `}
+    <div class="ms-actions">
+      ${r.id==='tts' ? `<button class="btn-ghost" style="padding:10px 20px" onclick="testVoice()">试听语音</button>` : ''}
+      <button class="btn-ghost" style="padding:10px 20px" onclick="probeRole('${r.id}')">测试连接</button>
+      <button class="btn-primary" style="padding:10px 24px" onclick="saveModelServices()">保存配置</button>
+    </div>
+    <div style="margin-top:22px;padding-top:18px;border-top:1px solid #eef1ec">
+      <div style="font-size:12px;font-weight:700;color:var(--gray2);letter-spacing:.04em;margin-bottom:4px">当前生效配置</div>
+      ${summaryRows}
+    </div>
+  </section>`;
+}
+
+function renderModelServices(){
+  const isConn = modelRoleTab === 'connections';
+  return `<div class="ms-wrap">
+    ${renderMsNav()}
+    ${isConn ? renderMsConnections() : renderMsRole()}
+  </div>`;
+}
+function selectModelRole(id){ modelRoleTab = id; connEditing = null; render(); }
+function setRoleConn(role, connId){
+  modelServices[role].connectionId = connId || null;
+  const list = msModelsFor(connId);
+  if(connId && !list.includes(modelServices[role].model)) modelServices[role].model = list[0] || '';
+  if(!connId) modelServices[role].model = '';
+  render();
+}
+function setRoleModel(role, model){ modelServices[role].model = model; }
+function setRoleOption(role, key, val){
+  modelServices[role].options = modelServices[role].options || {};
+  modelServices[role].options[key] = val;
+}
+function toggleTaskInherit(on){ modelServices.task.mode = on ? 'inherit' : 'reference'; render(); }
+function toggleConnEdit(id){ connEditing = connEditing === id ? null : id; render(); }
+function connField(id, field, val){
+  const c = msConn(id); if(!c) return;
+  if(field === 'newKey') c._newKey = val; else c[field] = val;
+}
+function addConn(){
+  const id = 'c' + (MODEL_CONNECTIONS.length + 1 + Math.floor(Math.random()*1000));
+  MODEL_CONNECTIONS.push({id, provider:'openai', name:'新提供方', baseUrl:'', key:'', models:['gpt-4o','gpt-4o-mini']});
+  connEditing = id; modelRoleTab = 'connections'; render();
+}
+function removeConn(id){
+  const i = MODEL_CONNECTIONS.findIndex(c=>c.id===id);
+  if(i < 0) return;
+  MODEL_CONNECTIONS.splice(i, 1);
+  // 引用该连接的档位降级为未配置，不级联删除角色配置
+  Object.keys(modelServices).forEach(role=>{
+    if(modelServices[role].connectionId === id){ modelServices[role].connectionId = null; modelServices[role].model = ''; }
+  });
+  if(connEditing === id) connEditing = null;
+  render(); toast('已删除提供方');
+}
+function probeRole(role){
+  const s = modelServices[role];
+  if(!s.connectionId){ probeState[role] = {msg:'请先选择提供方。'}; render(); return; }
+  probeState[role] = {msg:'正在测试连接…'};
+  render();
+  setTimeout(()=>{
+    const c = msConn(s.connectionId);
+    probeState[role] = {msg: c ? `连接成功 · 可用模型 ${c.models.length} 个` : '连接失败：提供方不存在'};
+    render();
+  }, 700);
+}
+function saveModelServices(){
+  MODEL_CONNECTIONS.forEach(c=>{ if(c._newKey){ c.key = '••••••••' + c._newKey.slice(-4); delete c._newKey; } });
+  toast('模型与服务配置已保存（原型演示）');
+  render();
+}
 function testVoice(){ if(window.speechSynthesis){ const u=new SpeechSynthesisUtterance('你好，这是语音合成测试'); u.lang='zh-CN'; speechSynthesis.cancel(); speechSynthesis.speak(u); toast('已播放试听语音'); } else toast('浏览器不支持语音合成'); }
 
 // ===== 占位页 =====
