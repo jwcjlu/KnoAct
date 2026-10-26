@@ -112,6 +112,9 @@ class WordMastery(Base):
     mistake_count: Mapped[int] = mapped_column(Integer, default=0)
     is_weak: Mapped[bool] = mapped_column(Boolean, default=False)
     next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)  # 迁移回填
+    attempts: Mapped[str] = mapped_column(TextCls, default="[]")
+    mastery: Mapped[float] = mapped_column(Float, default=0.0)
 
 class Mistake(Base):
     __tablename__ = "mistakes"
@@ -227,3 +230,16 @@ class Quiz(Base):
     questions: Mapped[str] = mapped_column(TextCls)            # JSON：[{id,prompt,choices,correct_index,evidence}]
     score: Mapped[int] = mapped_column(Integer, nullable=True) # None=未作答
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class KnowledgeMastery(Base):
+    """知识点级掌握度。"""
+    __tablename__ = "knowledge_mastery"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    knowledge_point_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"))
+    attempts: Mapped[str] = mapped_column(TextCls, default="[]")  # JSON：[true, false, ...]
+    mastery: Mapped[float] = mapped_column(Float, default=0.0)
+    mastered: Mapped[bool] = mapped_column(Boolean, default=False)
+    next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
