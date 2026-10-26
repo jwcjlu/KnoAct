@@ -269,3 +269,73 @@ def test_get_tts_legacy_still_works():
     assert t.api_key == "mm-legacy"
     assert t.voice == "male-qn-qingse"
     db.close()
+
+
+def test_migration_moves_legacy_keys_to_tables():
+    from migrate_model_catalog import migrate
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="ai_provider", value="deepseek"))
+    db.add(ModelConfig(key="ai_model", value="deepseek-chat"))
+    db.add(ModelConfig(key="ai_key", value="sk-legacy"))
+    db.add(ModelConfig(key="tts_provider", value="minimax"))
+    db.add(ModelConfig(key="tts_key", value="mm-key"))
+    db.add(ModelConfig(key="vision_model", value="qwen3-vl-plus"))
+    db.commit()
+
+    migrate(db)
+
+    llm = resolve(db, "llm")
+    assert llm.source == "binding"
+    assert llm.provider == "deepseek"
+    assert llm.model == "deepseek-chat"
+    assert llm.api_key == "sk-legacy"
+    assert llm.options.get("vision_model") == "qwen3-vl-plus"
+
+    tts = resolve(db, "tts")
+    assert tts.source == "binding"
+    assert tts.api_key == "mm-key"
+    db.close()
+
+
+def test_migration_is_idempotent():
+    from migrate_model_catalog import migrate
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="ai_provider", value="deepseek"))
+    db.add(ModelConfig(key="ai_key", value="sk-legacy"))
+    db.commit()
+
+    migrate(db)
+    migrate(db)
+
+    assert db.query(ModelConnection).count() == 1
+    assert db.query(ModelProfile).filter_by(role="llm").count() == 1
+    db.close()
+
+
+def test_migration_skips_fake_provider():
+    from migrate_model_catalog import migrate
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="ai_provider", value="fake"))
+    db.commit()
+    migrate(db)
+    assert db.query(ModelConnection).count() == 0
+    db.close()
+
+
+def test_migration_preserves_tts_options():
+    from migrate_model_catalog import migrate
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="tts_provider", value="minimax"))
+    db.add(ModelConfig(key="tts_key", value="k"))
+    db.add(ModelConfig(key="tts_voice", value="female-shaonv"))
+    db.add(ModelConfig(key="tts_speed", value="1.2"))
+    db.commit()
+    migrate(db)
+    tts = resolve(db, "tts")
+    assert tts.options.get("voice") == "female-shaonv"
+    assert tts.options.get("speed") == "1.2"
+    db.close()
