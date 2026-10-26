@@ -216,3 +216,14 @@ class RoleBinding(Base):
     role: Mapped[str] = mapped_column(String(16), primary_key=True)
     profile_id: Mapped[int] = mapped_column(ForeignKey("model_profiles.id"), nullable=True)
     mode: Mapped[str] = mapped_column(String(16), default="inherit")  # 仅 task 使用
+
+
+class Quiz(Base):
+    """边读边问·测验：题目 + 服务端答案 key。"""
+    __tablename__ = "quizzes"
+    id: Mapped[int] = mapped_column(primary_key=True)          # 即 quiz_id
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
+    user_id: Mapped[int] = mapped_column(Integer, default=0)
+    questions: Mapped[str] = mapped_column(TextCls)            # JSON：[{id,prompt,choices,correct_index,evidence}]
+    score: Mapped[int] = mapped_column(Integer, nullable=True) # None=未作答
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
