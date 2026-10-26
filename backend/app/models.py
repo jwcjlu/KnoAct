@@ -184,3 +184,35 @@ class Task(Base):
     reviewed_by: Mapped[int] = mapped_column(Integer, nullable=True)
     difficulty: Mapped[str] = mapped_column(String(16), nullable=True)  # 预留，本次恒 null
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ModelConnection(Base):
+    """一套凭证 + 端点，可被多个角色复用。"""
+    __tablename__ = "model_connections"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32))     # openai|deepseek|glm|minimax|xunfei|fake
+    name: Mapped[str] = mapped_column(String(128), default="")
+    base_url: Mapped[str] = mapped_column(String(512), default="")
+    api_key: Mapped[str] = mapped_column(String(512), default="")
+    extra_headers: Mapped[str] = mapped_column(TextCls, default="")  # JSON 文本
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ModelProfile(Base):
+    """某角色下的一档模型选择。"""
+    __tablename__ = "model_profiles"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    role: Mapped[str] = mapped_column(String(16))          # llm|task|embedding|search|tts|stt|imagegen
+    connection_id: Mapped[int] = mapped_column(ForeignKey("model_connections.id"), nullable=True)
+    model: Mapped[str] = mapped_column(String(128), default="")
+    name: Mapped[str] = mapped_column(String(128), default="")
+    options: Mapped[str] = mapped_column(TextCls, default="")  # JSON 文本
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RoleBinding(Base):
+    """角色 → 当前启用哪一档。主键即 role。"""
+    __tablename__ = "role_bindings"
+    role: Mapped[str] = mapped_column(String(16), primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("model_profiles.id"), nullable=True)
+    mode: Mapped[str] = mapped_column(String(16), default="inherit")  # 仅 task 使用
