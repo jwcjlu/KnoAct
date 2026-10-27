@@ -206,9 +206,12 @@ Capability）已在 `/api/ask` 落地，第 4–5 步（流式、收编其余调
    `chat` / `visualize` / `solve` 各自是拥有 `system_prompt` + `tools` 的
    capability（继承 `AgenticChatCapability`），经 `CapabilityRegistry` 路由，
    替换并删除了 `_MODE_SYSTEM`。
-4. **StreamBus + 流式回放**：`core/stream.py` + `runtime/stream_bus.py`，让出题/
-   对话流式返回，缓解当前「实时出题慢」的问题。（当前 `StreamBus` 仅服务端
-   收集事件，尚未推前端。）
+4. ✅ **DONE — StreamBus + 流式回放**：新增 `/api/ask/stream` SSE 端点（事件级
+   流式：`stage`/`tool_call`/`tool_result`/`final`），`_event_stream` 用
+   `asyncio.create_task` 并发跑 capability + 按索引轮询 `StreamBus.events` 实时
+   yield（含 provider 异常竞态处理，保证流必终止）；前端 `chatAsk` 用
+   `fetch` + `ReadableStream` 读取，`tool_call` 更新「正在…」占位、`final`
+   渲染答案。落库复用 `persist_turn`。
 5. **收编散落的 prompt 调用点**：把 [AI 调用现状](#ai-调用现状prompt-in-code) 表格里
    剩余的 7 处，逐一迁移为「capability 内的工具调用」，而不是各自拼 prompt。
 
