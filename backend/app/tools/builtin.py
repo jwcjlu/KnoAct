@@ -1,6 +1,15 @@
 """内置工具：lookup_word / search_text / render_mermaid。"""
+import re
+
 from ..core.context import UnifiedContext
 from ..core.tool_protocol import BaseTool, ToolParameter
+
+
+def _fallback_split(text: str) -> list[str]:
+    """复刻前端 splitSentences 的切句规则：按句末标点 + 换行切句。"""
+    if not text:
+        return []
+    return [s.strip() for s in re.split(r"(?<=[。！？!?])|\n+", text) if s.strip()]
 
 
 class LookupWordTool(BaseTool):
@@ -35,21 +44,20 @@ class LookupWordTool(BaseTool):
 
 class SearchTextTool(BaseTool):
     name = "search_text"
-    description = "在教材上下文里检索含某关键词的句子，返回句号及其编号，用于标注出处"
+    description = "在教材句子里检索含某关键词的句子，返回句号及其编号（句号对应前端跳转），用于标注出处"
     parameters = [
         ToolParameter(name="query", type="string", description="检索关键词"),
     ]
 
     def run(self, args, ctx: UnifiedContext) -> dict:
         query = (args.get("query") or "").strip()
-        text = ctx.text or ""
-        if not query or not text:
+        sentences = ctx.sentences or _fallback_split(ctx.text)
+        if not query or not sentences:
             return {"matches": []}
         matches = []
-        # ctx.text 形如「1.句子一 2.句子二」；简单按行/句切分编号匹配
-        for idx, line in enumerate(text.splitlines() or [text], start=1):
-            if query in line:
-                matches.append({"sentence_no": idx, "text": line.strip()})
+        for idx, s in enumerate(sentences, start=1):
+            if query in s:
+                matches.append({"sentence_no": idx, "text": s.strip()})
         return {"matches": matches}
 
 

@@ -1,5 +1,5 @@
 """统一上下文：一次 turn 的输入。"""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -10,3 +10,4 @@ class UnifiedContext:
     text: str = ""
     mode: str = "chat"
     model: str = ""
+    sentences: list[str] = field(default_factory=list)

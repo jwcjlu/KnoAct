@@ -35,6 +35,30 @@ def test_registry_list_schemas():
     assert "search_text" in names
 
 
+def test_search_text_uses_sentences_field():
+    # text 是一整行（无换行），但 sentences 显式给出两句；「适宜」在第 2 句
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="",
+                         text="白鹭是一首精巧的诗。色素的配合，身段的大小，一切都很适宜。",
+                         sentences=["白鹭是一首精巧的诗。", "色素的配合，身段的大小，一切都很适宜。"])
+    result = search_text.run({"query": "适宜"}, ctx)
+    # 用 sentences 时，第 2 句才含「适宜」→ sentence_no == 2
+    # 旧代码用 text.splitlines() 只有 1 行 → sentence_no == 1（错）
+    assert result["matches"][0]["sentence_no"] == 2
+
+
+def test_search_text_falls_back_to_text_split():
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="",
+                         text="第一句。\n第二句。", sentences=[])
+    result = search_text.run({"query": "第二"}, ctx)
+    assert result["matches"][0]["sentence_no"] == 2
+
+
+def test_search_text_no_sentences_and_no_text():
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="")
+    result = search_text.run({"query": "任何"}, ctx)
+    assert result["matches"] == []
+
+
 def test_lookup_word_returns_meaning():
     ctx = UnifiedContext(user_id=1, lesson_id=1, question="")
     result = lookup_word.run({"word": "徘徊"}, ctx)
