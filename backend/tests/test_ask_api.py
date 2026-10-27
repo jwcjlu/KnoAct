@@ -75,3 +75,29 @@ def test_extract_and_filter_roundtrip():
     citations = _extract_citations(answer)
     filtered = _filter_citations(citations, 3)
     assert filtered == [1, 2]
+
+
+def test_ask_stream_endpoint(setup_db):
+    from app.models import ModelConfig
+    db = SessionLocal()
+    db.add(ModelConfig(key="ai_provider", value="fake"))
+    db.commit(); db.close()
+    r = client.post("/api/ask/stream", json={"lesson_id": 1, "question": "你好", "context": ""})
+    assert r.status_code == 200
+    body = r.text
+    assert "data: " in body
+    assert '"type": "final"' in body
+    assert '"answer"' in body
+
+
+def test_ask_stream_persists_turn(setup_db):
+    from app.models import Turn, ModelConfig
+    db = SessionLocal()
+    db.add(ModelConfig(key="ai_provider", value="fake"))
+    db.commit(); db.close()
+    r = client.post("/api/ask/stream", json={"lesson_id": 1, "question": "流式问题", "context": ""})
+    assert r.status_code == 200
+    db = SessionLocal()
+    turn = db.query(Turn).filter_by(question="流式问题").first()
+    assert turn is not None
+    db.close()
