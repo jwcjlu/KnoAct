@@ -212,11 +212,15 @@ Capability）已在 `/api/ask` 落地，第 4–5 步（流式、收编其余调
    yield（含 provider 异常竞态处理，保证流必终止）；前端 `chatAsk` 用
    `fetch` + `ReadableStream` 读取，`tool_call` 更新「正在…」占位、`final`
    渲染答案。落库复用 `persist_turn`。
-5. **收编散落的 prompt 调用点**：把 [AI 调用现状](#ai-调用现状prompt-in-code) 表格里
-   剩余的 7 处，逐一迁移为「capability 内的工具调用」，而不是各自拼 prompt。
+5. ✅ **DONE — 收编散落的 prompt 调用点**：出题/材料生成抽成工具
+   （`tools/generation.py`：`generate_listening` / `generate_quiz_questions` /
+   `generate_diagnostic_questions`），`listening_material`、`quiz_generate`、
+   `ask_questions` 三个端点改调工具，`ask_reply` 改走 TurnEngine（`chat`
+   capability，AI 未配置时从 503 变为降级返回）。生词释义已是 `lookup_word`
+   工具。OCR / 拆课 / 后台出题（单次确定性调用）保持现状。
 
-> 完成第 4–5 步后，本文档即可改回完全体的 agent-native 架构描述（当前仅
-> `/api/ask` 已 agent 化）。
+> 第 1–5 步全部完成，`/api/ask` 已完全 agent 化，其余交互式/出题调用点也已
+> 收编进工具层或 TurnEngine。
 
 ## 幻觉补强（已落地）
 
