@@ -21,6 +21,7 @@ class AskReq(BaseModel):
     context: str = ""
     model: str = ""       # 覆盖默认模型（选模型）
     mode: str = "chat"    # chat=对话 | visualize=可视化 | solve=解题
+    sentences: list[str] = []
 
 @router.post("/api/notes")
 def add_note(req: NoteReq, db: Session = Depends(get_db)):
@@ -41,5 +42,6 @@ async def ask_ai(req: AskReq, db: Session = Depends(get_db)):
     ctx = UnifiedContext(
         user_id=user_id, lesson_id=req.lesson_id, question=req.question,
         text=req.context, mode=req.mode, model=req.model,
+        sentences=req.sentences,
     )
     return await route_to_capability(ctx)

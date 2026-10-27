@@ -1,6 +1,12 @@
 from app.database import SessionLocal
 
 
+def test_ask_req_accepts_sentences(setup_db):
+    from app.routers.notes import AskReq
+    req = AskReq(lesson_id=1, question="?", context="a。b。", sentences=["a。", "b。"])
+    assert req.sentences == ["a。", "b。"]
+
+
 def test_turn_table_exists(setup_db):
     from app.models import Turn, ToolCall
     db = SessionLocal()

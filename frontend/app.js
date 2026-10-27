@@ -1960,7 +1960,7 @@ async function chatAsk(preset){
   question = '';
   chatBusy = true;
   renderImmersiveChat();
-  const body = {lesson_id:currentLessonId, question:q, context:ctx, mode:chatMode};
+  const body = {lesson_id:currentLessonId, question:q, context:ctx, mode:chatMode, sentences: splitSentences(ctx)};
   if(chatModel) body.model = chatModel;
   try{
     const d = await api('/api/ask', {method:'POST', body});
