@@ -117,10 +117,34 @@ def review_submit(req: ReviewSubmitReq, db: Session = Depends(get_db)):
 
 @router.get("/api/listening/material")
 def listening_material(user_id: int, db: Session = Depends(get_db)):
+    import json as _json
+    from datetime import date as _date
+    from ..models import Task
     from ..tools.generation import generate_listening
     from ..core.context import UnifiedContext
+
+    row = db.query(Task).filter_by(
+        user_id=user_id, subject="英语", date=_date.today(), task_type="listening"
+    ).order_by(Task.id).first()
+    if row and row.content:
+        try:
+            data = _json.loads(row.content)
+            if data.get("dialogue"):
+                return {
+                    "text": data["dialogue"],
+                    "questions": [{"question": data.get("question", ""), "answer": data.get("answer", "")}],
+                }
+        except Exception:
+            pass
+
     ctx = UnifiedContext(user_id=user_id, lesson_id=0, question="")
     result = generate_listening.run({}, ctx)
+    db.add(Task(
+        user_id=user_id, subject="英语", date=_date.today(), task_type="listening",
+        title="英语听力练习", content_status="published",
+        content=_json.dumps(result, ensure_ascii=False),
+    ))
+    db.commit()
     return {
         "text": result["dialogue"],
         "questions": [{"question": result["question"], "answer": result["answer"]}],

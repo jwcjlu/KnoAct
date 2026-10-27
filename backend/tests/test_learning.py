@@ -70,6 +70,25 @@ def test_listening_material(setup_db):
     assert "text" in data and "questions" in data
 
 
+def test_listening_material_reads_pregenerated_task(setup_db):
+    import json
+    from datetime import date
+    from app.models import Task
+    from app.database import SessionLocal
+    s = SessionLocal()
+    s.add(Task(
+        user_id=1, subject="英语", date=date.today(), task_type="listening",
+        title="英语听力练习", content_status="published",
+        content=json.dumps({"dialogue": "A: Hi B: Hello", "question": "B 说了什么？", "answer": "Hello"}, ensure_ascii=False),
+    ))
+    s.commit(); s.close()
+
+    resp = _client().get("/api/listening/material?user_id=1")
+    data = resp.json()
+    assert data["text"] == "A: Hi B: Hello"
+    assert data["questions"][0]["answer"] == "Hello"
+
+
 def test_reading_material(setup_db):
     from app.models import Text
     from app.database import SessionLocal
