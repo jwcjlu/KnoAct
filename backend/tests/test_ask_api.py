@@ -57,23 +57,23 @@ def test_ask_api_persists_turn(setup_db):
     db.close()
 
 
-from app.runtime.orchestrator import _extract_citations, _filter_citations
+from app.runtime.orchestrator import extract_citations, filter_citations
 
 
 def test_filter_citations_removes_out_of_range():
     citations = [1, 5, 2]
-    assert _filter_citations(citations, 3) == [1, 2]
+    assert filter_citations(citations, 3) == [1, 2]
 
 
 def test_filter_citations_no_filter_when_max_zero():
     citations = [1, 5, 2]
-    assert _filter_citations(citations, 0) == [1, 5, 2]
+    assert filter_citations(citations, 0) == [1, 5, 2]
 
 
 def test_extract_and_filter_roundtrip():
     answer = "答案……[第1句]……[第5句]……[第2句]"
-    citations = _extract_citations(answer)
-    filtered = _filter_citations(citations, 3)
+    citations = extract_citations(answer)
+    filtered = filter_citations(citations, 3)
     assert filtered == [1, 2]
 
 
@@ -101,3 +101,23 @@ def test_ask_stream_persists_turn(setup_db):
     turn = db.query(Turn).filter_by(question="流式问题").first()
     assert turn is not None
     db.close()
+
+
+def test_ask_stream_error_terminates(monkeypatch):
+    # 让 get_provider 返回一个 generate 会抛异常的 provider
+    from app.models import ModelConfig
+    db = SessionLocal()
+    db.add(ModelConfig(key="ai_provider", value="fake"))
+    db.commit(); db.close()
+    import app.services.ai as ai
+    class BoomProvider:
+        name = "boom"
+        model = ""
+        api_key = ""
+        def generate(self, prompt, system="", json_mode=False):
+            raise RuntimeError("no key")
+    monkeypatch.setattr(ai, "get_provider", lambda db: BoomProvider())
+    r = client.post("/api/ask/stream", json={"lesson_id": 1, "question": "会失败", "context": ""})
+    assert r.status_code == 200
+    # 流必须终止（不会无限阻塞），且应含 error 事件
+    assert '"type": "error"' in r.text

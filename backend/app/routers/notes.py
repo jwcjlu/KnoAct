@@ -66,42 +66,58 @@ async def ask_stream(req: AskReq, db: Session = Depends(get_db)):
 async def _event_stream(ctx: UnifiedContext):
     from ..core.stream import StreamBus
     from ..capabilities.registry import CapabilityRegistry
-    from ..runtime.orchestrator import _extract_citations, _filter_citations, _persist
+    from ..runtime.orchestrator import extract_citations, filter_citations, persist_turn
 
     registry = CapabilityRegistry()
     capability = registry.get(ctx.mode)
     stream = StreamBus()
-    queue = stream.subscribe()
-
     task = asyncio.create_task(capability.run(ctx, stream))
+
     tool_events = []
     results_by_step = {}
     answer = ""
     citations = []
+    consumed = 0  # 已消费的 stream.events 下标（events 是权威有序列表）
+
+    def _yield_event(event):
+        nonlocal answer, citations
+        if event.type == "tool_call":
+            tool_events.append(event)
+            return _sse(event.type, event.data)
+        if event.type == "tool_result":
+            results_by_step[event.data.get("step", 0)] = event.data.get("result", {})
+            return _sse(event.type, event.data)
+        if event.type == "final":
+            answer = event.data.get("answer", "")
+            citations = filter_citations(extract_citations(answer), len(ctx.sentences))
+            return _sse("final", {"answer": answer, "citations": citations, "mode": ctx.mode})
+        return _sse(event.type, event.data)
 
     try:
         while True:
-            event = await queue.get()
-            if event.type == "tool_call":
-                tool_events.append(event)
-                yield _sse(event.type, event.data)
-            elif event.type == "tool_result":
-                results_by_step[event.data.get("step", 0)] = event.data.get("result", {})
-                yield _sse(event.type, event.data)
-            elif event.type == "final":
-                answer = event.data.get("answer", "")
-                citations = _filter_citations(_extract_citations(answer), len(ctx.sentences))
-                yield _sse("final", {"answer": answer, "citations": citations, "mode": ctx.mode})
+            # 先消费已就绪的事件
+            if consumed < len(stream.events):
+                yield _yield_event(stream.events[consumed])
+                consumed += 1
+                continue
+            if task.done():
                 break
-            else:
-                yield _sse(event.type, event.data)
+            # 没有新事件且任务仍在跑：等待下一批
+            await asyncio.sleep(0)
     finally:
         try:
             await task
         except Exception:
             pass
 
-    _persist(ctx, capability.name, answer, citations, tool_events, results_by_step)
+    # task 结束后兜底：provider 抛异常时 final 未发出，补发 error
+    if consumed < len(stream.events):
+        for event in stream.events[consumed:]:
+            yield _yield_event(event)
+    if task.done() and task.exception() is not None and answer == "":
+        yield _sse("error", {"error": str(task.exception())})
+
+    persist_turn(ctx, capability.name, answer, citations, tool_events, results_by_step)
 
 
 def _sse(event_type: str, data: dict) -> str:
