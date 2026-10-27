@@ -102,7 +102,8 @@ async def _event_stream(ctx: UnifiedContext):
                 continue
             if task.done():
                 break
-            # 没有新事件且任务仍在跑：等待下一批
+            # 没有新事件且任务仍在跑：让出事件循环。TurnEngine 每次 emit 后都
+            # await asyncio.to_thread（阻塞的 LLM 调用），会自然让出，这里只是轮询检查点。
             await asyncio.sleep(0)
     finally:
         try:
