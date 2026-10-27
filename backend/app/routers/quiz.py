@@ -7,9 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Quiz, Text, KnowledgePoint
-from ..services.quiz import (
-    QuizGenerationError, generate_quiz, grade_answers, strip_key,
-)
+from ..services.quiz import grade_answers, strip_key
 
 router = APIRouter(prefix="/api", tags=["read-and-ask"])
 
@@ -42,21 +40,24 @@ def _lesson_text(db: Session, lesson_id: int) -> str:
 
 @router.post("/quiz/generate")
 def quiz_generate(req: QuizGenerateReq, db: Session = Depends(get_db)):
+    from ..tools.generation import generate_quiz_questions
+    from ..core.context import UnifiedContext
     text = _lesson_text(db, req.lesson_id)
     if not text:
         raise HTTPException(status_code=400, detail="该课文暂无内容，无法出题")
-    try:
-        kps = [{"id": k.id, "category": k.category, "content": k.content}
-               for k in db.query(KnowledgePoint).filter_by(lesson_id=req.lesson_id).all()]
-        questions = generate_quiz(db, text, n=3, knowledge_points=kps)
-    except QuizGenerationError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    kps = [{"id": k.id, "category": k.category, "content": k.content}
+           for k in db.query(KnowledgePoint).filter_by(lesson_id=req.lesson_id).all()]
+    ctx = UnifiedContext(user_id=req.user_id, lesson_id=req.lesson_id, question="")
+    result = generate_quiz_questions.run(
+        {"text": text, "n": 3, "knowledge_points": json.dumps(kps, ensure_ascii=False)}, ctx)
+    if not result.get("questions"):
+        raise HTTPException(status_code=503, detail=result.get("error", "AI 未配置"))
     quiz = Quiz(lesson_id=req.lesson_id, user_id=req.user_id,
-                questions=json.dumps(questions, ensure_ascii=False))
+                questions=json.dumps(result["questions"], ensure_ascii=False))
     db.add(quiz)
     db.commit()
     db.refresh(quiz)
-    return {"quiz_id": quiz.id, "questions": strip_key(questions)}
+    return {"quiz_id": quiz.id, "questions": strip_key(result["questions"])}
 
 
 @router.post("/quiz/submit")
@@ -86,42 +87,28 @@ def quiz_submit(req: QuizSubmitReq, db: Session = Depends(get_db)):
 
 @router.post("/ask/questions")
 def ask_questions(req: AskQuestionsReq, db: Session = Depends(get_db)):
-    from ..services.ai import get_provider
-    provider = get_provider(db)
-    if provider.name == "fake":
-        raise HTTPException(status_code=503, detail="AI 未配置")
-    ctx = req.context or _lesson_text(db, req.lesson_id)
-    if not ctx:
+    from ..tools.generation import generate_diagnostic_questions
+    from ..core.context import UnifiedContext
+    ctx_text = req.context or _lesson_text(db, req.lesson_id)
+    if not ctx_text:
         raise HTTPException(status_code=400, detail="该课文暂无内容")
-    system = (
-        "你是小学生的学习助手，正在主动提问。请针对下面这段课文，"
-        "一次性提出 1-4 个只有学生能补充的高信息量诊断性问题，不要重复已知信息。"
-        '只返回 JSON：{"intro":"简短引导语","questions":[{"id":"q1","prompt":"问题",'
-        '"options":[{"label":"选项"}]}]}。选项可为空数组，表示自由作答。'
-    )
-    raw = provider.generate(prompt=f"课文：\n{ctx[:6000]}", system=system, json_mode=True)
-    try:
-        data = json.loads(raw)
-        return {"intro": data.get("intro", ""), "questions": data.get("questions") or []}
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=502, detail="AI 返回无法解析")
+    ctx = UnifiedContext(user_id=0, lesson_id=req.lesson_id, question="")
+    result = generate_diagnostic_questions.run({"context": ctx_text}, ctx)
+    if not result["questions"]:
+        raise HTTPException(status_code=503, detail="AI 未配置")
+    return {"intro": result["intro"], "questions": result["questions"]}
 
 
 @router.post("/ask/reply")
-def ask_reply(req: AskReplyReq, db: Session = Depends(get_db)):
-    from ..services.ai import get_provider
-    provider = get_provider(db)
-    if provider.name == "fake":
-        raise HTTPException(status_code=503, detail="AI 未配置")
-    ctx = req.context or _lesson_text(db, req.lesson_id)
+async def ask_reply(req: AskReplyReq, db: Session = Depends(get_db)):
+    from ..core.context import UnifiedContext
+    from ..runtime.orchestrator import route_to_capability
+    ctx_text = req.context or _lesson_text(db, req.lesson_id)
     replies_text = json.dumps(req.replies, ensure_ascii=False)
-    prompt = (
-        f"教材上下文（按句切分，句前编号）：{ctx}\n"
-        f"学生对这些诊断性问题的回答：{replies_text}\n"
-        "请基于学生的回答，继续用小学生能懂的话讲解课文。"
-        "如果讲解涉及原文某一句，在那句后标 [第N句]。"
+    ctx = UnifiedContext(
+        user_id=0, lesson_id=req.lesson_id,
+        question=f"学生对这些诊断性问题的回答：{replies_text}，请基于回答继续用小学生能懂的话讲解课文，涉及原文某句时在那句后标 [第N句]。",
+        text=ctx_text,
+        mode="chat",
     )
-    answer = provider.generate(prompt=prompt, system="你是小学生的学习助手。")
-    import re as _re
-    citations = [int(n) for n in _re.findall(r"第\s*(\d+)\s*句", answer)]
-    return {"answer": answer, "citations": sorted(set(citations))}
+    return await route_to_capability(ctx)

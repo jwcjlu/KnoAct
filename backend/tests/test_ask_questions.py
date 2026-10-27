@@ -30,7 +30,9 @@ def test_ask_questions_requires_ai(setup_db):
     assert r.status_code == 503
 
 
-def test_ask_reply_requires_ai(setup_db):
+def test_ask_reply_degrades_with_fake_provider(setup_db):
     lid = _seed()
     r = client.post("/api/ask/reply", json={"lesson_id": lid, "replies": {"q1": "好"}})
-    assert r.status_code == 503
+    assert r.status_code == 200
+    assert "answer" in r.json()
+    assert "citations" in r.json()
