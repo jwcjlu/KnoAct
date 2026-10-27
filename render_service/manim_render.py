@@ -1,5 +1,4 @@
 """封装 subprocess 调 `manim render`，返回产物 mp4 路径，失败返回 None。"""
-import subprocess
 from pathlib import Path
 
 
@@ -17,14 +16,16 @@ def render_code_with_error(code: str, out_dir: str, timeout: int = 120) -> tuple
     scene = m.group(1)
 
     try:
-        proc = subprocess.run(
+        from .sandbox import run_sandboxed
+        # 沙箱执行：清洗环境变量（剔除 DATABASE_URL/API key）+ 限定 cwd 到任务目录
+        proc = run_sandboxed(
             ["python", "-m", "manim", "render", "-ql", "--media_dir", str(out), str(src), scene],
-            capture_output=True, text=True, timeout=timeout,
+            cwd=str(out),
+            timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
-        return None, "timeout"
-    except FileNotFoundError:
-        return None, "manim not found"
+    except RuntimeError as e:
+        # 沙箱未启用（off）等：直接报错，不裸跑脏代码
+        return None, str(e)
     if proc.returncode != 0:
         return None, (proc.stderr or "")[:2000]
 

@@ -26,3 +26,18 @@ DATABASE_URL="sqlite:///D:/workspace/github/KnoAct/backend/zhixueban.db" \
 
 - Python 3.10 + `manim`（0.19.x）+ `ffmpeg`（系统级）+ LaTeX（MiKTeX，数学公式排版）。
 - TTS/LLM provider 复用主服务 `backend/app/services/`，通过 `DATABASE_URL` 连同一个库读配置。
+
+## 沙箱（执行 LLM 生成的 manim 代码）
+
+LLM 生成的 manim 代码本质是要执行的 Python 代码。渲染时经 `render_service/sandbox.py`
+做受限执行，参照 DeepTutor 的 sandbox 分层：
+
+- 环境变量 `KNOACT_RENDER_SANDBOX` 选后端：`subprocess`（默认）/ `docker` / `off`。
+- `subprocess` —— **APPLICATION 级**（默认）：清洗环境变量（剔除 `DATABASE_URL`/API key
+  等敏感值）+ 限定 cwd 到任务目录 + 输出截断。**不做 OS 级隔离**，LLM 代码若主动
+  `os.system` 读盘/联网仍可逃逸——与 DeepTutor 对 APPLICATION 级的定位一致。
+- `docker` —— **SYSTEM 级**（后置）：无网络独立容器执行，需 Docker Desktop。
+- `off` —— 拒绝执行未沙箱代码。
+
+生产部署前应落地 `docker` 后端（`--network=none` + 非 root + 只读根 FS + 只写 media），
+并把 `KNOACT_RENDER_SANDBOX=docker`。
