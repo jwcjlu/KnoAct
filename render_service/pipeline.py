@@ -36,4 +36,5 @@ def run_pipeline(task_id: str, prompt: str, narration: str, voice: str, status_c
     if not final:
         raise RuntimeError("合轨失败")
 
-    return f"{task_id}/final.mp4"
+    # 返回相对 MEDIA_DIR 的真实产物路径（mix_audio 降级时可能是原始 manim mp4）
+    return str(Path(final).relative_to(MEDIA_DIR)).replace("\\", "/")
