@@ -2011,13 +2011,46 @@ function handleStreamEvent(evt){
     updateThinking(`正在${toolLabel(evt.data.tool)}…`);
   } else if(evt.type === 'final'){
     const d = evt.data;
-    chatMessages.push({role:'ai', text:d.answer || '（暂无回答）', citations:d.citations || [], mode:d.mode || chatMode});
+    const msg = {role:'ai', text:d.answer || '（暂无回答）', citations:d.citations || [], mode:d.mode || chatMode};
+    if(d.render_task_id){
+      msg.renderTaskId = d.render_task_id;
+      msg.renderStatus = 'rendering';
+    }
+    chatMessages.push(msg);
     renderImmersiveChat();
+    if(d.render_task_id) pollRenderTask(d.render_task_id, chatMessages.length - 1);
   }
 }
 
+async function pollRenderTask(taskId, msgIndex){
+  const renderCard = (status, url) => {
+    const m = chatMessages[msgIndex];
+    if(!m) return;
+    m.renderStatus = status;
+    if(url) m.renderVideo = url;
+    renderImmersiveChat();
+  };
+  for(let i = 0; i < 60; i++){  // 最多 60 × 3s = 180s
+    try{
+      const r = await fetch(API + '/api/render/' + taskId);
+      const d = await r.json();
+      if(d.status === 'done' && d.video_url){
+        renderCard('done', d.video_url);
+        return;
+      }
+      if(d.status === 'error' || d.status === 'unavailable'){
+        renderCard('error', null);
+        return;
+      }
+      renderCard(d.status, null);
+    }catch(e){ /* 忽略单次失败 */ }
+    await new Promise(res => setTimeout(res, 3000));
+  }
+  renderCard('error', null);
+}
+
 function toolLabel(name){
-  return {lookup_word:'查词', search_text:'检索原文', render_mermaid:'画图'}[name] || '思考';
+  return {lookup_word:'查词', search_text:'检索原文', render_mermaid:'画图', render_manim:'生成动画'}[name] || '思考';
 }
 // 只原地刷新沉浸页对话面板（不重挂载 PDF 阅读器）
 function renderImmersiveChat(){
@@ -2029,7 +2062,7 @@ function renderImmersiveChat(){
         if(isUser) return `<div class="im-msg user" data-i="${i}"><div class="bubble">${escapeAttr(m.text)}</div></div>`;
         const modeName = CHAT_MODES.find(x=>x.id===(m.mode||'chat'))?.name;
         const modeTag = modeName && modeName !== '对话' ? `<span class="mm-tag">${modeName}</span>` : '';
-        return `<div class="im-msg ai" data-i="${i}">${modeTag}<div class="bubble">${renderAnswer(m.text)}</div>${m.citations&&m.citations.length?`<div class="meta">出处：第 ${m.citations.join('、')} 句</div>`:''}</div>`;
+        return `<div class="im-msg ai" data-i="${i}">${modeTag}<div class="bubble">${renderAnswer(m.text)}</div>${m.renderTaskId?renderTaskCard(m):''}${m.citations&&m.citations.length?`<div class="meta">出处：第 ${m.citations.join('、')} 句</div>`:''}</div>`;
       }).join('')
     : `<div class="im-empty"><div class="mark">${welcomeMark()}</div><div class="big">边读边问，随时解惑</div><div class="hint">选中正文里任意一段，就能追问、解释或翻译它；AI 的回答会指明出自原文的哪一处。</div></div>`;
   const cards = quizCardHtml() + askCardHtml();
@@ -2043,6 +2076,16 @@ function renderImmersiveChat(){
   // 清空输入框
   const inp = document.getElementById('im-input');
   if(inp) inp.value = '';
+}
+function renderTaskCard(m){
+  if(m.renderStatus === 'done' && m.renderVideo){
+    return `<div class="render-card"><video src="${m.renderVideo}" controls width="100%"></video></div>`;
+  }
+  if(m.renderStatus === 'error'){
+    return `<div class="render-card">动画生成失败，请稍后再试。</div>`;
+  }
+  const label = {rendering:'渲染中…', generating:'生成中…', mixing:'合成音轨…', queued:'排队中…', submitted:'已提交…'}[m.renderStatus] || '渲染中…';
+  return `<div class="render-card"><span class="render-progress">${label}</span></div>`;
 }
 function quizCardHtml(){
   if(!quizState.questions.length) return '';
