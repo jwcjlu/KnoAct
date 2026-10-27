@@ -164,7 +164,7 @@
   .pl-reader .bar .ic{width:36px;height:36px;border-radius:10px;background:var(--blue-soft);color:var(--blue);display:grid;place-items:center;flex-shrink:0}
   .pl-reader .bar .name{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pl-reader .bar .sub{font-size:12px;color:#929a94}
-  .reader-body{flex:1;background:#eceeea;display:flex;justify-content:center;padding:24px;overflow:auto}
+  .reader-body{flex:1;background:#f5f2ea;display:flex;justify-content:center;padding:24px;overflow:auto}
   .reader-page{width:100%;max-width:620px;min-height:760px;background:#fff;padding:48px 64px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
   .reader-page .unit{text-align:center;font-size:12px;font-weight:600;letter-spacing:.3em;color:#83918a}
   .reader-page h2{margin-top:16px;text-align:center;font-size:30px;font-weight:700}
@@ -252,6 +252,31 @@
   .placeholder-page .ic{width:72px;height:72px;border-radius:24px;background:var(--blue-soft);color:var(--blue);display:grid;place-items:center;margin-bottom:20px}
   .placeholder-page h2{font-size:22px;font-weight:700;color:var(--ink)}
   .placeholder-page p{margin-top:8px;font-size:14px}
+
+  /* 学习中心 */
+  .center-tabs{display:flex;gap:10px;margin:20px 0 24px;flex-wrap:wrap}
+  .center-tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line3);background:var(--card);border-radius:12px;padding:10px 18px;font-size:14px;font-weight:600;color:#4f5952;cursor:pointer;transition:.15s}
+  .center-tab:hover{border-color:var(--blue-border);color:var(--blue)}
+  .center-tab.active{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
+  .center-tab.dict{border-color:var(--orange);color:var(--orange)}
+  .center-panel{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  .center-material{border:1px solid var(--line3);background:var(--card);border-radius:20px;padding:24px}
+  .cm-head{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--blue);margin-bottom:16px}
+  .cm-text{font-size:15px;line-height:28px;color:var(--ink);white-space:pre-wrap}
+  .center-play{margin-top:16px;display:inline-flex;align-items:center;gap:8px;border-radius:12px;background:var(--blue);color:#fff;padding:10px 20px;font-size:14px;font-weight:700}
+  .center-questions{display:flex;flex-direction:column;gap:16px}
+  .center-question{border:1px solid var(--line3);background:var(--card);border-radius:16px;padding:20px}
+  .cq-q{font-size:14px;font-weight:600;color:var(--ink);line-height:22px}
+  .cq-form{display:flex;gap:10px;margin-top:14px}
+  .cq-input{flex:1;border:1px solid var(--line3);border-radius:10px;padding:10px 14px;font-size:14px;font-family:inherit}
+  .cq-input:focus{outline:none;border-color:var(--blue3)}
+  .cq-btn{border-radius:10px;background:var(--blue);color:#fff;padding:10px 18px;font-size:14px;font-weight:600}
+  .cq-ans{margin-top:14px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
+  .cq-ans.right{color:var(--green)}
+  .cq-ans.wrong{color:#c04b3a}
+  .center-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:40vh;text-align:center;color:var(--gray)}
+  .center-empty p{margin-top:12px;font-size:14px}
+  @media (max-width:820px){ .center-panel{grid-template-columns:1fr} }
 
   /* 听写练习 */
   .dict-wrap{max-width:720px;margin:0 auto}
@@ -449,6 +474,176 @@
   .nl-note-meta{margin-top:8px;font-size:11px;color:#a0a7a2;display:flex;align-items:center;gap:10px}
   .nl-note-del{color:#c05b4a;cursor:pointer;margin-left:auto}
 
+  /* 沉浸式阅读：pdf.js 文本层 + 选中气泡 + 出处按钮 */
+  /* 对齐 DeepTutor globals.css 的 .textLayer：pdf.js 6.x 靠这套 CSS 变量 + 绝对定位
+     把每个 span 精确摆到字形位置。KnoAct 原来只有 white-space/transform-origin，缺失了
+     position:absolute 和 --text-scale-factor/--min-font-size-inv，导致文本层与 PNG 视觉层
+     错位、文字叠成一团、划线/高亮对不齐。 */
+  .pdf-page .pdf-text-layer{
+    position:absolute;inset:0;overflow:clip;opacity:1;
+    line-height:1;text-align:initial;letter-spacing:normal;word-spacing:normal;
+    text-size-adjust:none;forced-color-adjust:none;
+    transform-origin:0 0;caret-color:CanvasText;z-index:0;
+    --min-font-size:1;
+    --text-scale-factor:calc(var(--total-scale-factor,1)*var(--min-font-size));
+    --min-font-size-inv:calc(1/var(--min-font-size));
+  }
+  .pdf-page .pdf-text-layer span,
+  .pdf-page .pdf-text-layer br{
+    color:transparent;position:absolute;white-space:pre;cursor:text;
+    transform-origin:0% 0%;user-select:text;
+  }
+  .pdf-page .pdf-text-layer > :not(.markedContent),
+  .pdf-page .pdf-text-layer .markedContent span:not(.markedContent){
+    z-index:1;--font-height:0;--scale-x:1;--rotate:0deg;
+    font-size:calc(var(--text-scale-factor)*var(--font-height));
+    transform:rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+  }
+  .pdf-page .pdf-text-layer .markedContent{display:contents}
+  .pdf-page .pdf-text-layer ::selection{background:rgb(59 130 246 / .32)}
+  /* 划线/高亮墨迹层：绝对定位铺在文本层上方，mix-blend-multiply 荧光笔效果，不盖住文字 */
+  .pdf-page .pdf-annot-layer{position:absolute;inset:0;pointer-events:none;z-index:2}
+  .pdf-page .pdf-annot-layer .ann-mark{position:absolute;border-radius:2px;mix-blend-mode:multiply;pointer-events:auto;cursor:pointer}
+  .pdf-page .pdf-annot-layer .ann-mark.underline{background:none;mix-blend-mode:normal;border-bottom:2px solid}
+  .pdf-page .pdf-annot-flash{position:absolute;border-radius:2px;mix-blend-mode:multiply;background:rgb(96 165 250/.3);animation:pdf-flash 1.5s ease-out forwards;z-index:3}
+  @keyframes pdf-flash{0%,22%{background:rgb(96 165 250/.62);box-shadow:0 0 0 3px rgb(96 165 250/.55)}100%{background:rgb(96 165 250/.3);box-shadow:0 0 0 1px rgb(96 165 250/.28)}}
+  .ans .citation{display:inline;border:none;background:var(--blue-soft);color:var(--blue2);border-radius:6px;padding:1px 6px;font-size:12px;font-weight:600;margin:0 2px}
+
+  /* ===== 选中气泡工具栏（对齐 DeepTutor AnnotationPopover：浅色卡片 + 图标按钮 + 色板）===== */
+  #reader-popover{position:fixed;z-index:60;background:#fff;border:1px solid #e3e6e2;border-radius:12px;padding:7px;box-shadow:0 10px 30px -12px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:6px;max-width:min(360px,92vw)}
+  #reader-popover .rp-row{display:flex;align-items:center;gap:4px}
+  #reader-popover .rp-sep{width:1px;height:20px;background:#e3e6e2;margin:0 3px;flex:none}
+  #reader-popover .rp-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:none;border-radius:8px;background:transparent;color:#5a635c;cursor:pointer;transition:background .12s,color .12s}
+  #reader-popover .rp-btn:hover{background:#f1f3ef;color:#2b332e}
+  #reader-popover .rp-btn.ask{width:auto;height:28px;padding:0 11px;gap:5px;background:var(--blue2,#3158e8);color:#fff;font-size:12px;font-weight:600;border-radius:8px}
+  #reader-popover .rp-btn.ask:hover{background:#2447c7;color:#fff}
+  #reader-popover .rp-chip{height:28px;padding:0 9px;border:none;border-radius:8px;background:transparent;color:#5a635c;font-size:12px;font-weight:500;cursor:pointer;transition:background .12s,color .12s}
+  #reader-popover .rp-chip:hover{background:#f1f3ef;color:#2b332e}
+  #reader-popover .rp-swatch{width:20px;height:20px;border-radius:50%;border:1px solid rgba(0,0,0,.1);cursor:pointer;transition:transform .12s,border-color .12s}
+  #reader-popover .rp-swatch:hover{transform:scale(1.08)}
+  #reader-popover .rp-swatch.on{border-color:#2b332e;transform:scale(1.1)}
+  #reader-popover .rp-swatches{display:flex;align-items:center;gap:5px;padding:0 2px}
+  #reader-popover .rp-quote{max-width:240px;padding:0 4px;font-size:11px;font-style:italic;color:#8e9691;line-height:1.5;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  #reader-popover .rp-note-row{display:none;flex-direction:column;gap:6px}
+  #reader-popover .rp-note-row textarea{width:100%;min-height:60px;resize:none;border:1px solid #e3e6e2;border-radius:8px;padding:7px 9px;font-size:12px;font-family:inherit;line-height:1.5;color:#2b332e;outline:none;background:#fff}
+  #reader-popover .rp-note-row textarea:focus{border-color:var(--blue2,#3158e8)}
+  #reader-popover .rp-note-actions{display:flex;justify-content:flex-end;gap:6px}
+  #reader-popover .rp-note-actions button{padding:4px 10px;border-radius:7px;font-size:11px;cursor:pointer}
+  #reader-popover .rp-cancel{background:transparent;color:#8e9691}
+  #reader-popover .rp-cancel:hover{background:#f1f3ef;color:#2b332e}
+  #reader-popover .rp-save{background:var(--blue2,#3158e8);color:#fff;font-weight:600}
+  #reader-popover .rp-save:hover{background:#2447c7}
+
+  /* 课文搜索下拉 */
+  .lesson-select{margin-top:12px}
+  .lesson-search{display:flex;align-items:center;gap:8px;border:1px solid #e3e6e2;border-radius:10px;padding:9px 12px;background:#fff;color:#8e9691}
+  .lesson-search input{flex:1;border:none;outline:none;font-size:13px;color:#2b332e;background:transparent}
+  .lesson-search input::placeholder{color:#b0b8b2}
+  .ls-clear{border:none;background:#eef0ed;color:#78817b;width:20px;height:20px;border-radius:50%;font-size:14px;line-height:1;cursor:pointer;flex:none}
+  .ls-clear:hover{background:#e3e6e2;color:#2b332e}
+  .lesson-options{display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:260px;overflow-y:auto}
+  .lesson-option{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border:1px solid transparent;border-radius:9px;background:transparent;cursor:pointer;text-align:left;transition:background .12s}
+  .lesson-option:hover{background:#f4f5f2}
+  .lesson-option.active{background:var(--blue-soft);border-color:rgba(49,88,232,.25)}
+  .lo-title{font-size:13px;color:#2b332e;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lesson-option.active .lo-title{color:var(--blue2);font-weight:600}
+  .lo-pages{font-size:11px;color:#8e9691;flex:none}
+  .lo-empty{padding:16px 12px;text-align:center;color:#8e9691;font-size:13px}
+
+  /* 阅读模式切换 */
+  .read-mode-bar{display:flex;gap:8px;margin-top:14px}
+  .rm-btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border:1px solid #e3e6e2;border-radius:10px;background:#fff;color:#4b544e;font-size:13px;font-weight:600;cursor:pointer;transition:all .12s}
+  .rm-btn:hover{border-color:#c9cfca}
+  .rm-btn.active{background:var(--blue-soft);border-color:rgba(49,88,232,.25);color:var(--blue2)}
+
+  /* ===== 全屏沉浸页 —— 三栏布局（目录 / 阅读器 / 对话），对齐 DeepTutor ===== */
+  .immersive{position:fixed;inset:0;z-index:40;background:var(--bg, #f4f5f2);display:flex;flex-direction:column;font-size:14px;color:#2b332e}
+  /* 顶部 44px 工具栏 */
+  .im-top{display:flex;align-items:center;gap:6px;height:44px;flex:none;padding:0 10px;background:#fff;border-bottom:1px solid #eef0ed}
+  .im-top .im-grow{flex:1;min-width:0;display:flex;align-items:center;gap:6px}
+  .im-title{font-size:13.5px;font-weight:600;color:#2b332e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .im-sub{font-size:11.5px;color:#8e9691;white-space:nowrap}
+  /* 图标工具按钮（返回/目录开关/朗读/测验/全屏/菜单/新对话/对话开关） */
+  .im-tool{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;border-radius:7px;background:transparent;color:#5a635c;cursor:pointer;transition:background .12s}
+  .im-tool:hover{background:#f1f3ef;color:#2b332e}
+  .im-tool.active{background:#eaf0ff;color:var(--blue2,#3158e8)}
+  .im-back{display:inline-flex;align-items:center;gap:5px;height:32px;padding:0 10px;border:none;border-radius:7px;background:transparent;color:#5a635c;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s}
+  .im-back:hover{background:#f1f3ef;color:#2b332e}
+  .im-divider{width:1px;height:20px;background:#eef0ed;margin:0 4px;flex:none}
+  /* 三栏主体（列宽由 JS 内联 grid-template-columns 控制，可拖拽） */
+  .im-body{display:grid;grid-template-columns:200px 5px minmax(0,1fr) 5px 380px;gap:0;flex:1;min-height:0}
+  /* 左栏：目录导航 */
+  .im-nav{overflow-y:auto;background:#fafbf9;border-right:1px solid #eef0ed;padding:10px 0;min-height:0;min-width:0}
+  .im-nav .nav-head{padding:4px 16px 8px;font-size:11px;font-weight:700;color:#8e9691;text-transform:uppercase;letter-spacing:.04em}
+  .im-nav-item{display:flex;align-items:flex-start;gap:8px;width:100%;padding:7px 14px;border:none;background:transparent;text-align:left;cursor:pointer;color:#4b544e;font-size:13px;line-height:1.4;transition:background .12s}
+  .im-nav-item:hover{background:#f1f3ef}
+  .im-nav-item.active{background:#eaf0ff;color:var(--blue2,#3158e8);font-weight:600}
+  .im-nav-item .ni-idx{flex:none;width:18px;text-align:right;font-size:11px;color:#aab1ab;tabular-nums;margin-top:2px}
+  .im-nav-item.active .ni-idx{color:var(--blue2,#3158e8)}
+  .im-nav-item .ni-title{min-width:0;flex:1}
+  /* 中栏：阅读器（书桌色对齐 DeepTutor --secondary 暖米色 #f5f2ea，让白纸「浮」起来） */
+  .im-reader{overflow-y:auto;overscroll-behavior:contain;background:#f5f2ea;min-height:0;min-width:0}
+  .im-reader .reader-pad{padding:16px 24px 64px}
+  /* 拖拽分隔条（窄条，中央一条竖线，hover/拖拽高亮） */
+  .im-sep{position:relative;cursor:col-resize;background:#f2f4f1;min-height:0;touch-action:none}
+  .im-sep::after{content:'';position:absolute;top:0;bottom:0;left:50%;width:1px;transform:translateX(-50%);background:#e3e6e2;transition:background .12s,width .12s}
+  .im-sep:hover::after,.im-sep.dragging::after{background:var(--blue2,#3158e8);width:2px}
+  /* 右栏：对话伴学 */
+  .im-side{display:flex;flex-direction:column;min-height:0;background:#fff;border-left:1px solid #eef0ed;min-width:0}
+  .im-chat-head{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid #f0f2ef}
+  .im-chat-head .t{font-family:Georgia,"Songti SC","SimSun",serif;font-size:13.5px;font-weight:600;color:#2b332e}
+  .im-chat-head .sub{font-size:11px;color:#8e9691}
+  .im-chat-body{flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+  /* 消息气泡 */
+  .im-msg{display:flex;flex-direction:column;max-width:100%}
+  .im-msg.user{align-items:flex-end}
+  .im-msg.ai{align-items:flex-start}
+  .im-msg .bubble{padding:10px 13px;border-radius:14px;font-size:13.5px;line-height:1.65;max-width:94%;word-break:break-word}
+  .im-msg.user .bubble{background:var(--blue2,#3158e8);color:#fff;border-bottom-right-radius:4px}
+  .im-msg.ai .bubble{background:#f3f5f2;color:#2b332e;border-bottom-left-radius:4px}
+  .im-msg .meta{font-size:10.5px;color:#aab1ab;margin:4px 2px 0}
+  .im-msg .mm-tag{align-self:flex-start;font-size:10px;color:#7c86d8;background:#eef2ff;border-radius:6px;padding:1px 6px;margin-bottom:2px}
+  .im-msg.ai .bubble .citation{display:inline;margin:0 1px;padding:0 4px;border:none;border-radius:4px;background:#dde6ff;color:var(--blue2,#3158e8);font-size:12px;cursor:pointer}
+  /* 空态欢迎（对齐 DeepTutor CompanionWelcome：衬线标题 + 插图 + 说明）*/
+  .im-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;color:#aab1ab;text-align:center;padding:24px}
+  .im-empty .mark{width:64px;height:72px;margin-bottom:16px;color:#c4cac6}
+  .im-empty .mark svg{width:100%;height:100%;overflow:visible}
+  .im-empty .big{font-family:Georgia,"Songti SC","SimSun",serif;font-size:18px;font-weight:600;color:#2b332e;letter-spacing:-.01em;margin-bottom:8px}
+  .im-empty .hint{font-size:12.5px;line-height:1.7;max-width:250px;color:#8e9691}
+  /* 底部输入区（浮动在对话之上） */
+  .im-composer{flex:none;padding:10px 14px 12px;border-top:1px solid #f0f2ef;background:linear-gradient(to bottom, rgba(255,255,255,0) 0, #fff 32px)}
+  .im-composer .quick{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .im-composer .qa-btn{flex:none;padding:5px 11px;border:1px solid #e3e6e2;border-radius:999px;background:#fff;color:#4b544e;font-size:12px;cursor:pointer;transition:all .12s}
+  .im-composer .qa-btn:hover{border-color:#c9cfca;background:#fafbf9}
+  .im-composer .row{display:flex;align-items:flex-end;gap:8px}
+  .im-composer textarea{flex:1;min-height:40px;max-height:120px;resize:none;border:1px solid #e3e6e2;border-radius:12px;padding:10px 13px;font-size:13.5px;font-family:inherit;line-height:1.5;color:#2b332e;background:#fff;outline:none}
+  .im-composer textarea:focus{border-color:var(--blue2,#3158e8)}
+  .im-composer .send-btn{flex:none;width:40px;height:40px;border:none;border-radius:12px;background:var(--blue2,#3158e8);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background .12s}
+  .im-composer .send-btn:hover{background:#2447c7}
+  .im-composer .send-btn:disabled{background:#c4cbce;cursor:not-allowed}
+  /* 模型/模式 chip 行 */
+  .im-chips{position:relative;display:flex;gap:6px;align-items:center;margin-bottom:8px}
+  .im-chip{position:relative;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid #e3e6e2;border-radius:999px;background:#fff;color:#4b544e;font-size:12px;cursor:pointer;transition:all .12s;user-select:none}
+  .im-chip:hover{border-color:#c9cfca;background:#fafbf9}
+  .im-chip.on{border-color:var(--blue2,#3158e8);color:var(--blue2,#3158e8);background:#eef2ff}
+  .im-chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.7}
+  .im-chip .caret{margin-left:2px;opacity:.55}
+  .im-menu{position:absolute;bottom:calc(100% + 6px);left:0;min-width:180px;max-height:280px;overflow:auto;background:#fff;border:1px solid #e3e6e2;border-radius:12px;box-shadow:0 8px 24px rgba(20,30,25,.12);padding:5px;z-index:60}
+  .im-menu .mi{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13px;color:#2b332e;cursor:pointer}
+  .im-menu .mi:hover{background:#f3f5f2}
+  .im-menu .mi.on{background:#eef2ff;color:var(--blue2,#3158e8);font-weight:600}
+  .im-menu .mi .mi-desc{font-size:11px;color:#8e9691;font-weight:400}
+  .im-menu .mi.on .mi-desc{color:#7c86d8}
+  .im-menu .mi .mi-name{flex:1}
+  /* mermaid 图在气泡里的样式 */
+  .im-msg.ai .bubble .mmd{display:block;margin:8px 0;overflow:auto;background:#fff;border:1px solid #e3e6e2;border-radius:10px;padding:10px;text-align:center}
+  .im-msg.ai .bubble .mmd svg{max-width:100%;height:auto}
+  /* 引用上下文提示条 */
+  .im-ctx{flex:none;display:flex;align-items:center;gap:6px;margin:0 14px 8px;padding:6px 10px;border-radius:8px;background:#f3f6ff;border:1px solid #e0e8ff;color:#5a635c;font-size:12px}
+  .im-ctx .q{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .im-ctx .x{cursor:pointer;color:#8e9691}
+  .pdf-page-slot{min-height:120px}
+
   @media(max-width:1024px){
     .sidebar{display:none}
     .main{margin-left:0;padding:20px}
@@ -531,9 +726,9 @@
       <p>每天坚持 30 分钟，学习效果会更好哦。</p>
     </div>
     <div class="user-row">
-      <div class="avatar" id="userAvatar">晨</div>
+      <div class="avatar" id="userAvatar">轩</div>
       <div style="flex:1">
-        <div class="user-name" id="userName">林晨</div>
+        <div class="user-name" id="userName">金宇轩</div>
         <div class="user-grade" id="userGrade">五年级</div>
       </div>
       <button onclick="toggleRole()" id="roleSwitch" style="font-size:11px;font-weight:700;color:var(--blue2);white-space:nowrap">家长端</button>
@@ -547,6 +742,18 @@
 <div class="toast" id="toast"></div>
 
 
-<script src="app.js"></script>
+<!-- 改 app.js 后把 v= 后面的数字 +1，避免 127.0.0.1 / localhost 各自缓存旧脚本 -->
+<!-- pdf.js 本地化（对齐 DeepTutor 的 pdfjs-dist 6.x legacy 构建 + 同源 worker/wasm），
+     用 module 动态 import 挂到 window.pdfjsLib，避免 CDN 跨域导致内嵌 CJK 字体 canvas 渲染挂起。 -->
+<script type="module">
+  import * as pdfjsLib from './vendor/pdfjs/build/pdf.mjs';
+  if(!pdfjsLib.GlobalWorkerOptions.workerSrc){
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/build/pdf.worker.min.mjs', import.meta.url).href;
+  }
+  window.pdfjsLib = pdfjsLib;
+  window.pdfjsWasmUrl = new URL('./vendor/pdfjs/wasm/', import.meta.url).href;
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>
