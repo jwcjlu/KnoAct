@@ -36,7 +36,7 @@ class TurnEngine:
             args = parsed.get("args") or {}
             if not tool_name:
                 # 解析失败：强制收尾
-                return self._forced_finish(ctx, history, stream)
+                return await self._forced_finish(ctx, history, stream)
 
             try:
                 tool: BaseTool = self.registry.get(tool_name)
@@ -53,7 +53,7 @@ class TurnEngine:
             history.append({"tool": tool_name, "args": args, "result": result})
 
         # 步数上限：强制收尾
-        return self._forced_finish(ctx, history, stream)
+        return await self._forced_finish(ctx, history, stream)
 
     def _system(self, ctx: UnifiedContext) -> str:
         schemas = json.dumps(self.registry.list_schemas(), ensure_ascii=False)
@@ -81,7 +81,7 @@ class TurnEngine:
         except (ValueError, TypeError):
             return {}
 
-    def _forced_finish(self, ctx: UnifiedContext, history: list[dict], stream: StreamBus) -> dict:
+    async def _forced_finish(self, ctx: UnifiedContext, history: list[dict], stream: StreamBus) -> dict:
         # 把历史交给 LLM 求 final；失败则返回友好文案
         try:
             prompt = (
@@ -89,7 +89,7 @@ class TurnEngine:
                 "之前的工具结果如下，请直接给出最终回答（不要再调工具）：\n"
                 + "\n".join(json.dumps(h, ensure_ascii=False) for h in history)
             )
-            raw = self.provider.generate(prompt, self._system(ctx), True)
+            raw = await asyncio.to_thread(self.provider.generate, prompt, self._system(ctx), True)
             data = self._parse(raw)
             answer = data.get("final_answer")
             if answer:
