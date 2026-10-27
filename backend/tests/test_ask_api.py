@@ -13,3 +13,23 @@ def test_turn_table_exists(setup_db):
     db.add(tc); db.commit()
     assert db.query(ToolCall).count() == 1
     db.close()
+
+
+from fastapi.testclient import TestClient
+from app.main import app
+from app.models import ModelConfig
+
+client = TestClient(app)
+
+
+def test_ask_api_end_to_end(setup_db):
+    # 用 fake provider：不会返回合法 JSON，应走降级返回友好文案（status=error 但不 500）
+    db = SessionLocal()
+    db.add(ModelConfig(key="ai_provider", value="fake"))
+    db.commit(); db.close()
+    r = client.post("/api/ask", json={"lesson_id": 1, "question": "你好", "context": "白鹭是一首精巧的诗"})
+    assert r.status_code == 200
+    body = r.json()
+    assert "answer" in body
+    assert "citations" in body
+    assert "mode" in body

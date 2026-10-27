@@ -3,7 +3,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Note
-from ..services.ai import get_provider
+from ..core.context import UnifiedContext
+from ..runtime.orchestrator import route_to_capability
 
 router = APIRouter(tags=["notes"])
 
@@ -18,6 +19,8 @@ class AskReq(BaseModel):
     lesson_id: int
     question: str
     context: str = ""
+    model: str = ""       # 覆盖默认模型（选模型）
+    mode: str = "chat"    # chat=对话 | visualize=可视化 | solve=解题
 
 @router.post("/api/notes")
 def add_note(req: NoteReq, db: Session = Depends(get_db)):
@@ -30,8 +33,9 @@ def list_notes(lesson_id: int, db: Session = Depends(get_db)):
     return db.query(Note).filter_by(lesson_id=lesson_id).order_by(Note.created_at.desc()).all()
 
 @router.post("/api/ask")
-def ask_ai(req: AskReq, db: Session = Depends(get_db)):
-    provider = get_provider(db)
-    prompt = f"教材上下文：{req.context}\n孩子提问：{req.question}\n请用小学生能懂的话解答。"
-    answer = provider.generate(prompt=prompt, system="你是小学生的学习助手，讲解要通俗、有耐心。")
-    return {"answer": answer}
+async def ask_ai(req: AskReq):
+    ctx = UnifiedContext(
+        user_id=0, lesson_id=req.lesson_id, question=req.question,
+        text=req.context, mode=req.mode, model=req.model,
+    )
+    return await route_to_capability(ctx)
