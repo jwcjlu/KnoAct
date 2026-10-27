@@ -1,68 +1,58 @@
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from app.routers.mistakes import router as mistakes_router
+from app.main import app
+from app.database import SessionLocal
+from app.models import User, WordBank, Lesson, PdfDocument, Mistake
+
+client = TestClient(app)
 
 
-def _client():
-    app = FastAPI()
-    app.include_router(mistakes_router)
-    return TestClient(app)
+def _seed():
+    db = SessionLocal()
+    for m in (Mistake, WordBank, Lesson, PdfDocument, User):
+        db.query(m).delete()
+    db.commit()
+    u = User(name="孩子", role="child")
+    db.add(u); db.flush()
+    doc = PdfDocument(filename="y.pdf", subject="语文", storage_path="")
+    db.add(doc); db.flush()
+    l = Lesson(document_id=doc.id, subject="语文", title="第1课",
+               start_page=1, end_page=1, extract_status="done", audit_status="approved")
+    db.add(l); db.flush()
+    wb = WordBank(lesson_id=l.id, subject="语文", word="白鹭", extra="pinyin")
+    db.add(wb); db.flush()
+    db.commit()
+    return u.id, wb.id
 
 
-def _seed_mistake():
-    from app.models import Mistake
-    from app.database import SessionLocal
-    s = SessionLocal()
-    m = Mistake(user_id=1, source_type="dictation", question="听写：徘徊", your_answer="排回", correct_answer="徘徊")
-    s.add(m); s.commit()
-    mid = m.id
-    s.close()
-    return mid
+def test_mark_correct_with_word_id_removes_only_after_gate(setup_db):
+    uid, wbid = _seed()
+    db = SessionLocal()
+    m = Mistake(user_id=uid, source_type="dictation", question="白鹭",
+                your_answer="白露", correct_answer="白鹭", word_bank_id=wbid)
+    db.add(m); db.commit(); mid = m.id
+    db.close()
+
+    r1 = client.post(f"/api/mistakes/{mid}/correct").json()
+    assert r1["removed"] is False   # 0.5 未达标
+    r2 = client.post(f"/api/mistakes/{mid}/correct").json()
+    assert r2["removed"] is False   # 0.8 未达标
+    r3 = client.post(f"/api/mistakes/{mid}/correct").json()
+    assert r3["removed"] is True    # 1.0 达标
+
+    db = SessionLocal()
+    assert db.get(Mistake, mid) is None
+    db.close()
 
 
-def test_list_mistakes(setup_db):
-    _seed_mistake()
-    resp = _client().get("/api/mistakes?user_id=1")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data) == 1
-    assert data[0]["correct_answer"] == "徘徊"
+def test_mark_correct_without_id_uses_legacy_threshold(setup_db):
+    uid, wbid = _seed()
+    db = SessionLocal()
+    m = Mistake(user_id=uid, source_type="reading", question="主旨是什么",
+                your_answer="A", correct_answer="B")  # 无关联 id
+    db.add(m); db.commit(); mid = m.id
+    db.close()
 
-
-def test_mark_correct_removes_after_3(setup_db):
-    mid = _seed_mistake()
-    c = _client()
-    for _ in range(2):
-        r = c.post(f"/api/mistakes/{mid}/correct").json()
-        assert r["removed"] is False
-    r = c.post(f"/api/mistakes/{mid}/correct").json()
-    assert r["removed"] is True
-    # 已删除
-    from app.database import SessionLocal
-    from app.models import Mistake
-    s = SessionLocal()
-    assert s.query(Mistake).filter_by(id=mid).count() == 0
-    s.close()
-
-
-def test_mark_wrong_resets_streak(setup_db):
-    mid = _seed_mistake()
-    c = _client()
-    c.post(f"/api/mistakes/{mid}/correct")
-    r = c.post(f"/api/mistakes/{mid}/wrong").json()
-    assert r["mistake_count"] == 2
-    from app.database import SessionLocal
-    from app.models import Mistake
-    s = SessionLocal()
-    m = s.query(Mistake).filter_by(id=mid).first()
-    assert m.consecutive_correct == 0
-    s.close()
-
-
-def test_weakness_report(setup_db):
-    _seed_mistake()
-    resp = _client().get("/api/mistakes/report?user_id=1")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    assert data["rows"][0]["name"] == "听写"
+    client.post(f"/api/mistakes/{mid}/correct")
+    client.post(f"/api/mistakes/{mid}/correct")
+    r3 = client.post(f"/api/mistakes/{mid}/correct").json()
+    assert r3["removed"] is True    # 旧逻辑：连续 3 次

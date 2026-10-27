@@ -39,12 +39,23 @@ def _subject_sources(subject: str) -> list[str]:
 
 @router.post("/{mistake_id}/correct")
 def mark_correct(mistake_id: int, db: Session = Depends(get_db)):
-    """答对一次：consecutive_correct 累计，达到阈值自动移出（删除）。"""
+    """答对一次：有词/知识点关联时用掌握度判定移出，否则走旧计数逻辑。"""
     m = db.get(Mistake, mistake_id)
     if not m:
         return {"removed": False, "error": "not found"}
-    m.consecutive_correct += 1
-    removed = m.consecutive_correct >= REMOVE_AFTER
+    from ..services.mastery import record_attempt, GATE
+
+    removed = False
+    if m.word_bank_id:
+        mastery = record_attempt(db, m.user_id, "word", m.word_bank_id, True)
+        removed = mastery >= GATE
+    elif m.knowledge_point_id:
+        mastery = record_attempt(db, m.user_id, "knowledge", m.knowledge_point_id, True)
+        removed = mastery >= GATE
+    else:
+        m.consecutive_correct += 1
+        removed = m.consecutive_correct >= REMOVE_AFTER
+
     if removed:
         db.delete(m)
     db.commit()
@@ -53,12 +64,19 @@ def mark_correct(mistake_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{mistake_id}/wrong")
 def mark_wrong(mistake_id: int, db: Session = Depends(get_db)):
-    """再答错：重置连续正确计数，累计错误次数。"""
+    """再答错：有词/知识点关联时驱动掌握度下降，否则走旧计数。"""
     m = db.get(Mistake, mistake_id)
     if not m:
         return {"error": "not found"}
-    m.consecutive_correct = 0
+    from ..services.mastery import record_attempt
+
+    if m.word_bank_id:
+        record_attempt(db, m.user_id, "word", m.word_bank_id, False)
+    elif m.knowledge_point_id:
+        record_attempt(db, m.user_id, "knowledge", m.knowledge_point_id, False)
+    # 错题本自身的计数字段，无论走哪个分支都要更新
     m.mistake_count += 1
+    m.consecutive_correct = 0
     db.commit()
     return {"mistake_count": m.mistake_count}
 

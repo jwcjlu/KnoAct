@@ -126,6 +126,8 @@ class Mistake(Base):
     correct_answer: Mapped[str] = mapped_column(TextCls)
     mistake_count: Mapped[int] = mapped_column(Integer, default=1)
     consecutive_correct: Mapped[int] = mapped_column(Integer, default=0)
+    word_bank_id: Mapped[int] = mapped_column(ForeignKey("word_banks.id"), nullable=True)
+    knowledge_point_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"), nullable=True)
 
 class LearningRecord(Base):
     __tablename__ = "learning_records"
