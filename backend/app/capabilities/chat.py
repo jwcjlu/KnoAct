@@ -7,12 +7,7 @@ from ..tools.registry import ToolRegistry
 from ..tools.builtin import lookup_word, search_text, render_mermaid
 
 
-def _default_registry() -> ToolRegistry:
-    reg = ToolRegistry()
-    reg.register(lookup_word)
-    reg.register(search_text)
-    reg.register(render_mermaid)
-    return reg
+ALL_TOOLS = {"lookup_word": lookup_word, "search_text": search_text, "render_mermaid": render_mermaid}
 
 
 class AgenticChatCapability(TurnCapability):
@@ -23,19 +18,16 @@ class AgenticChatCapability(TurnCapability):
 
     @property
     def _registry(self) -> ToolRegistry:
-        all_tools = {"lookup_word": lookup_word, "search_text": search_text, "render_mermaid": render_mermaid}
         reg = ToolRegistry()
         for name in self.tools:
-            if name in all_tools:
-                reg.register(all_tools[name])
+            if name in ALL_TOOLS:
+                reg.register(ALL_TOOLS[name])
         return reg
 
     async def run(self, ctx: UnifiedContext, stream: StreamBus) -> None:
         stream.emit(StreamEvent(type="stage", data={"stage": "thinking"}))
-        engine = TurnEngine(provider=_get_provider(ctx), registry=self._registry)
-        result = await engine.run(ctx, stream)
-        # 把最终答案作为最后一个 final 事件发出，供 orchestrator 取
-        stream.emit(StreamEvent(type="final", data=result))
+        engine = TurnEngine(provider=_get_provider(ctx), registry=self._registry, system_prompt=self.system_prompt)
+        await engine.run(ctx, stream)
 
 
 def _get_provider(ctx: UnifiedContext):

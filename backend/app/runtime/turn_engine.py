@@ -11,9 +11,10 @@ from ..tools.registry import ToolRegistry, ToolNotFoundError
 class TurnEngine:
     MAX_STEPS = 8
 
-    def __init__(self, provider, registry: ToolRegistry) -> None:
+    def __init__(self, provider, registry: ToolRegistry, system_prompt: str = "") -> None:
         self.provider = provider
         self.registry = registry
+        self.system_prompt = system_prompt
 
     async def run(self, ctx: UnifiedContext, stream: StreamBus) -> dict:
         """驱动多步循环，返回 {answer, status, tool_calls}。"""
@@ -57,9 +58,10 @@ class TurnEngine:
 
     def _system(self, ctx: UnifiedContext) -> str:
         schemas = json.dumps(self.registry.list_schemas(), ensure_ascii=False)
+        base = self.system_prompt or "你是小学生的学习助手，讲解要通俗、有耐心。"
         return (
-            "你是小学生的学习助手，可以用工具辅助回答。\n"
-            "你每次只能返回一种 JSON：\n"
+            f"{base}\n"
+            "你可以用工具辅助回答。你每次只能返回一种 JSON：\n"
             '  - 回答完成：{"final_answer": "你的回答"}\n'
             '  - 调用工具：{"tool": "工具名", "args": {...}}\n'
             f"可用工具：{schemas}\n"

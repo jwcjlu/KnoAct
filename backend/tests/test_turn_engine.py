@@ -120,3 +120,16 @@ def test_turn_engine_invalid_json_falls_back():
     result = asyncio.run(engine.run(ctx, bus))
     assert result["status"] == "error"
     assert "抱歉" in result["answer"]
+
+
+def test_turn_engine_uses_custom_system_prompt():
+    provider = ScriptedProvider(['{"final_answer": "ok"}'])
+    reg = ToolRegistry()
+    reg.register(lookup_word)
+    engine = TurnEngine(provider=provider, registry=reg, system_prompt="自定义提示词XYZ")
+    bus = StreamBus()
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="?", text="")
+    asyncio.run(engine.run(ctx, bus))
+    # system prompt 是 generate 的第二个位置参数，这里通过检查第二次生成调用来验证太复杂；
+    # 改为直接验证 _system 方法
+    assert "自定义提示词XYZ" in engine._system(ctx)
