@@ -12,6 +12,12 @@ def _fallback_split(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"(?<=[。！？!?])|\n+", text) if s.strip()]
 
 
+_MERMAID_RE = re.compile(
+    r"^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|mindmap|journey)\b",
+    re.MULTILINE,
+)
+
+
 class LookupWordTool(BaseTool):
     name = "lookup_word"
     description = "查一个词的释义，用小学生能懂的话解释"
@@ -63,7 +69,7 @@ class SearchTextTool(BaseTool):
 
 class RenderMermaidTool(BaseTool):
     name = "render_mermaid"
-    description = "校验并输出 mermaid 代码块（graph TD / mindmap），用于把知识画成图"
+    description = "校验并输出 mermaid 代码块（graph TD / mindmap 等），用于把知识画成图"
     parameters = [
         ToolParameter(name="code", type="string", description="mermaid 源码"),
     ]
@@ -72,8 +78,7 @@ class RenderMermaidTool(BaseTool):
         code = (args.get("code") or "").strip()
         if not code:
             return {"ok": False, "error": "code 不能为空"}
-        # 简单校验：含 mermaid 图类型关键字
-        valid = any(k in code for k in ("graph", "mindmap", "flowchart"))
+        valid = bool(_MERMAID_RE.search(code))
         return {"ok": valid, "code": code} if valid else {"ok": False, "error": "不是有效的 mermaid 图"}
 
 

@@ -89,6 +89,18 @@ def test_render_mermaid_invalid():
     assert result.get("ok") is False
 
 
+def test_render_mermaid_rejects_non_declaration_substring():
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="")
+    result = render_mermaid.run({"code": "photograph of a graph"}, ctx)
+    assert result.get("ok") is False
+
+
+def test_render_mermaid_accepts_extended_types():
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="")
+    result = render_mermaid.run({"code": "sequenceDiagram\nAlice->>Bob: hi"}, ctx)
+    assert result.get("ok") is True
+
+
 import asyncio
 
 from app.core.stream import StreamBus
