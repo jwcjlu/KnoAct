@@ -58,7 +58,7 @@ def test_audit_lesson_approve(setup_db):
 
 
 def test_extract_document_missing_file_marks_done(setup_db):
-    """无真实 PDF 时提取走兜底：不报错，生词为空，但课文为空也会标记完成。"""
+    """无真实 PDF 时提取：源文件不存在 → 返回 error，lesson 保持 pending（不启动后台任务）。"""
     from app.models import PdfDocument, Lesson
     from app.database import SessionLocal
     s = SessionLocal()
@@ -70,8 +70,8 @@ def test_extract_document_missing_file_marks_done(setup_db):
     s.close()
     resp = _client().post(f"/api/pdf/documents/{did}/extract")
     assert resp.status_code == 200
-    assert resp.json()["extracted"] == 1
+    assert resp.json()["error"] == "源文件不存在"
     s = SessionLocal()
     l = s.query(Lesson).filter_by(document_id=did).first()
-    assert l.extract_status == "done"
+    assert l.extract_status == "pending"
     s.close()
