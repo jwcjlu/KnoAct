@@ -1,0 +1,63 @@
+# ============================================
+# KnoAct 渲染 Sandbox Runner（docker-compose）
+# ============================================
+# 只编排 sandbox runner 这一个服务：独立容器执行 LLM 生成的 manim 代码。
+# 主渲染服务（render_service/app.py）跑在宿主机，通过
+# KNOACT_RENDER_SANDBOX=docker + KNOACT_RENDER_RUNNER_URL=http://localhost:8901
+# 把 manim 命令转发到这里。
+#
+# 安全要点（参照 DeepTutor docker-compose.yml 的 sandbox-runner）：
+#   * no-new-privileges + cap_drop ALL：容器无法提权/获得额外 capability
+#   * read_only rootfs + tmpfs：根文件系统只读，仅 /tmp、/home/runner 可写
+#   * pids_limit / mem_limit：防 fork 炸弹 / 内存耗尽
+#   * 不发布端口到宿主机：仅通过内部网络可达（如需宿主机直连调试，临时加 ports）
+#
+# 启动：
+#   docker compose -f render_service/docker-compose.yml up -d --build
+# ============================================
+
+services:
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: render_service/runner/Dockerfile
+    container_name: knoact-render-runner
+    restart: unless-stopped
+
+    # 只读挂载：manim 产物写回主服务的 media 目录（/outputs 是容器内可写根，
+    # 映射到宿主机 render_service/media，主渲染服务从这里读回 mp4）。
+    volumes:
+      - ./render_service/media:/outputs:rw
+
+    environment:
+      - RUNNER_PORT=8901
+
+    # 不发布端口到宿主机（仅内部网络）。如需宿主机直接调试：
+    # ports:
+    #   - "8901:8901"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/runner
+    pids_limit: 256
+    mem_limit: 2g
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8901/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    networks:
+      - render-net
+
+networks:
+  render-net:
+    driver: bridge

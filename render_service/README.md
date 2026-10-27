@@ -36,8 +36,28 @@ LLM 生成的 manim 代码本质是要执行的 Python 代码。渲染时经 `re
 - `subprocess` —— **APPLICATION 级**（默认）：清洗环境变量（剔除 `DATABASE_URL`/API key
   等敏感值）+ 限定 cwd 到任务目录 + 输出截断。**不做 OS 级隔离**，LLM 代码若主动
   `os.system` 读盘/联网仍可逃逸——与 DeepTutor 对 APPLICATION 级的定位一致。
-- `docker` —— **SYSTEM 级**（后置）：无网络独立容器执行，需 Docker Desktop。
+- `docker` —— **SYSTEM 级**：把 manim 命令转发到独立 runner sidecar 容器执行
+  （无网络 + 非 root + `cap_drop ALL` + 只读根 FS + 只写 media 卷）。
 - `off` —— 拒绝执行未沙箱代码。
 
-生产部署前应落地 `docker` 后端（`--network=none` + 非 root + 只读根 FS + 只写 media），
-并把 `KNOACT_RENDER_SANDBOX=docker`。
+### 启用 docker（SYSTEM 级）沙箱
+
+```bash
+# 1. 构建并启动 runner sidecar 容器（带 manim + ffmpeg + TeX Live 重依赖）
+docker compose -f render_service/docker-compose.yml up -d --build
+
+# 2. 主渲染服务用 docker 后端 + 指向 runner
+KNOACT_RENDER_SANDBOX=docker \
+KNOACT_RENDER_RUNNER_URL=http://localhost:8901 \
+DATABASE_URL="sqlite:///D:/workspace/github/KnoAct/backend/zhixueban.db" \
+  python -m uvicorn render_service.app:app --port 8011
+```
+
+runner 地址由 `KNOACT_RENDER_RUNNER_URL` 指定（默认 `http://localhost:8901`）。
+runner 不可达时**报错而非降级到 subprocess**，避免静默失去隔离。
+
+runner 组件（`render_service/runner/`）：
+- `server.py` —— 纯标准库 HTTP server，`GET /health` + `POST /exec`，唯一执行 manim 的地方。
+- `Dockerfile` —— `python:3.11-slim` + ffmpeg + TeX Live 精简子集 + manim，非 root 用户。
+- `docker-compose.yml` —— 安全加固：`no-new-privileges` + `cap_drop ALL` + `read_only` +
+  tmpfs + `pids_limit`/`mem_limit`，不发布端口，`./render_service/media` 挂载为 `/outputs`。

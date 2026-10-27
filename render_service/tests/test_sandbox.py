@@ -3,7 +3,12 @@ import os
 import subprocess
 import sys
 
-from render_service.sandbox import run_sandboxed, _scrubbed_env
+from render_service.sandbox import (
+    run_sandboxed,
+    _scrubbed_env,
+    _to_container_path,
+    backend,
+)
 
 
 def test_scrubbed_env_drops_sensitive_vars():
@@ -50,3 +55,27 @@ def test_run_sandboxed_refuses_when_off(monkeypatch, tmp_path):
             assert "拒绝执行" in str(e) or "未启用" in str(e)
     finally:
         monkeypatch.delenv("KNOACT_RENDER_SANDBOX", raising=False)
+
+
+def test_to_container_path_translates_media():
+    p = _to_container_path("render_service/media/abc123/_scene.py")
+    assert p == "/outputs/abc123/_scene.py"
+
+
+def test_to_container_path_leaves_non_media():
+    assert _to_container_path("/some/other/path.py") == "/some/other/path.py"
+
+
+def test_docker_backend_unreachable_raises(monkeypatch, tmp_path):
+    """runner 不可达时报错，不静默降级到 subprocess。"""
+    monkeypatch.setenv("KNOACT_RENDER_SANDBOX", "docker")
+    monkeypatch.setenv("KNOACT_RENDER_RUNNER_URL", "http://127.0.0.1:1")
+    try:
+        try:
+            run_sandboxed([sys.executable, "-c", "pass"], cwd=str(tmp_path), timeout=3)
+            assert False, "should have raised"
+        except RuntimeError as e:
+            assert "runner 不可达" in str(e)
+    finally:
+        monkeypatch.delenv("KNOACT_RENDER_SANDBOX", raising=False)
+        monkeypatch.delenv("KNOACT_RENDER_RUNNER_URL", raising=False)

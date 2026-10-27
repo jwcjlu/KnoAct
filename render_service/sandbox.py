@@ -4,21 +4,21 @@
 
 - ``subprocess`` —— 受限 subprocess（APPLICATION 级）：清洗环境变量 + 限定 cwd +
   资源限额。本机 Windows / 本地 dev 的默认。
-- ``docker`` —— SYSTEM 级：跑在无网络独立容器（后置，需 Docker Desktop）。
+- ``docker`` —— SYSTEM 级：转发到独立 runner sidecar 容器（无网络 + 非 root +
+  cap_drop ALL + read_only rootfs），由 :mod:`render_service.runner.server` 执行。
 - ``off`` —— 禁用渲染（默认不执行未沙箱代码）。
 
-后端由环境变量 ``KNOACT_RENDER_SANDBOX`` 选择；未设置时默认 ``subprocess``
-（本地 dev 的 APPLICATION 隔离，不提供 OS 级防护——LLM 代码若主动
-``os.system`` 读盘/联网仍可逃逸，与 DeepTutor 对 APPLICATION 级的定位一致）。
+后端由环境变量 ``KNOACT_RENDER_SANDBOX`` 选择；未设置时默认 ``subprocess``。
 
-SYSTEM 级隔离（docker）作为后置部署选项，落地后把默认值切到 ``docker``。
+docker 后端通过 ``KNOACT_RENDER_RUNNER_URL`` 指定 runner 地址（默认
+``http://localhost:8901``）。runner 未连上时**报错而非降级到 subprocess**——
+否则就静默退回了不隔离的执行，违背沙箱目的。
 """
 from __future__ import annotations
 
+import json
 import os
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 # 只透传这些环境变量给被执行的代码，杜绝 LLM 代码读到 DATABASE_URL / API key
@@ -31,6 +31,8 @@ SAFE_ENV_KEYS = (
 )
 
 _SANDBOX_ENV = "KNOACT_RENDER_SANDBOX"
+_RUNNER_URL_ENV = "KNOACT_RENDER_RUNNER_URL"
+_DEFAULT_RUNNER_URL = "http://localhost:8901"
 
 
 def backend() -> str:
@@ -43,6 +45,75 @@ def _scrubbed_env() -> dict[str, str]:
     return {key: os.environ[key] for key in SAFE_ENV_KEYS if key in os.environ}
 
 
+def _runner_url() -> str:
+    return os.environ.get(_RUNNER_URL_ENV, _DEFAULT_RUNNER_URL).strip().rstrip("/")
+
+
+# 宿主机 media 目录（与 pipeline.MEDIA_DIR 一致），docker 后端把其中的宿主路径
+# 翻译成容器内的 /outputs 挂载路径。
+_MEDIA_DIR = Path(__file__).resolve().parent / "media"
+_OUTPUTS = "/outputs"
+
+
+def _to_container_path(host_path: str) -> str:
+    """把宿主机 media 目录下的路径翻译成容器内 /outputs 下的路径。
+
+    不在 media 目录下的路径原样返回（通常不该发生，仅容错）。
+    """
+    try:
+        rel = Path(host_path).resolve().relative_to(_MEDIA_DIR.resolve())
+    except ValueError:
+        return host_path
+    return str(Path(_OUTPUTS) / rel).replace("\\", "/")
+
+
+def _run_via_runner(
+    argv: list[str],
+    *,
+    cwd: str,
+    timeout: int,
+    max_output_chars: int,
+) -> subprocess.CompletedProcess:
+    """SYSTEM 级隔离：把命令转发到 runner sidecar 容器执行（HTTP /exec）。
+
+    把 argv 与 workdir 里的 media 宿主路径翻译成容器内 /outputs 路径。
+    """
+    import requests
+
+    argv_c = [_to_container_path(a) for a in argv]
+    workdir_c = _to_container_path(cwd)
+
+    payload = {
+        "argv": argv_c,
+        "workdir": workdir_c,
+        "env": _scrubbed_env(),
+        "limits": {"timeout_s": timeout, "max_output_chars": max_output_chars},
+    }
+    try:
+        resp = requests.post(
+            f"{_runner_url()}/exec", json=payload, timeout=timeout + 15
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        # runner 不可达：报错而非降级到 subprocess（否则静默失去隔离）
+        raise RuntimeError(f"docker 沙箱 runner 不可达：{type(exc).__name__}: {exc}")
+
+    if data.get("error"):
+        # runner 自身失败（坏请求/spawn 错误）
+        return subprocess.CompletedProcess(
+            argv, 1, stdout=data.get("stdout", ""), stderr=data.get("error", "")
+        )
+
+    exit_code = int(data.get("exit_code", 0))
+    return subprocess.CompletedProcess(
+        argv,
+        exit_code,
+        stdout=data.get("stdout", "") or "",
+        stderr=data.get("stderr", "") or "",
+    )
+
+
 def run_sandboxed(
     argv: list[str],
     *,
@@ -53,21 +124,21 @@ def run_sandboxed(
     """在受限沙箱里执行命令。
 
     - ``subprocess`` 后端：清洗环境变量 + 限定 cwd + 截断输出（APPLICATION 级）。
-    - ``docker`` / ``off``：见 :func:`backend`，docker 落地前视为 off。
+    - ``docker`` 后端：转发到 runner sidecar 容器（SYSTEM 级）。
+    - ``off``：拒绝执行。
 
     返回 CompletedProcess（与 subprocess.run 兼容）。调用方按 returncode 判断成败。
     """
     mode = backend()
-    if mode in ("off", "docker"):
-        # off：拒绝执行；docker 尚未落地，暂按 off 处理（避免裸跑脏代码）
-        raise RuntimeError(f"渲染沙箱后端 {mode!r} 未启用，拒绝执行未沙箱代码")
+    if mode == "off":
+        raise RuntimeError("渲染沙箱后端 'off'，拒绝执行未沙箱代码")
+    if mode == "docker":
+        return _run_via_runner(
+            argv, cwd=cwd, timeout=timeout, max_output_chars=max_output_chars
+        )
 
     # subprocess 后端：清洗 env + 限定 cwd
     env = _scrubbed_env()
-    if mode == "docker":
-        # 占位：将来走 RunnerSidecarBackend 式 HTTP 转发，不在本机裸跑
-        raise RuntimeError("docker 沙箱后端尚未实现")
-
     try:
         proc = subprocess.run(
             argv,
