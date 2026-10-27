@@ -27,3 +27,32 @@ def test_capability_manifest_fields():
     assert m.name == "chat"
     assert m.stages == ["thinking"]
     assert m.tools_used == ["lookup_word"]
+
+
+from app.capabilities.chat import ChatCapability, VisualizeCapability, SolveCapability
+from app.capabilities.registry import CapabilityRegistry
+
+
+def test_chat_manifest():
+    assert ChatCapability().name == "chat"
+    assert "lookup_word" in ChatCapability().manifest.tools_used
+
+
+def test_visualize_uses_render_mermaid():
+    assert "render_mermaid" in VisualizeCapability().manifest.tools_used
+
+
+def test_solve_system_prompt_is_stepwise():
+    assert "分步骤" in SolveCapability().system_prompt
+
+
+def test_registry_routes_mode():
+    reg = CapabilityRegistry()
+    assert isinstance(reg.get("chat"), ChatCapability)
+    assert isinstance(reg.get("visualize"), VisualizeCapability)
+    assert isinstance(reg.get("solve"), SolveCapability)
+
+
+def test_registry_unknown_mode_falls_back_to_chat():
+    reg = CapabilityRegistry()
+    assert isinstance(reg.get("nope"), ChatCapability)
