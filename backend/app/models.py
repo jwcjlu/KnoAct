@@ -243,3 +243,32 @@ class KnowledgeMastery(Base):
     mastered: Mapped[bool] = mapped_column(Boolean, default=False)
     next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Turn(Base):
+    """一次 agent turn：一个提问 → 一次多步工具循环 → 最终答案。"""
+    __tablename__ = "turns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)
+    capability: Mapped[str] = mapped_column(String(32))   # chat | visualize | solve
+    mode: Mapped[str] = mapped_column(String(16))          # 冗余存原始 mode
+    question: Mapped[str] = mapped_column(TextCls)
+    context: Mapped[str] = mapped_column(TextCls, default="")
+    status: Mapped[str] = mapped_column(String(16), default="running")  # running|done|error
+    final_answer: Mapped[str] = mapped_column(TextCls, default="")
+    citations: Mapped[str] = mapped_column(TextCls, default="[]")  # JSON 数组文本
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+
+class ToolCall(Base):
+    """一次 turn 内的一次工具调用（含 args + result，可 replay）。"""
+    __tablename__ = "tool_calls"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    turn_id: Mapped[int] = mapped_column(ForeignKey("turns.id"))
+    step: Mapped[int] = mapped_column(Integer)
+    tool_name: Mapped[str] = mapped_column(String(64))
+    args: Mapped[str] = mapped_column(TextCls, default="{}")   # JSON 文本
+    result: Mapped[str] = mapped_column(TextCls, default="{}")  # JSON 文本
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
