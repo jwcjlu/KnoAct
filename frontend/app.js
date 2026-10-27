@@ -128,6 +128,7 @@ const vizDemo = {
 let excerpt = '', answer = '', question = '';
 let chatMessages = [];  // 沉浸页对话记录 [{role:'user'|'ai', text, citations, mode}]
 let chatBusy = false;   // 是否正在等待 AI 回复
+let thinkingText = '正在思考…';   // 流式期间显示的占位文案
 let navOpen = true;     // 沉浸页左栏目录开关
 let chatOpen = true;    // 沉浸页右栏对话开关
 let navWidth = readPanelWidth('nav', 200);   // 左栏目录宽度（可拖拽）
@@ -1955,21 +1956,63 @@ async function chatAsk(preset){
   const q = (preset || question || '').trim();
   if(!q || chatBusy) return;
   const ctx = excerpt && excerpt.trim() ? excerpt.trim() : currentText;
-  // 追加用户消息
   chatMessages.push({role:'user', text:q});
   question = '';
   chatBusy = true;
+  thinkingText = '正在思考…';
   renderImmersiveChat();
   const body = {lesson_id:currentLessonId, question:q, context:ctx, mode:chatMode, sentences: splitSentences(ctx)};
   if(chatModel) body.model = chatModel;
+
   try{
-    const d = await api('/api/ask', {method:'POST', body});
-    chatMessages.push({role:'ai', text:d.answer || '（暂无回答）', citations:d.citations || [], mode:d.mode || chatMode});
+    const resp = await fetch(API + '/api/ask/stream', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while(true){
+      const {done, value} = await reader.read();
+      if(done) break;
+      buf += decoder.decode(value, {stream:true});
+      let idx;
+      while((idx = buf.indexOf('\n\n')) >= 0){
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const line = chunk.split('\n').find(l=>l.startsWith('data: '));
+        if(!line) continue;
+        try{
+          const evt = JSON.parse(line.slice(6));
+          handleStreamEvent(evt);
+        }catch(e){ /* 跳过坏事件 */ }
+      }
+    }
   }catch(err){
     chatMessages.push({role:'ai', text:'抱歉，回答出错了，请稍后再试。', citations:[], mode:chatMode});
   }
   chatBusy = false;
+  thinkingText = '正在思考…';
   renderImmersiveChat();
+}
+
+function updateThinking(text){
+  thinkingText = text;
+  renderImmersiveChat();
+}
+
+function handleStreamEvent(evt){
+  if(evt.type === 'tool_call'){
+    updateThinking(`正在${toolLabel(evt.data.tool)}…`);
+  } else if(evt.type === 'final'){
+    const d = evt.data;
+    chatMessages.push({role:'ai', text:d.answer || '（暂无回答）', citations:d.citations || [], mode:d.mode || chatMode});
+    renderImmersiveChat();
+  }
+}
+
+function toolLabel(name){
+  return {lookup_word:'查词', search_text:'检索原文', render_mermaid:'画图'}[name] || '思考';
 }
 // 只原地刷新沉浸页对话面板（不重挂载 PDF 阅读器）
 function renderImmersiveChat(){
@@ -1985,7 +2028,7 @@ function renderImmersiveChat(){
       }).join('')
     : `<div class="im-empty"><div class="mark">${welcomeMark()}</div><div class="big">边读边问，随时解惑</div><div class="hint">选中正文里任意一段，就能追问、解释或翻译它；AI 的回答会指明出自原文的哪一处。</div></div>`;
   const cards = quizCardHtml() + askCardHtml();
-  if(chatBusy) list += `<div class="im-msg ai"><div class="bubble" style="color:#aab1ab">正在思考…</div></div>`;
+  if(chatBusy) list += `<div class="im-msg ai"><div class="bubble" style="color:#aab1ab">${escapeAttr(thinkingText)}</div></div>`;
   body.innerHTML = list + cards;
   body.scrollTop = body.scrollHeight;
   renderMermaids(body);
