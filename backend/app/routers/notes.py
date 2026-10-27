@@ -66,7 +66,7 @@ async def ask_stream(req: AskReq, db: Session = Depends(get_db)):
 async def _event_stream(ctx: UnifiedContext):
     from ..core.stream import StreamBus
     from ..capabilities.registry import CapabilityRegistry
-    from ..runtime.orchestrator import extract_citations, filter_citations, persist_turn
+    from ..runtime.orchestrator import extract_citations, filter_citations, persist_turn, extract_render_task_id
 
     registry = CapabilityRegistry()
     capability = registry.get(ctx.mode)
@@ -90,7 +90,12 @@ async def _event_stream(ctx: UnifiedContext):
         if event.type == "final":
             answer = event.data.get("answer", "")
             citations = filter_citations(extract_citations(answer), len(ctx.sentences))
-            return _sse("final", {"answer": answer, "citations": citations, "mode": ctx.mode})
+            return _sse("final", {
+                "answer": answer,
+                "citations": citations,
+                "mode": ctx.mode,
+                "render_task_id": extract_render_task_id(results_by_step),
+            })
         return _sse(event.type, event.data)
 
     try:

@@ -29,12 +29,25 @@ async def route_to_capability(ctx: UnifiedContext) -> dict:
     citations = filter_citations(extract_citations(answer), len(ctx.sentences))
 
     persist_turn(ctx, capability.name, answer, citations, tool_events, results_by_step)
-    return {"answer": answer, "citations": citations, "mode": ctx.mode}
+    return {
+        "answer": answer,
+        "citations": citations,
+        "mode": ctx.mode,
+        "render_task_id": extract_render_task_id(results_by_step),
+    }
 
 
 def extract_citations(answer: str) -> list[int]:
     import re
     return sorted(set(int(n) for n in re.findall(r"第\s*(\d+)\s*句", answer)))
+
+
+def extract_render_task_id(results_by_step: dict[int, dict]) -> str:
+    """从 tool_result 里找 render_manim 返回的 task_id。"""
+    for result in results_by_step.values():
+        if isinstance(result, dict) and result.get("task_id"):
+            return result["task_id"]
+    return ""
 
 
 def filter_citations(citations: list[int], max_n: int) -> list[int]:
