@@ -274,3 +274,19 @@ class ToolCall(Base):
     args: Mapped[str] = mapped_column(TextCls, default="{}")   # JSON 文本
     result: Mapped[str] = mapped_column(TextCls, default="{}")  # JSON 文本
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RenderTask(Base):
+    """一次 manim 动画渲染任务（提交给独立渲染服务）。"""
+    __tablename__ = "render_tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    turn_id: Mapped[int] = mapped_column(ForeignKey("turns.id"), nullable=True)
+    prompt: Mapped[str] = mapped_column(TextCls, default="")
+    narration: Mapped[str] = mapped_column(TextCls, default="")
+    status: Mapped[str] = mapped_column(String(16), default="submitted")
+    video_url: Mapped[str] = mapped_column(String(255), default="")
+    error: Mapped[str] = mapped_column(TextCls, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

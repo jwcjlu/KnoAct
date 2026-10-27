@@ -85,3 +85,5 @@ class RenderMermaidTool(BaseTool):
 lookup_word = LookupWordTool()
 search_text = SearchTextTool()
 render_mermaid = RenderMermaidTool()
+
+from .render_manim_tool import render_manim

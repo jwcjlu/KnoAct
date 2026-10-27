@@ -5,9 +5,10 @@ from ..core.stream import StreamBus, StreamEvent
 from ..runtime.turn_engine import TurnEngine
 from ..tools.registry import ToolRegistry
 from ..tools.builtin import lookup_word, search_text, render_mermaid
+from ..tools.render_manim_tool import render_manim
 
 
-ALL_TOOLS = {"lookup_word": lookup_word, "search_text": search_text, "render_mermaid": render_mermaid}
+ALL_TOOLS = {"lookup_word": lookup_word, "search_text": search_text, "render_mermaid": render_mermaid, "render_manim": render_manim}
 
 
 class AgenticChatCapability(TurnCapability):
@@ -64,7 +65,7 @@ class VisualizeCapability(AgenticChatCapability):
         "当孩子提问适合用图表达时，调用 render_mermaid 工具画图，图下方再用一两句小学生能懂的话解释。"
         "如果不适合画图，就直接用通俗的话解答。"
     )
-    tools = ["render_mermaid", "search_text"]
+    tools = ["render_mermaid", "render_manim", "search_text"]
 
 
 class SolveCapability(AgenticChatCapability):
