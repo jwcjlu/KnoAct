@@ -115,28 +115,14 @@ def review_submit(req: ReviewSubmitReq, db: Session = Depends(get_db)):
 
 @router.get("/api/listening/material")
 def listening_material(user_id: int, db: Session = Depends(get_db)):
-    provider = get_provider(db)
-    try:
-        text = provider.generate(
-            prompt='用小学生已学单词编一段 3 句的英语对话，并出 1 道理解题。'
-                   '只返回 JSON，格式：{"dialogue":"对话内容","question":"题目","answer":"答案"}',
-            system="你是英语老师。",
-            json_mode=True,
-        )
-        import json as _json
-        try:
-            data = _json.loads(text)
-        except Exception:
-            # 兜底：尝试用 || 切分（旧格式）
-            stem, _, ans = text.partition("||")
-            return {"text": stem.strip(), "questions": [{"question": ans.strip(), "answer": ans.strip()}]}
-        dialogue = (data.get("dialogue") or "").strip()
-        question = (data.get("question") or "").strip()
-        answer = (data.get("answer") or "").strip()
-        return {"text": dialogue, "questions": [{"question": question, "answer": answer}]}
-    except Exception:
-        text = "A: What can you do? B: I can sing."
-        return {"text": text, "questions": [{"question": "对话里 B 会做什么？", "answer": "唱歌"}]}
+    from ..tools.generation import generate_listening
+    from ..core.context import UnifiedContext
+    ctx = UnifiedContext(user_id=user_id, lesson_id=0, question="")
+    result = generate_listening.run({}, ctx)
+    return {
+        "text": result["dialogue"],
+        "questions": [{"question": result["question"], "answer": result["answer"]}],
+    }
 
 @router.get("/api/reading/material")
 def reading_material(lesson_id: int, db: Session = Depends(get_db)):
