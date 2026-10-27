@@ -70,6 +70,24 @@ def _gen_review(db, lesson, count):
     )
 
 
+def _gen_listening(db, lesson):
+    words = [w.word for w in db.query(WordBank).filter_by(lesson_id=lesson.id).all()]
+    kps = [p.content for p in db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).all()]
+    if not words:
+        return None
+    from ..tools.generation import generate_listening
+    from ..core.context import UnifiedContext
+    ctx = UnifiedContext(user_id=0, lesson_id=lesson.id, question="")
+    result = generate_listening.run({"words": words, "knowledge_points": kps}, ctx)
+    return Task(
+        task_type="listening", subject=lesson.subject, title="英语听力练习",
+        detail=f"基于 {len(words)} 个已学生词",
+        content=json.dumps(result, ensure_ascii=False),
+        points=15,
+        content_status="published",
+    )
+
+
 def generate_tasks_for_user(db: Session, user_id: int, day: date):
     """为单个孩子生成当天两科任务。幂等：同 (user_id, subject, date) 已存在则跳过。"""
     subjects = ["语文", "英语"]
@@ -83,9 +101,12 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date):
         n_dict = _default_count(db, "task_dictation_count", 15)
         n_know = _default_count(db, "task_knowledge_count", 5)
         n_review = _default_count(db, "task_review_count", 15)
-        for gen in (_gen_dictation(db, lesson, n_dict),
-                    _gen_knowledge(db, lesson, n_know),
-                    _gen_review(db, lesson, n_review)):
+        gens = [_gen_dictation(db, lesson, n_dict),
+                _gen_knowledge(db, lesson, n_know),
+                _gen_review(db, lesson, n_review)]
+        if subject == "英语":
+            gens.append(_gen_listening(db, lesson))
+        for gen in gens:
             if gen is not None:
                 gen.user_id = user_id
                 gen.date = day

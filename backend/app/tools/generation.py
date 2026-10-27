@@ -27,13 +27,22 @@ class GenerateListeningTool(BaseTool):
 
     def run(self, args, ctx: UnifiedContext) -> dict:
         provider = _get_provider()
+        words = args.get("words") or []
+        kps = args.get("knowledge_points") or []
         try:
-            text = provider.generate(
-                prompt='用小学生已学单词编一段 3 句的英语对话，并出 1 道理解题。'
-                       '只返回 JSON，格式：{"dialogue":"对话内容","question":"题目","answer":"答案"}',
-                system="你是英语老师。",
-                json_mode=True,
-            )
+            if words or kps:
+                word_s = "、".join(words)
+                kp_s = "、".join(kps)
+                prompt = (
+                    f"用以下已学单词编一段 3 句的英语对话，并出 1 道理解题。\n"
+                    f"已学单词：{word_s}\n"
+                    f"知识点：{kp_s}\n"
+                    '只返回 JSON，格式：{"dialogue":"对话内容","question":"题目","answer":"答案"}'
+                )
+            else:
+                prompt = ('用小学生已学单词编一段 3 句的英语对话，并出 1 道理解题。'
+                          '只返回 JSON，格式：{"dialogue":"对话内容","question":"题目","answer":"答案"}')
+            text = provider.generate(prompt=prompt, system="你是英语老师。", json_mode=True)
             data = json.loads(text)
             return {
                 "dialogue": (data.get("dialogue") or "").strip(),
