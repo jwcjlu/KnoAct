@@ -8,15 +8,29 @@ import re
 from sqlalchemy.orm import Session
 
 from .ai import get_provider
-from .pdf_split import _page_text, SUBJECT_RULES
+from .pdf_split import _page_text, _is_scanned, _ocr_page, SUBJECT_RULES
 
 
-def _extract_words_fallback(pdf_path: str, start_page: int, end_page: int, subject: str) -> list[dict]:
-    """无 AI 时兜底：从页面文本中按「生词表/单词表」标记后的行提取词条。"""
+def _lesson_texts(pdf_path: str, start_page: int, end_page: int, db=None) -> str:
+    """抽取一课页码范围的文本。文本型直接读；扫描版逐页 OCR（db 提供时）。"""
     texts = _page_text(pdf_path)
     if not texts:
+        return ""
+    if _is_scanned(texts) and db is not None:
+        parts = []
+        for i in range(start_page - 1, min(end_page, len(texts))):
+            t = _ocr_page(pdf_path, i, db, "识别图片中的全部文字，原样输出，不要解释。")
+            if t:
+                parts.append(t)
+        return "\n".join(parts)
+    return "\n".join(texts[start_page - 1:end_page])
+
+
+def _extract_words_fallback(pdf_path: str, start_page: int, end_page: int, subject: str, db=None) -> list[dict]:
+    """无 AI 时兜底：从页面文本中按「生词表/单词表」标记后的行提取词条。"""
+    block = _lesson_texts(pdf_path, start_page, end_page, db)
+    if not block:
         return []
-    block = "\n".join(texts[start_page - 1:end_page])
     words = []
     for line in block.splitlines():
         line = line.strip()
@@ -34,11 +48,10 @@ def _extract_words_fallback(pdf_path: str, start_page: int, end_page: int, subje
     return words
 
 
-def _extract_text_fallback(pdf_path: str, start_page: int, end_page: int) -> str:
-    texts = _page_text(pdf_path)
-    if not texts:
+def _extract_text_fallback(pdf_path: str, start_page: int, end_page: int, db=None) -> str:
+    block = _lesson_texts(pdf_path, start_page, end_page, db).strip()
+    if not block:
         return ""
-    block = "\n".join(texts[start_page - 1:end_page]).strip()
     # 取前几段作为课文正文（截断到 500 字）
     body = re.sub(r"\n{2,}", "\n", block)
     return body[:500]
@@ -53,22 +66,29 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
     provider = get_provider(db)
     has_real = provider.name != "fake"
 
+    # 从 PDF 抽取本课真实页面文本，作为提取的上下文（否则 AI 凭空编造，生词/知识点对不上教材）
+    page_block = _lesson_texts(pdf_path, start_page, end_page, db)[:3000]
+
     if has_real:
         pages = f"第 {start_page}–{end_page} 页"
         if rules["has_word_bank"]:
             prompt = (
-                f"你正在为一本「{subject}」教材的第 {pages} 拆课。请提取：\n"
-                f"1) 生词/单词表（每行：词|{rules['word_extra']}）\n"
-                f"2) 本课知识点（每行一个）\n"
-                f"3) 课文正文（原文，最多 300 字）\n"
-                f"用三段输出，分别以「生词：」「知识点：」「课文：」开头。"
+                f"你正在为一本「{subject}」教材的第 {pages} 拆课。下面是这一课的原文（可能含目录残留、页码、插图文字，请忽略无关内容）。\n"
+                f"请严格基于原文提取：\n"
+                f"1) 生词/单词表（每行：词|{rules['word_extra']}），只收原文中真实出现的生词\n"
+                f"2) 本课知识点（每行一个，来自课文涉及的字词、句式、语法点）\n"
+                f"3) 课文正文（原文照抄，最多 300 字）\n"
+                f"用三段输出，分别以「生词：」「知识点：」「课文：」开头。\n\n"
+                f"原文：\n{page_block}"
             )
         else:
             prompt = (
-                f"你正在为一本「{subject}」教材的第 {pages} 拆课。请提取：\n"
+                f"你正在为一本「{subject}」教材的第 {pages} 拆课。下面是这一课的原文（可能含目录残留、页码，请忽略）。\n"
+                f"请严格基于原文提取：\n"
                 f"1) 本课知识点（每行一个）\n"
-                f"2) 正文内容（最多 300 字）\n"
-                f"用两段输出，分别以「知识点：」「课文：」开头。"
+                f"2) 正文内容（原文照抄，最多 300 字）\n"
+                f"用两段输出，分别以「知识点：」「课文：」开头。\n\n"
+                f"原文：\n{page_block}"
             )
         try:
             raw = provider.generate(prompt=prompt, system="你是教材拆解助手，只输出提取结果，不要解释。")
@@ -78,8 +98,8 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
         except Exception:
             pass  # AI 失败回退兜底
 
-    words = _extract_words_fallback(pdf_path, start_page, end_page, subject) if rules["has_word_bank"] else []
-    text = _extract_text_fallback(pdf_path, start_page, end_page)
+    words = _extract_words_fallback(pdf_path, start_page, end_page, subject, db) if rules["has_word_bank"] else []
+    text = _extract_text_fallback(pdf_path, start_page, end_page, db)
     return {"words": words, "points": [], "text": text}
 
 

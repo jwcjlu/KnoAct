@@ -18,3 +18,9 @@ venv/
 
 # Render service generated media (mp4 output)
 render_service/media/
+
+# Uploaded PDFs + rendered page images (runtime artifacts)
+backend/uploads/
+
+# pdf.js 下载临时清单（本地化后无引用）
+pdfjs_files_tmp.json
