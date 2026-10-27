@@ -86,10 +86,17 @@ class TurnEngine:
     async def _forced_finish(self, ctx: UnifiedContext, history: list[dict], stream: StreamBus) -> dict:
         # 把历史交给 LLM 求 final；失败则返回友好文案
         try:
+            context_part = f"教材上下文：{ctx.text or '（无）'}\n"
+            history_part = (
+                "之前的工具结果如下：\n" + "\n".join(json.dumps(h, ensure_ascii=False) for h in history)
+                if history else ""
+            )
             prompt = (
+                f"{context_part}"
                 f"孩子提问：{ctx.question}\n"
-                "之前的工具结果如下，请直接给出最终回答（不要再调工具）：\n"
-                + "\n".join(json.dumps(h, ensure_ascii=False) for h in history)
+                f"{history_part}\n"
+                "请只基于上面的教材上下文和工具结果直接给出最终回答（不要再调工具），"
+                "不要编造教材里没有的内容。"
             )
             raw = await asyncio.to_thread(self.provider.generate, prompt, self._system(ctx), True)
             data = self._parse(raw)

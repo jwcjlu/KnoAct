@@ -169,3 +169,19 @@ def test_turn_engine_uses_custom_system_prompt():
     # system prompt 是 generate 的第二个位置参数，这里通过检查第二次生成调用来验证太复杂；
     # 改为直接验证 _system 方法
     assert "自定义提示词XYZ" in engine._system(ctx)
+
+
+def test_forced_finish_prompt_includes_context_and_no_fabrication():
+    provider = ScriptedProvider(["not json", '{"final_answer": "白鹭是精巧的诗"}'])
+    reg = ToolRegistry()
+    reg.register(lookup_word)
+    engine = TurnEngine(provider=provider, registry=reg)
+    bus = StreamBus()
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="?", text="白鹭是一首精巧的诗。")
+    asyncio.run(engine.run(ctx, bus))
+    # 第一次调用解析失败 → _forced_finish 第二次调用
+    assert len(provider.calls) == 2
+    forced_prompt = provider.calls[1]
+    assert "教材上下文" in forced_prompt
+    assert "白鹭是一首精巧的诗" in forced_prompt
+    assert "不要编造" in forced_prompt
