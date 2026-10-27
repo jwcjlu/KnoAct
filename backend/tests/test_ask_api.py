@@ -49,3 +49,23 @@ def test_ask_api_persists_turn(setup_db):
     assert turn.final_answer != ""          # _persist 写入了答案
     assert turn.status in ("done", "error")  # _persist 写入了状态
     db.close()
+
+
+from app.runtime.orchestrator import _extract_citations, _filter_citations
+
+
+def test_filter_citations_removes_out_of_range():
+    citations = [1, 5, 2]
+    assert _filter_citations(citations, 3) == [1, 2]
+
+
+def test_filter_citations_no_filter_when_max_zero():
+    citations = [1, 5, 2]
+    assert _filter_citations(citations, 0) == [1, 5, 2]
+
+
+def test_extract_and_filter_roundtrip():
+    answer = "答案……[第1句]……[第5句]……[第2句]"
+    citations = _extract_citations(answer)
+    filtered = _filter_citations(citations, 3)
+    assert filtered == [1, 2]
