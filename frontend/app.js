@@ -75,6 +75,11 @@ let confirmDocId = null;
 let knowledgeRows = [];
 let goalRows = [];
 let reportRows = [];
+let masteryReport = null;
+async function loadMasteryReport(){
+  masteryReport = await api(`/api/mastery/report?user_id=${uid}`);
+  return masteryReport;
+}
 let configMap = {};
 let aiConfig = {provider:'deepseek', model:'deepseek-chat', key:'', baseUrl:''};
 let aiModelOptions = [];  // 中转站拉取到的动态模型列表
@@ -2130,7 +2135,7 @@ function setParentTab(t){
   if(t==='知识点') loadKnowledge();
   if(t==='题目') loadQuestionData().then(()=>render());
   if(t==='目标') loadGoals();
-  if(t==='报告') loadReport();
+  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
   render();
@@ -2576,6 +2581,22 @@ function renderReportTab(){
         <div style="font-size:13px;color:var(--gray2);margin-bottom:16px">近 30 天错误频率（知识点级）</div>
         <div class="weak-list">${rows || '<p style="font-size:13px;color:var(--gray2)">暂无错误记录</p>'}</div>
         <p style="margin-top:16px;font-size:12px;color:#8e9691">形近字混淆是当前最薄弱的环节，AI 会相应提高相关生词的复习频率。</p>
+      </div>
+    </div>
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic purple">${icon('brain',20)}</div>
+        <div><h3>掌握度报告</h3><div class="sub">知识点掌握情况（按答题记录计算）</div></div></div>
+      <div class="bd">
+        <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px">
+          <span style="font-size:13px;color:var(--gray2)">已掌握 <b style="color:var(--green2)">${masteryReport?.mastered||0}</b> ·
+          薄弱 <b style="color:var(--orange2)">${masteryReport?.weak||0}</b> · 共 ${masteryReport?.total||0}</span>
+        </div>
+        ${(masteryReport?.rows||[]).map(r=>`
+          <div class="weak-row">
+            <span class="w-name">${escapeAttr(r.category)} · ${escapeAttr(r.title)}</span>
+            <div class="w-bar"><div class="w-fill" style="width:${Math.round(r.mastery*100)}%;background:${r.mastered?'var(--green2)':'var(--orange2)'}"></div></div>
+            <span class="w-val">${r.mastered?'✓ ':''}${Math.round(r.mastery*100)}%</span>
+          </div>`).join('') || '<p style="font-size:13px;color:var(--gray2)">暂无掌握度记录</p>'}
       </div>
     </div>
   </div>`;

@@ -45,3 +45,16 @@ def test_mastery_record_endpoint(setup_db):
     })
     assert r.status_code == 200
     assert r.json()["mastery"] == 0.5
+
+
+def test_mastery_report_counts(setup_db):
+    uid, kpid = _seed()
+    db = SessionLocal()
+    record_attempt(db, uid, "knowledge", kpid, True)
+    db.close()
+    r = client.get(f"/api/mastery/report?user_id={uid}&subject=语文")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] >= 1
+    assert data["mastered"] + data["weak"] >= 1
+    assert len(data["rows"]) >= 1
