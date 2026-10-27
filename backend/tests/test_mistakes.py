@@ -56,3 +56,28 @@ def test_mark_correct_without_id_uses_legacy_threshold(setup_db):
     client.post(f"/api/mistakes/{mid}/correct")
     r3 = client.post(f"/api/mistakes/{mid}/correct").json()
     assert r3["removed"] is True    # 旧逻辑：连续 3 次
+
+
+def test_record_quiz_mistake_dedup(setup_db):
+    from app.services.quiz import record_quiz_mistake
+    uid, wbid = _seed()
+    db = SessionLocal()
+
+    record_quiz_mistake(db, uid, "作者把白鹭比作什么？", "一幅画", "一首诗", kp_id=None)
+    record_quiz_mistake(db, uid, "作者把白鹭比作什么？", "一幅画", "一首诗", kp_id=None)
+
+    rows = db.query(Mistake).filter_by(user_id=uid, question="作者把白鹭比作什么？").all()
+    assert len(rows) == 1          # 去重
+    assert rows[0].mistake_count == 2  # 累加
+    db.close()
+
+
+def test_record_quiz_mistake_distinct_kp_separate(setup_db):
+    from app.services.quiz import record_quiz_mistake
+    uid, wbid = _seed()
+    db = SessionLocal()
+    record_quiz_mistake(db, uid, "Q", "A", "B", kp_id=1)
+    record_quiz_mistake(db, uid, "Q", "A", "B", kp_id=2)
+    rows = db.query(Mistake).filter_by(user_id=uid, question="Q").all()
+    assert len(rows) == 2  # 不同 kp_id 不合并
+    db.close()

@@ -79,6 +79,18 @@ def quiz_submit(req: QuizSubmitReq, db: Session = Depends(get_db)):
             kpid = q.get("knowledge_point_id")
             if kpid is not None:
                 record_mastery(db, quiz.user_id, "knowledge", kpid, r["is_correct"])
+    if quiz.user_id:
+        from ..services.quiz import record_quiz_mistake
+        for q, r in zip(questions, results):
+            if r["is_correct"]:
+                continue
+            sel = next((a.get("selected_index") for a in req.answers
+                        if a.get("question_id") == q["id"]), None)
+            your = (q["choices"][sel]
+                    if isinstance(sel, int) and 0 <= sel < len(q["choices"]) else "")
+            correct = q["choices"][q["correct_index"]]
+            record_quiz_mistake(db, quiz.user_id, q["prompt"], your, correct,
+                                q.get("knowledge_point_id"))
     score = sum(1 for r in results if r["is_correct"])
     quiz.score = score
     db.commit()

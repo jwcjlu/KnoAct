@@ -124,3 +124,24 @@ def grade_answers(questions: list[dict], answers: list[dict]) -> list[dict]:
         out.append({"question_id": a["question_id"],
                     "is_correct": selected == q["correct_index"]})
     return out
+
+
+def record_quiz_mistake(db: Session, user_id: int, question: str,
+                        your_answer: str, correct_answer: str,
+                        kp_id: int | None = None) -> None:
+    """测验答错收错题本，按 (user_id, kp_id, question) 去重累加。"""
+    from ..models import Mistake
+    q = db.query(Mistake).filter_by(user_id=user_id, question=question)
+    if kp_id is not None:
+        q = q.filter_by(knowledge_point_id=kp_id)
+    existing = q.first()
+    if existing:
+        existing.mistake_count += 1
+        existing.consecutive_correct = 0
+    else:
+        db.add(Mistake(
+            user_id=user_id, source_type="reading",
+            question=question, your_answer=your_answer,
+            correct_answer=correct_answer, knowledge_point_id=kp_id,
+        ))
+    db.commit()
