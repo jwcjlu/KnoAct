@@ -38,7 +38,7 @@ class LookupWordTool(BaseTool):
             finally:
                 db.close()
         except Exception:
-            meaning = f"「{word}」的释义（示例）"
+            return {"word": word, "meaning": "", "error": "释义暂不可用"}
         return {"word": word, "meaning": meaning}
 
 

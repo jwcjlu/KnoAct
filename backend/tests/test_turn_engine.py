@@ -65,6 +65,18 @@ def test_lookup_word_returns_meaning():
     assert "meaning" in result
 
 
+def test_lookup_word_error_path_returns_error_not_fake_meaning(monkeypatch):
+    import app.tools.builtin as builtin
+    import app.services.ai as ai
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="")
+    def boom(db):
+        raise RuntimeError("no key")
+    monkeypatch.setattr(ai, "get_provider", boom)
+    result = builtin.lookup_word.run({"word": "徘徊"}, ctx)
+    assert result["meaning"] == ""
+    assert "error" in result
+
+
 def test_render_mermaid_valid():
     ctx = UnifiedContext(user_id=1, lesson_id=1, question="")
     result = render_mermaid.run({"code": "graph TD; A-->B;"}, ctx)
