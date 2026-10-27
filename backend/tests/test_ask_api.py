@@ -33,3 +33,17 @@ def test_ask_api_end_to_end(setup_db):
     assert "answer" in body
     assert "citations" in body
     assert "mode" in body
+
+
+def test_ask_api_persists_turn(setup_db):
+    from app.models import Turn, ModelConfig
+    db = SessionLocal()
+    db.add(ModelConfig(key="ai_provider", value="fake"))
+    db.commit(); db.close()
+    r = client.post("/api/ask", json={"lesson_id": 1, "question": "你好", "context": ""})
+    assert r.status_code == 200
+    db = SessionLocal()
+    turn = db.query(Turn).order_by(Turn.id.desc()).first()
+    assert turn is not None
+    assert turn.mode == "chat"
+    db.close()

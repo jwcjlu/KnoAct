@@ -33,9 +33,13 @@ def list_notes(lesson_id: int, db: Session = Depends(get_db)):
     return db.query(Note).filter_by(lesson_id=lesson_id).order_by(Note.created_at.desc()).all()
 
 @router.post("/api/ask")
-async def ask_ai(req: AskReq):
+async def ask_ai(req: AskReq, db: Session = Depends(get_db)):
+    # TODO: wire real auth/user context (no session/auth yet — resolve first child as placeholder)
+    from ..models import User
+    child = db.query(User).filter_by(role="child").first()
+    user_id = child.id if child else 0
     ctx = UnifiedContext(
-        user_id=0, lesson_id=req.lesson_id, question=req.question,
+        user_id=user_id, lesson_id=req.lesson_id, question=req.question,
         text=req.context, mode=req.mode, model=req.model,
     )
     return await route_to_capability(ctx)
