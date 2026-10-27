@@ -139,11 +139,17 @@ def listening_material(user_id: int, db: Session = Depends(get_db)):
 
     ctx = UnifiedContext(user_id=user_id, lesson_id=0, question="")
     result = generate_listening.run({}, ctx)
-    db.add(Task(
-        user_id=user_id, subject="英语", date=_date.today(), task_type="listening",
-        title="英语听力练习", content_status="published",
-        content=_json.dumps(result, ensure_ascii=False),
-    ))
+    content = _json.dumps(result, ensure_ascii=False)
+    if row is not None:
+        # 已存在当天 listening Task 但内容空/无法解析：原地更新，避免撞唯一约束
+        row.content = content
+        row.title = "英语听力练习"
+        row.content_status = "published"
+    else:
+        db.add(Task(
+            user_id=user_id, subject="英语", date=_date.today(), task_type="listening",
+            title="英语听力练习", content_status="published", content=content,
+        ))
     db.commit()
     return {
         "text": result["dialogue"],

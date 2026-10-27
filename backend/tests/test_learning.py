@@ -70,6 +70,32 @@ def test_listening_material(setup_db):
     assert "text" in data and "questions" in data
 
 
+def test_listening_material_updates_empty_pregenerated_task(setup_db):
+    import json
+    from datetime import date
+    from app.models import Task
+    from app.database import SessionLocal
+    # 预生成一条 content 为空的任务（模拟损坏/空数据）
+    s = SessionLocal()
+    s.add(Task(
+        user_id=1, subject="英语", date=date.today(), task_type="listening",
+        title="英语听力练习", content_status="published", content="",
+    ))
+    s.commit(); s.close()
+
+    resp = _client().get("/api/listening/material?user_id=1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "text" in data and "questions" in data
+
+    # 落库的记录应被原地更新（仍只有一条，且 content 已非空）
+    s = SessionLocal()
+    rows = s.query(Task).filter_by(user_id=1, subject="英语", date=date.today(), task_type="listening").all()
+    assert len(rows) == 1
+    assert rows[0].content
+    s.close()
+
+
 def test_listening_material_reads_pregenerated_task(setup_db):
     import json
     from datetime import date
