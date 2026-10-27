@@ -1,7 +1,9 @@
-"""渲染流水线：生成代码(阶段2)→渲染→TTS→合轨。阶段1先跑通 render→tts→mix。"""
+"""渲染流水线：生成代码→渲染(纠错重试)→TTS→合轨。"""
 from pathlib import Path
 
-from .manim_render import render_code
+from .manim_render import render_code_with_error
+from .codegen import generate_manim_code
+from .retry import render_with_retry
 from .tts import synthesize_to_file
 from .mix import mix_audio
 
@@ -9,26 +11,24 @@ MEDIA_DIR = Path(__file__).resolve().parent / "media"
 
 
 def run_pipeline(task_id: str, prompt: str, narration: str, voice: str, status_cb) -> str:
-    """阶段1：不生成代码，用 prompt 作为占位场景（真实生成在 Task 8 接 LLM）。
-
-    返回视频 URL 相对路径（相对 MEDIA_DIR）。
-    """
     out = MEDIA_DIR / task_id
     out.mkdir(parents=True, exist_ok=True)
 
+    status_cb("generating")
+    code = generate_manim_code(prompt)
+
+    def gen_fn(prev_error):
+        # 把渲染错误喂回 LLM 重新生成
+        return generate_manim_code(f"{prompt}（上一次渲染报错：{prev_error}，请修复）")
+
+    def render_fn(code, out_dir):
+        mp4, _err = render_code_with_error(code, out_dir)
+        return mp4
+
     status_cb("rendering")
-    # 阶段1：写死一个最简单的 manim 场景，证明 render→tts→mix 全链路通
-    code = (
-        "from manim import *\n"
-        "class Demo(Scene):\n"
-        "    def construct(self):\n"
-        f"        t = Text({narration!r} or {prompt!r} or 'hi')\n"
-        "        self.add(t)\n"
-        "        self.play(FadeIn(t))\n"
-    )
-    mp4 = render_code(code, str(out))
+    mp4 = render_with_retry(code, gen_fn, render_fn, str(out), max_retries=3)
     if not mp4:
-        raise RuntimeError("manim 渲染失败")
+        raise RuntimeError("manim 渲染失败（重试后仍失败）")
 
     status_cb("mixing")
     audio = synthesize_to_file(narration or prompt, str(out / "narration.mp3"))
