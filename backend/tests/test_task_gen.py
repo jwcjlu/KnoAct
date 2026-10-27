@@ -69,6 +69,42 @@ def test_generate_tasks_creates_review_when_word_is_due():
     db.close()
 
 
+def _setup_english(db):
+    db.query(WordMastery).delete()
+    db.query(WordBank).delete()
+    db.query(KnowledgePoint).delete()
+    db.query(Text).delete()
+    db.query(Lesson).delete()
+    db.query(PdfDocument).delete()
+    db.query(Task).delete()
+    db.query(User).delete()
+    db.commit()
+    u = User(name="测试孩子", role="child")
+    db.add(u); db.flush()
+    doc = PdfDocument(filename="英语.pdf", subject="英语", storage_path="")
+    db.add(doc); db.flush()
+    l1 = Lesson(document_id=doc.id, subject="英语", title="Unit 1", start_page=1, end_page=2,
+                extract_status="done", audit_status="approved")
+    db.add(l1); db.flush()
+    for w in ["apple", "banana"]:
+        db.add(WordBank(lesson_id=l1.id, subject="英语", word=w, extra="释义"))
+    db.add(KnowledgePoint(subject="英语", category="词汇", content="颜色词", lesson_id=l1.id))
+    db.commit()
+    return u.id, l1.id
+
+
+def test_generate_tasks_creates_listening_for_english():
+    db = SessionLocal()
+    uid, l1 = _setup_english(db)
+    generate_tasks_for_user(db, uid, date.today())
+    listening = db.query(Task).filter_by(
+        user_id=uid, subject="英语", date=date.today(), task_type="listening").all()
+    assert len(listening) == 1
+    content = json.loads(listening[0].content)
+    assert "dialogue" in content and "question" in content and "answer" in content
+    db.close()
+
+
 def test_generate_tasks_no_lesson_produces_no_tasks():
     db = SessionLocal()
     u = User(name="无课孩子", role="child")
