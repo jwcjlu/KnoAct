@@ -40,10 +40,12 @@ def test_ask_api_persists_turn(setup_db):
     db = SessionLocal()
     db.add(ModelConfig(key="ai_provider", value="fake"))
     db.commit(); db.close()
-    r = client.post("/api/ask", json={"lesson_id": 1, "question": "你好", "context": ""})
+    r = client.post("/api/ask", json={"lesson_id": 1, "question": "唯一标记问题", "context": ""})
     assert r.status_code == 200
     db = SessionLocal()
-    turn = db.query(Turn).order_by(Turn.id.desc()).first()
+    turn = db.query(Turn).filter_by(question="唯一标记问题").order_by(Turn.id.desc()).first()
     assert turn is not None
     assert turn.mode == "chat"
+    assert turn.final_answer != ""          # _persist 写入了答案
+    assert turn.status in ("done", "error")  # _persist 写入了状态
     db.close()
