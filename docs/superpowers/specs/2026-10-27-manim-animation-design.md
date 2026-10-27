@@ -85,7 +85,7 @@ manim」+「带音轨视频」的完整落地。
 
 | 端点 | 作用 |
 | --- | --- |
-| `POST /render` | 提交任务。入参 `{ task_id, prompt, narration, voice, tts_config, llm_config, quality }`。立即返回 `202 Accepted`（不等待渲染）。 |
+| `POST /render` | 提交任务。入参 `{ task_id, prompt, narration, voice, quality }`（`voice` 选 TTS 音色；LLM/TTS provider 配置由渲染服务连库自读，见 §3.4）。立即返回 `202 Accepted`（不等待渲染）。 |
 | `GET /render/{task_id}` | 查进度。返回 `{ status, video_url?, error?, progress? }` |
 
 `status` 枚举：`queued | generating | rendering | mixing | done | error`。
@@ -130,9 +130,18 @@ manim」+「带音轨视频」的完整落地。
 
 ### 3.4 配置来源
 
-渲染服务是独立进程，**不连主服务数据库**。LLM/TTS 的 provider 配置由主服务在
-提交任务时**随任务透传已解析好的配置**（`llm_config` / `tts_config`），渲染服务
-无状态。这样渲染服务不依赖 `model_config.resolve` 及数据库。
+渲染服务**自己连主服务数据库读配置**，复用 `model_config.resolve(db, role)` 和
+`get_tts(db)` 的 provider 解析逻辑（LLM 走 `role="llm"`，TTS 走 `role="tts"`），
+不跨服务透传密钥。
+
+实现方式：渲染服务 import 主服务的 `models.py`（ORM）+ `database.py`
+（`SessionLocal`）+ `services/model_config.py`，通过 `DATABASE_URL` 环境变量指向
+同一个库。SQLite 场景下需用**绝对路径** `DATABASE_URL`（相对路径随 cwd 漂移，
+见 AGENTS.md 环境陷阱）；MySQL 场景天然共享。
+
+> 注意：渲染服务与主服务是**两个进程**，SQLite 并发写需留意。本场景渲染服务
+> 只**读**配置（`ModelConnection` / `ModelProfile` / `RoleBinding` / `ModelConfig`），
+> 不写库，读写竞争风险低。
 
 ## 4. 主服务侧：`render_manim` 工具 + 状态持久化
 
@@ -235,7 +244,7 @@ RenderTask
 | 风险 | 缓解 |
 | --- | --- |
 | LLM 生成的 manim 代码质量不稳 | 阶段 2 纠错循环 + 工具描述里给「manim 代码最小可用模板」，避免从零生成 |
-| 模型配置进渲染服务 | 提交时透传已解析配置，渲染服务无状态不连库（§3.4） |
+| 模型配置进渲染服务 | 渲染服务自己连库读配置，复用 `resolve`/`get_tts`，`DATABASE_URL` 绝对路径（§3.4） |
 | TeX Live 体积/安装 | 数学子集；阶段 1 就装进镜像并验证公式渲染 |
 | 并发与超时 | 严格限并发 + 整体超时，防坏动画拖垮队列 |
 | 代码执行安全 | 容器隔离（非 root、无网络、只写 /media）兜底 |
@@ -245,7 +254,7 @@ RenderTask
 
 | Path | 改动 |
 | --- | --- |
-| `render_service/`（新目录，与 backend 平级） | 独立渲染服务：FastAPI app + 队列 + manim/ffmpeg/TTS 编排 + Dockerfile |
+| `render_service/`（新目录，与 backend 平级） | 独立渲染服务：FastAPI app + 队列 + manim/ffmpeg/TTS 编排 + Dockerfile；import 主服务 `models`/`database`/`services` 读配置 |
 | `backend/app/tools/builtin.py` | 新增 `RenderManimTool`（提交型工具） |
 | `backend/app/tools/registry.py` | 注册 `render_manim` |
 | `backend/app/capabilities/chat.py` | `visualize` 的 `tools` 加 `render_manim` |
