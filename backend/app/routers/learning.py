@@ -56,6 +56,7 @@ def dictation_grade(req: GradeReq, db: Session = Depends(get_db)):
 class WrongWord(BaseModel):
     word: str
     your_answer: str = ""
+    word_id: int = 0
 
 class CompleteReq(BaseModel):
     user_id: int
@@ -73,6 +74,7 @@ def dictation_complete(req: CompleteReq, db: Session = Depends(get_db)):
             user_id=req.user_id, source_type="dictation",
             question=f"听写词语：{ww.word}",
             your_answer=ww.your_answer, correct_answer=ww.word,
+            word_bank_id=ww.word_id if ww.word_id else None,
         ))
     db.commit()
     return {"points_awarded": awarded, "mistakes_recorded": len(req.wrong_words)}

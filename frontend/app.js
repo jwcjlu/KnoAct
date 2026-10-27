@@ -576,7 +576,7 @@ async function submitDict(){
   s.tried = true; s.phase = 'feedback';
   await api('/api/dictation/grade', {method:'POST', body:{user_id:uid, word:w.w, word_id:w.id, answer:s.input}});
   if(right){ s.correct++; }
-  else { s.wrong.push({word:w.w, pinyin:w.pinyin, meaning:w.meaning, yours:s.input.trim()}); }
+  else { s.wrong.push({word:w.w, pinyin:w.pinyin, meaning:w.meaning, yours:s.input.trim(), id:w.id}); }
   render();
 }
 function dictNext(){
@@ -588,7 +588,7 @@ function dictNext(){
 }
 async function finishDictation(){
   const s = dictState;
-  const wrongWords = s.wrong.map(x=>({word:x.word, your_answer:x.yours}));
+  const wrongWords = s.wrong.map(x=>({word:x.word, your_answer:x.yours, word_id:x.id}));
   const d = await api('/api/dictation/complete', {method:'POST', body:{user_id:uid, correct:s.correct, wrong:s.wrong.length, wrong_words:wrongWords}});
   if(!completed.includes(1)) completed.push(1);
 
