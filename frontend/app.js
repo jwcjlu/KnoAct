@@ -2174,10 +2174,10 @@ function toggleRole(){
 }
 function setParentTab(t){
   parentTab=t;
-  if(t==='教材') loadPdfDocs();
-  if(t==='知识点') loadKnowledge();
-  if(t==='题目') loadQuestionData().then(()=>render());
-  if(t==='目标') loadGoals();
+  if(t==='教材'){ loadPdfDocs().then(()=>render()); return; }
+  if(t==='知识点'){ loadKnowledge().then(()=>render()); return; }
+  if(t==='题目'){ loadQuestionData().then(()=>render()); return; }
+  if(t==='目标'){ loadGoals().then(()=>render()); return; }
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
