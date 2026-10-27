@@ -214,3 +214,21 @@ Capability）已在 `/api/ask` 落地，第 4–5 步（流式、收编其余调
 
 > 完成第 4–5 步后，本文档即可改回完全体的 agent-native 架构描述（当前仅
 > `/api/ask` 已 agent 化）。
+
+## 幻觉补强（已落地）
+
+针对 `/api/ask` agent 化后的四个 LLM 幻觉风险，已做如下补强：
+
+1. **出处句号校验**：前端把已切好的句子数组作为 `sentences` 字段传给后端
+   （`UnifiedContext.sentences`），`orchestrator._filter_citations` 剔除越界句号
+   （`[第N句]` 的 N 必须 ∈ `1..len(sentences)`），杜绝模型伪造不存在的引用。
+2. **`search_text` 按句编号**：`search_text` 工具改用 `ctx.sentences`（回退
+   `_fallback_split` 复刻前端 `splitSentences` 规则），句号与前端 `jumpToSentence`
+   对齐，消除「行号 vs 句号」错位。
+3. **`lookup_word` 如实失败**：查词异常回落 `meaning=""` + `error="释义暂不可用"`
+   （不再编造「（示例）」假释义）。
+4. **`_forced_finish` 补回约束**：兜底收尾 prompt 补回教材上下文 + 「不要编造
+   教材里没有的内容」约束，且 history 为空时不输出空「工具结果」段。
+5. **`render_mermaid` 严格校验**：子串匹配改为行首图类型声明正则
+   （`graph|flowchart|sequenceDiagram|…`），拒绝 `"photograph of a graph"` 之类
+   的伪图。
