@@ -60,7 +60,7 @@ def test_generate_tasks_creates_review_when_word_is_due():
     # 挑一个本课生词，造一条到期待复习记录
     wb = db.query(WordBank).filter_by(lesson_id=l1_id).first()
     db.add(WordMastery(word_bank_id=wb.id, is_weak=True,
-                       next_review_at=datetime.utcnow() - timedelta(days=1)))
+                       next_review_at=datetime.utcnow() - timedelta(days=1), user_id=uid))
     db.commit()
 
     generate_tasks_for_user(db, uid, date.today())

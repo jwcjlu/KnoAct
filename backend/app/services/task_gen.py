@@ -79,9 +79,10 @@ def _gen_knowledge(db, lesson, user_id, count, new_ratio=5):
     )
 
 
-def _gen_review(db, lesson, count):
+def _gen_review(db, lesson, user_id, count):
     now = datetime.utcnow()
     weak_ids = [r[0] for r in db.query(WordMastery.word_bank_id).filter(
+        WordMastery.user_id == user_id,
         WordMastery.next_review_at.isnot(None), WordMastery.next_review_at <= now).all()]
     if not weak_ids:
         return None
@@ -150,7 +151,7 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
         new_ratio = _default_count(db, "task_new_ratio", 5)
         gens = [_gen_dictation(db, lesson, user_id, n_dict, new_ratio),
                 _gen_knowledge(db, lesson, user_id, n_know, new_ratio),
-                _gen_review(db, lesson, n_dict)]
+                _gen_review(db, lesson, user_id, n_dict)]
         if subject == "英语":
             gens.append(_gen_listening(db, lesson))
         if subject == "数学":
