@@ -868,6 +868,7 @@ async function startAssignment(){
   if(!activeLessonId){ toast('请先选择课程'); return; }
   const res = await api(`/api/learning/assignment`, {method:'POST', body:{user_id:uid, lesson_id:activeLessonId, subject:currentSubject}});
   plQuiz = res.questions || [];
+  if(!plQuiz.length){ toast('本课暂无作业题，请稍后再试'); return; }
   plQuizPicks = {};
   plQuizResult = null;
   render();
