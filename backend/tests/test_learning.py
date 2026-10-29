@@ -155,6 +155,93 @@ def test_dictation_grade_updates_word_mastery(setup_db):
     s.close()
 
 
+def test_learning_lessons_returns_current_flag(setup_db):
+    from app.models import Lesson, LearningProgress, PdfDocument
+    from app.database import SessionLocal
+    s = SessionLocal()
+    doc = PdfDocument(filename="语文教材.pdf", subject="语文", storage_path="/x.pdf")
+    s.add(doc); s.flush()
+    l1 = Lesson(document_id=doc.id, subject="语文", title="第1课", start_page=1, end_page=3, audit_status="approved")
+    l2 = Lesson(document_id=doc.id, subject="语文", title="第2课", start_page=4, end_page=6, audit_status="approved")
+    s.add_all([l1, l2]); s.flush()
+    l1_id, l2_id = l1.id, l2.id
+    s.add(LearningProgress(user_id=1, subject="语文", current_lesson_id=l2_id))
+    s.commit(); s.close()
+
+    resp = _client().get("/api/learning/lessons?user_id=1&subject=语文")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+    by_id = {d["id"]: d for d in data}
+    assert by_id[l1_id]["is_current"] is False
+    assert by_id[l2_id]["is_current"] is True
+    assert by_id[l2_id]["document_name"] == "语文教材.pdf"
+
+
+def test_assignment_grade_passes_advances_progress(setup_db):
+    from app.models import Lesson, LearningProgress
+    from app.database import SessionLocal
+    s = SessionLocal()
+    l1 = Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3, audit_status="approved")
+    l2 = Lesson(document_id=1, subject="语文", title="第2课", start_page=4, end_page=6, audit_status="approved")
+    s.add_all([l1, l2]); s.flush()
+    l1_id, l2_id = l1.id, l2.id
+    s.add(LearningProgress(user_id=1, subject="语文", current_lesson_id=l1_id))
+    s.commit(); s.close()
+
+    # 正确率 >= 默认阈值 0.6 → 通过，推进到下一课
+    resp = _client().post("/api/learning/assignment/grade",
+                          json={"user_id": 1, "lesson_id": l1_id, "subject": "语文", "correct": 4, "total": 5})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["passed"] is True
+
+    s = SessionLocal()
+    prog = s.query(LearningProgress).filter_by(user_id=1, subject="语文").first()
+    assert prog.current_lesson_id == l2_id
+    s.close()
+
+
+def test_assignment_grade_below_threshold_does_not_advance(setup_db):
+    from app.models import Lesson, LearningProgress
+    from app.database import SessionLocal
+    s = SessionLocal()
+    l1 = Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3, audit_status="approved")
+    l2 = Lesson(document_id=1, subject="语文", title="第2课", start_page=4, end_page=6, audit_status="approved")
+    s.add_all([l1, l2]); s.flush()
+    l1_id = l1.id
+    s.add(LearningProgress(user_id=1, subject="语文", current_lesson_id=l1_id))
+    s.commit(); s.close()
+
+    resp = _client().post("/api/learning/assignment/grade",
+                          json={"user_id": 1, "lesson_id": l1_id, "subject": "语文", "correct": 1, "total": 5})
+    body = resp.json()
+    assert body["passed"] is False
+
+    s = SessionLocal()
+    prog = s.query(LearningProgress).filter_by(user_id=1, subject="语文").first()
+    assert prog.current_lesson_id == l1_id
+    s.close()
+
+
+def test_assignment_returns_questions(setup_db):
+    from app.models import Lesson, Text
+    from app.database import SessionLocal
+    s = SessionLocal()
+    l = Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3, audit_status="approved")
+    s.add(l); s.flush()
+    lid = l.id
+    s.add(Text(lesson_id=lid, content="白鹭是一首精巧的诗。"))
+    s.commit(); s.close()
+
+    resp = _client().post("/api/learning/assignment",
+                          json={"user_id": 1, "lesson_id": lid, "subject": "语文"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "questions" in data
+    assert len(data["questions"]) > 0
+
+
 def test_dictation_complete_records_wrong_words(setup_db):
     from app.models import User
     from app.database import SessionLocal

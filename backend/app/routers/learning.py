@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from ..database import get_db
 from ..models import Lesson, WordBank, Point
-from ..models import KnowledgePoint, Mistake, WordMastery
+from ..models import KnowledgePoint, Mistake, WordMastery, LearningProgress
 from ..services.scheduler import select_words, next_review_after
 from ..services.ai import get_provider
 
@@ -13,12 +13,34 @@ router = APIRouter(tags=["learning"])
 MASTERY_REMOVE_AFTER = 3  # 连续答对 3 次视为已掌握，移出日常听写
 
 
+def _cfg_int(db, key, fallback):
+    from ..models import ModelConfig
+    row = db.query(ModelConfig).filter_by(key=key).first()
+    try:
+        return int(row.value) if row and row.value else fallback
+    except ValueError:
+        return fallback
+
+
+def _cfg_str(db, key, fallback):
+    from ..models import ModelConfig
+    row = db.query(ModelConfig).filter_by(key=key).first()
+    return row.value if row and row.value else fallback
+
+
 @router.get("/api/dictation/words")
-def dictation_words(user_id: int, db: Session = Depends(get_db)):
-    approved = db.query(Lesson).filter_by(audit_status="approved").all()
-    ids = [l.id for l in approved]
-    words = db.query(WordBank).filter(WordBank.lesson_id.in_(ids)).all() if ids else []
-    # 读 mastery：错得多/到期 的排前面
+def dictation_words(user_id: int, subject: str = "语文", db: Session = Depends(get_db)):
+    # 只取当前课的生词（与 task_gen._current_lesson 口径一致），而非全库所有已审核课
+    prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
+    lessons = db.query(Lesson).filter_by(subject=subject).order_by(Lesson.id).all()
+    lesson = None
+    if lessons:
+        if prog and prog.current_lesson_id:
+            lesson = next((l for l in lessons if l.id == prog.current_lesson_id), None)
+        lesson = lesson or lessons[0]
+    if lesson is None:
+        return []
+    words = db.query(WordBank).filter_by(lesson_id=lesson.id).all()
     rows = []
     for w in words:
         m = db.query(WordMastery).filter_by(word_bank_id=w.id).first()
@@ -172,3 +194,78 @@ def reading_material(lesson_id: int, db: Session = Depends(get_db)):
         db.commit()
         qs = db.query(Question).filter_by(lesson_id=lesson_id, qtype="reading").order_by(Question.id).all()
     return {"text": t.content, "questions": [{"question": q.question, "answer": q.answer} for q in qs]}
+
+
+@router.get("/api/learning/lessons")
+def learning_lessons(user_id: int, subject: str = "语文", db: Session = Depends(get_db)):
+    """个性化学习选课列表：返回该学科所有课（含教材来源、当前进度标记）。"""
+    from ..models import PdfDocument
+    lessons = db.query(Lesson).filter_by(subject=subject).order_by(Lesson.id).all()
+    prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
+    current_id = prog.current_lesson_id if prog else None
+    out = []
+    for l in lessons:
+        doc = db.get(PdfDocument, l.document_id)
+        out.append({
+            "id": l.id, "subject": l.subject, "title": l.title,
+            "start_page": l.start_page, "end_page": l.end_page,
+            "document_name": doc.filename if doc else "",
+            "is_current": l.id == current_id,
+        })
+    return out
+
+
+class AssignmentReq(BaseModel):
+    user_id: int
+    lesson_id: int
+    subject: str = "语文"
+
+
+@router.post("/api/learning/assignment")
+def assignment(req: AssignmentReq, db: Session = Depends(get_db)):
+    """AI 现场出作业：读配置的题数与难度，基于本课正文出题。"""
+    from ..models import Text
+    from ..services.assignment import generate_assignment
+    t = db.query(Text).filter_by(lesson_id=req.lesson_id).first()
+    if not t or not t.content.strip():
+        return {"questions": []}
+    n = _cfg_int(db, "assignment_question_count", 4)
+    diff = _cfg_str(db, f"difficulty_{req.subject}", "中等")
+    qs = generate_assignment(db, t.content, subject=req.subject, difficulty=diff, n=n)
+    return {"questions": qs}
+
+
+class AssignmentGradeReq(BaseModel):
+    user_id: int
+    lesson_id: int
+    subject: str = "语文"
+    correct: int
+    total: int
+
+
+@router.post("/api/learning/assignment/grade")
+def assignment_grade(req: AssignmentGradeReq, db: Session = Depends(get_db)):
+    """判分：正确率 >= 阈值则推进进度。"""
+    try:
+        threshold = float(_cfg_str(db, "assignment_pass_threshold", "0.6"))
+    except ValueError:
+        threshold = 0.6
+    rate = req.correct / req.total if req.total else 0
+    passed = rate >= threshold
+    if passed:
+        lessons = db.query(Lesson).filter_by(subject=req.subject).order_by(Lesson.id).all()
+        prog = db.query(LearningProgress).filter_by(user_id=req.user_id, subject=req.subject).first()
+        if not prog:
+            prog = LearningProgress(user_id=req.user_id, subject=req.subject, current_lesson_id=None)
+            db.add(prog)
+        if lessons:
+            ids = [l.id for l in lessons]
+            cur = prog.current_lesson_id
+            if cur in ids:
+                idx = ids.index(cur)
+                nxt = ids[idx + 1] if idx + 1 < len(ids) else ids[-1]
+            else:
+                nxt = ids[0]
+            prog.current_lesson_id = nxt
+        db.commit()
+    return {"passed": passed, "rate": rate}
