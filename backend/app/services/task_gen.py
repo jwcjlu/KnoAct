@@ -29,20 +29,21 @@ def _default_count(db: Session, key: str, fallback: int) -> int:
         return fallback
 
 
-def _gen_dictation(db, lesson, count, new_ratio=5):
+def _gen_dictation(db, lesson, user_id, count, new_ratio=5):
     """按遗忘曲线出听写：当前课取「新」名额，旧课到期词取「旧」名额，凑不满不补。"""
     subject = lesson.subject
     # 新：当前课生词
     new_words = db.query(WordBank).filter_by(lesson_id=lesson.id).order_by(WordBank.id).limit(new_ratio).all()
-    # 旧：其它课中到期待复习的词（next_review_at <= now）
+    # 旧：其它课中到期待复习的词（next_review_at <= now），按用户隔离
     now = datetime.utcnow()
     due_ids = [r[0] for r in db.query(WordMastery.word_bank_id).filter(
+        WordMastery.user_id == user_id,
         WordMastery.next_review_at.isnot(None), WordMastery.next_review_at <= now).all()]
     due_words = []
     if due_ids:
         due_words = (db.query(WordBank)
                      .filter(WordBank.id.in_(due_ids), WordBank.lesson_id != lesson.id)
-                     .order_by(WordBank.id).limit(count - new_ratio).all())
+                     .order_by(WordBank.id).limit(max(0, count - new_ratio)).all())
     words = new_words + due_words
     if not words:
         return None
@@ -54,18 +55,19 @@ def _gen_dictation(db, lesson, count, new_ratio=5):
     )
 
 
-def _gen_knowledge(db, lesson, count, new_ratio=5):
+def _gen_knowledge(db, lesson, user_id, count, new_ratio=5):
     """按遗忘曲线出知识点：当前课取「新」名额，旧课到期知识点取「旧」名额。"""
     subject = lesson.subject
     new_pts = db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).order_by(KnowledgePoint.id).limit(new_ratio).all()
     now = datetime.utcnow()
     due_ids = [r[0] for r in db.query(KnowledgeMastery.knowledge_point_id).filter(
+        KnowledgeMastery.user_id == user_id,
         KnowledgeMastery.next_review_at.isnot(None), KnowledgeMastery.next_review_at <= now).all()]
     due_pts = []
     if due_ids:
         due_pts = (db.query(KnowledgePoint)
                    .filter(KnowledgePoint.id.in_(due_ids), KnowledgePoint.lesson_id != lesson.id)
-                   .order_by(KnowledgePoint.id).limit(count - new_ratio).all())
+                   .order_by(KnowledgePoint.id).limit(max(0, count - new_ratio)).all())
     pts = new_pts + due_pts
     if not pts:
         return None
@@ -146,8 +148,8 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
         n_dict = _default_count(db, f"task_dictation_count_{subject}", 7)
         n_know = _default_count(db, "task_knowledge_count", 5)
         new_ratio = _default_count(db, "task_new_ratio", 5)
-        gens = [_gen_dictation(db, lesson, n_dict, new_ratio),
-                _gen_knowledge(db, lesson, n_know, new_ratio),
+        gens = [_gen_dictation(db, lesson, user_id, n_dict, new_ratio),
+                _gen_knowledge(db, lesson, user_id, n_know, new_ratio),
                 _gen_review(db, lesson, n_dict)]
         if subject == "英语":
             gens.append(_gen_listening(db, lesson))

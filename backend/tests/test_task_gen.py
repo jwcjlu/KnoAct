@@ -144,3 +144,29 @@ def test_dictation_picks_new_and_due_words():
     # 到期旧词只有1个，凑不满2个 → 不硬补，总数为 2(新) + 1(旧) = 3
     assert len(words) == 3
     db.close()
+
+
+def test_dictation_isolates_due_words_across_users():
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 孩子A：第1课（白鹭、矗立）
+    # 孩子B：一个第2课生词，带一条到期 WordMastery（属于B）
+    other = User(name="别的孩子", role="child")
+    db.add(other); db.flush()
+    doc = db.query(PdfDocument).first()
+    l2 = Lesson(document_id=doc.id, subject="语文", title="第2课", start_page=3, end_page=4,
+                extract_status="done", audit_status="approved")
+    db.add(l2); db.flush()
+    wb_b = WordBank(lesson_id=l2.id, subject="语文", word="B的旧词", extra="")
+    db.add(wb_b); db.flush()
+    db.add(WordMastery(word_bank_id=wb_b.id, is_weak=True,
+                       next_review_at=datetime.utcnow() - timedelta(days=1), user_id=other.id))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    assert t is not None
+    got = {w["word"] for w in json.loads(t.content)}
+    # A 的听写只含本课新词，绝不能混入 B 的到期旧词
+    assert got == {"白鹭", "矗立"}
+    db.close()
