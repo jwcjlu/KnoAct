@@ -2204,6 +2204,7 @@ function setParentTab(t){
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
+  if(t==='学习配置'){ loadConfig().then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
   render();
 }
@@ -2397,7 +2398,7 @@ async function showAddTask(){
 }
 
 function renderParent(){
-  const tabs = ['教材','知识点','题目','目标','报告','任务','规则','设置'].map(t=>
+  const tabs = ['教材','知识点','题目','目标','报告','任务','规则','学习配置','设置'].map(t=>
     `<button class="filter-btn ${parentTab===t?'active':''}" style="border-radius:10px;padding:8px 16px;font-size:13px;font-weight:600;color:${parentTab===t?'#3158e8':'#778079'};background:${parentTab===t?'#fff':'transparent'}" onclick="setParentTab('${t}')">${t}</button>`
   ).join('');
 
@@ -2409,6 +2410,7 @@ function renderParent(){
   else if(parentTab==='报告') body = renderReportTab();
   else if(parentTab==='任务') body = renderTaskTab();
   else if(parentTab==='规则') body = renderRulesTab();
+  else if(parentTab==='学习配置') body = renderLearningConfigTab();
   else if(parentTab==='设置') body = renderSettingsTab();
 
   return `<div class="parent-banner">
@@ -2875,6 +2877,66 @@ function msRoleHtml(){
       ${summary}
     </div>
   </section>`;
+}
+
+// ---- 学习配置 ----
+async function renderLearningConfigTab(){
+  // 确保 configMap 已加载
+  if(Object.keys(configMap).length === 0){ await loadConfig(); }
+  const num = (key, def, label, hint, min='0', max='100', step='1') => `
+    <div class="lc-row">
+      <div class="lc-label">${label}</div>
+      <input class="lc-input" type="number" min="${min}" max="${max}" step="${step}"
+             value="${configMap[key] || def}" data-key="${key}" />
+      ${hint ? `<div class="lc-hint">${hint}</div>` : ''}
+    </div>`;
+  const sel = (key, def, label, opts) => `
+    <div class="lc-row">
+      <div class="lc-label">${label}</div>
+      <select class="lc-input" data-key="${key}">
+        ${opts.map(o=>`<option value="${o}" ${(configMap[key]||def)===o?'selected':''}>${o}</option>`).join('')}
+      </select>
+    </div>`;
+  const chk = (key, label, hint) => `
+    <div class="lc-row">
+      <label class="lc-label"><input type="checkbox" data-key="${key}" ${configMap[key]!=='false'?'checked':''} /> ${label}</label>
+      ${hint ? `<div class="lc-hint">${hint}</div>` : ''}
+    </div>`;
+
+  return `
+    <div class="parent-grid">
+      <div class="parent-panel" style="grid-column:1/-1">
+        <div class="head"><div class="ic blue">${icon('chart',20)}</div><div><h3>学习配置</h3><div class="sub">调整每日听写量、新旧比例、作业难度与测试开关</div></div></div>
+        <div class="bd">
+          ${num('task_dictation_count_语文','7','语文每日听写量','每天听写几个语文生词')}
+          ${num('task_dictation_count_英语','7','英语每日听写量','每天听写几个英语单词')}
+          ${num('task_new_ratio','5','新/旧比例（新名额）','每日任务里「当天新课」的名额，旧=总量-新')}
+          ${num('assignment_question_count','4','作业题数','个性化学习每次作业几道题')}
+          ${num('assignment_pass_threshold','0.6','通过正确率','0~1，例如 0.6 表示 60%','0','1','0.1')}
+          ${sel('difficulty_语文','中等','语文出题难度',['简单','中等','困难'])}
+          ${sel('difficulty_英语','中等','英语出题难度',['简单','中等','困难'])}
+          ${sel('difficulty_数学','中等','数学出题难度',['简单','中等','困难'])}
+          ${chk('personalized_disable_chat','测试阶段禁用 AI 对话','勾选 = 禁用（默认），取消勾选 = 开放')}
+          <div style="margin-top:16px">
+            <button class="btn-primary" onclick="saveLearningConfig()">保存配置</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function saveLearningConfig(){
+  // 收集所有 [data-key] 输入框/下拉/勾选框的当前值
+  const inputs = document.querySelectorAll('[data-key]');
+  for(const el of inputs){
+    const key = el.dataset.key;
+    let value;
+    if(el.type === 'checkbox'){ value = el.checked ? 'true' : 'false'; }
+    else { value = el.value; }
+    await api('/api/config', {method:'POST', body:{key, value}});
+  }
+  toast('学习配置已保存');
+  await loadConfig();
 }
 
 // ---- 设置（旧版，保留作为回滚路径）----

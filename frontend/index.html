@@ -264,6 +264,7 @@
   .cm-head{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--blue);margin-bottom:16px}
   .cm-text{font-size:15px;line-height:28px;color:var(--ink);white-space:pre-wrap}
   .center-play{margin-top:16px;display:inline-flex;align-items:center;gap:8px;border-radius:12px;background:var(--blue);color:#fff;padding:10px 20px;font-size:14px;font-weight:700}
+  .cm-hint{margin-top:12px;font-size:13px;color:var(--muted)}
   .center-questions{display:flex;flex-direction:column;gap:16px}
   .center-question{border:1px solid var(--line3);background:var(--card);border-radius:16px;padding:20px}
   .cq-q{font-size:14px;font-weight:600;color:var(--ink);line-height:22px}
@@ -600,7 +601,7 @@
   .im-msg.ai{align-items:flex-start}
   .im-msg .bubble{padding:10px 13px;border-radius:14px;font-size:13.5px;line-height:1.65;max-width:94%;word-break:break-word}
   .im-msg.user .bubble{background:var(--blue2,#3158e8);color:#fff;border-bottom-right-radius:4px}
-  .im-msg.ai .bubble{background:#f3f5f2;color:#2b332e;border-bottom-left-radius:4px}
+  .im-msg.ai .bubble{background:#f3f5f2;color:#2b332e;border-bottom-left-radius:4px;white-space:pre-wrap}
   .im-msg .meta{font-size:10.5px;color:#aab1ab;margin:4px 2px 0}
   .im-msg .mm-tag{align-self:flex-start;font-size:10px;color:#7c86d8;background:#eef2ff;border-radius:6px;padding:1px 6px;margin-bottom:2px}
   .im-msg.ai .bubble .citation{display:inline;margin:0 1px;padding:0 4px;border:none;border-radius:4px;background:#dde6ff;color:var(--blue2,#3158e8);font-size:12px;cursor:pointer}
@@ -636,8 +637,20 @@
   .im-menu .mi.on .mi-desc{color:#7c86d8}
   .im-menu .mi .mi-name{flex:1}
   /* mermaid 图在气泡里的样式 */
-  .im-msg.ai .bubble .mmd{display:block;margin:8px 0;overflow:auto;background:#fff;border:1px solid #e3e6e2;border-radius:10px;padding:10px;text-align:center}
+  .im-msg.ai .bubble .mmd{white-space:normal;display:block;margin:8px 0;overflow:auto;background:#fff;border:1px solid #e3e6e2;border-radius:10px;padding:10px;text-align:center}
   .im-msg.ai .bubble .mmd svg{max-width:100%;height:auto}
+  .im-msg.ai .bubble .mmd svg .error-icon,.im-msg.ai .bubble .mmd svg .error-text{display:none!important}
+  .im-msg.ai .bubble .mmd-src{font-size:11px;text-align:left;white-space:pre-wrap;color:#4b544e;margin:0;padding:8px;background:#f7f8f7;border-radius:6px;max-height:200px;overflow:auto}
+  /* 动画渲染进度 / 视频卡片 */
+  .render-card{margin-top:6px;max-width:94%}
+  .render-card video{display:block;border-radius:10px;background:#000}
+  .render-progress{font-size:11.5px;color:#8e9691;background:#f3f5f2;border-radius:8px;padding:4px 10px;display:inline-block}
+  /* 思考过程折叠卡片（仿 DeepTutor ModelThinkingCard） */
+  .thinking-card{margin-top:6px;max-width:94%;border:1px solid #e3e6e2;border-radius:10px;background:#fafbfa;overflow:hidden}
+  .thinking-card summary{display:flex;align-items:center;gap:6px;padding:5px 10px;font-size:11.5px;font-weight:500;color:#8e9691;cursor:pointer;list-style:none;user-select:none}
+  .thinking-card summary::-webkit-details-marker{display:none}
+  .thinking-card summary svg{flex:none;opacity:.8}
+  .thinking-card .thinking-body{border-top:1px solid #eef0ee;padding:8px 10px;font-size:12px;line-height:1.6;color:#5a635c;white-space:pre-wrap;word-break:break-word}
   /* 引用上下文提示条 */
   .im-ctx{flex:none;display:flex;align-items:center;gap:6px;margin:0 14px 8px;padding:6px 10px;border-radius:8px;background:#f3f6ff;border:1px solid #e0e8ff;color:#5a635c;font-size:12px}
   .im-ctx .q{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -701,7 +714,13 @@
   .qq-choice.on{border-color:var(--blue-border);background:var(--blue-soft);color:var(--blue)}
   .qq-choice.ok{border-color:var(--green2);background:var(--green-soft)}
   .qq-choice.bad{border-color:#c05b4a;background:#fdf0ee}
+  .quiz-card.submitted .qq-choice{cursor:default;pointer-events:none}
   .quiz-foot{margin-top:12px;display:flex;justify-content:flex-end;align-items:center;gap:10px;font-size:13px;font-weight:600}
+  .lc-row{margin-bottom:14px}
+  .lc-label{display:block;font-size:13px;font-weight:600;color:#4c554f;margin-bottom:6px}
+  .lc-input{width:100%;max-width:280px;border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px;background:var(--card)}
+  .lc-input:focus{outline:none;border-color:var(--blue-border)}
+  .lc-hint{margin-top:4px;font-size:12px;color:#8e9691}
 </style>
 </head>
 <body>
@@ -754,6 +773,6 @@
   window.pdfjsWasmUrl = new URL('./vendor/pdfjs/wasm/', import.meta.url).href;
 </script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<script src="app.js?v=19"></script>
+<script src="app.js?v=27"></script>
 </body>
 </html>
