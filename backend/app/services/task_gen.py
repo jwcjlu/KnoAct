@@ -4,12 +4,12 @@ from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
-from ..models import User, Lesson, LearningProgress, WordBank, KnowledgePoint, WordMastery, Task
+from ..models import User, Lesson, LearningProgress, WordBank, KnowledgePoint, WordMastery, KnowledgeMastery, Task, Text
 
 
 def _current_lesson(db: Session, subject: str, user_id: int):
-    """按科返回当前课：LearningProgress.current_lesson_id 匹配该科则用它，否则回退该科第一课。"""
-    prog = db.query(LearningProgress).filter_by(user_id=user_id).first()
+    """按科返回当前课：LearningProgress 匹配 (user_id, subject) 则用它，否则回退该科第一课。"""
+    prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
     lessons = db.query(Lesson).filter_by(subject=subject).order_by(Lesson.id).all()
     if not lessons:
         return None
@@ -29,25 +29,49 @@ def _default_count(db: Session, key: str, fallback: int) -> int:
         return fallback
 
 
-def _gen_dictation(db, lesson, count):
-    words = db.query(WordBank).filter_by(lesson_id=lesson.id).limit(count).all()
+def _gen_dictation(db, lesson, count, new_ratio=5):
+    """按遗忘曲线出听写：当前课取「新」名额，旧课到期词取「旧」名额，凑不满不补。"""
+    subject = lesson.subject
+    # 新：当前课生词
+    new_words = db.query(WordBank).filter_by(lesson_id=lesson.id).order_by(WordBank.id).limit(new_ratio).all()
+    # 旧：其它课中到期待复习的词（next_review_at <= now）
+    now = datetime.utcnow()
+    due_ids = [r[0] for r in db.query(WordMastery.word_bank_id).filter(
+        WordMastery.next_review_at.isnot(None), WordMastery.next_review_at <= now).all()]
+    due_words = []
+    if due_ids:
+        due_words = (db.query(WordBank)
+                     .filter(WordBank.id.in_(due_ids), WordBank.lesson_id != lesson.id)
+                     .order_by(WordBank.id).limit(count - new_ratio).all())
+    words = new_words + due_words
     if not words:
         return None
     return Task(
-        task_type="dictation", subject=lesson.subject, title=f"{lesson.title} 生词听写",
-        detail=f"今日新学 · {len(words)} 个重点生词",
+        task_type="dictation", subject=subject, title=f"{lesson.title} 生词听写",
+        detail=f"今日听写 · {len(words)} 个（新课 {len(new_words)} + 复习 {len(due_words)}）",
         content=json.dumps([{"id": w.id, "word": w.word, "extra": w.extra} for w in words], ensure_ascii=False),
         points=20,
     )
 
 
-def _gen_knowledge(db, lesson, count):
-    pts = db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).limit(count).all()
+def _gen_knowledge(db, lesson, count, new_ratio=5):
+    """按遗忘曲线出知识点：当前课取「新」名额，旧课到期知识点取「旧」名额。"""
+    subject = lesson.subject
+    new_pts = db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).order_by(KnowledgePoint.id).limit(new_ratio).all()
+    now = datetime.utcnow()
+    due_ids = [r[0] for r in db.query(KnowledgeMastery.knowledge_point_id).filter(
+        KnowledgeMastery.next_review_at.isnot(None), KnowledgeMastery.next_review_at <= now).all()]
+    due_pts = []
+    if due_ids:
+        due_pts = (db.query(KnowledgePoint)
+                   .filter(KnowledgePoint.id.in_(due_ids), KnowledgePoint.lesson_id != lesson.id)
+                   .order_by(KnowledgePoint.id).limit(count - new_ratio).all())
+    pts = new_pts + due_pts
     if not pts:
         return None
     return Task(
-        task_type="knowledge", subject=lesson.subject, title=f"{lesson.title} 基础知识",
-        detail=f"重点巩固 · {len(pts)} 个知识点",
+        task_type="knowledge", subject=subject, title=f"{lesson.title} 基础知识",
+        detail=f"重点巩固 · {len(pts)} 个知识点（新课 {len(new_pts)} + 复习 {len(due_pts)}）",
         content=json.dumps([{"id": p.id, "content": p.content, "category": p.category} for p in pts], ensure_ascii=False),
         points=20,
     )
@@ -88,9 +112,30 @@ def _gen_listening(db, lesson):
     )
 
 
-def generate_tasks_for_user(db: Session, user_id: int, day: date):
-    """为单个孩子生成当天两科任务。幂等：同 (user_id, subject, date) 已存在则跳过。"""
-    subjects = ["语文", "英语"]
+def _gen_math_practice(db, lesson):
+    """数学练习：基于本课正文出计算/应用题，content 存题目 JSON。"""
+    from .math_gen import generate_math_questions
+    text = db.query(Text).filter_by(lesson_id=lesson.id).first()
+    if not text or not text.content.strip():
+        return None
+    qs = generate_math_questions(db, text.content, n=3)
+    if not qs:
+        return None
+    return Task(
+        task_type="math", subject=lesson.subject, title=f"{lesson.title} 数学练习",
+        detail=f"今日练习 · {len(qs)} 道计算/应用题",
+        content=json.dumps(qs, ensure_ascii=False),
+        points=20,
+        content_status="published",
+    )
+
+
+def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = False):
+    """为单个孩子生成当天各科任务。幂等：同 (user_id, subject, date) 已存在则跳过。
+    force=True 时先删除该孩子当天全部任务再重新生成（家长手动触发覆盖重生成）。"""
+    if force:
+        db.query(Task).filter_by(user_id=user_id, date=day).delete(synchronize_session=False)
+    subjects = ["语文", "英语", "数学"]
     for subject in subjects:
         exists = db.query(Task).filter_by(user_id=user_id, subject=subject, date=day).first()
         if exists:
@@ -98,14 +143,16 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date):
         lesson = _current_lesson(db, subject, user_id)
         if not lesson:
             continue
-        n_dict = _default_count(db, "task_dictation_count", 15)
+        n_dict = _default_count(db, f"task_dictation_count_{subject}", 7)
         n_know = _default_count(db, "task_knowledge_count", 5)
-        n_review = _default_count(db, "task_review_count", 15)
-        gens = [_gen_dictation(db, lesson, n_dict),
-                _gen_knowledge(db, lesson, n_know),
-                _gen_review(db, lesson, n_review)]
+        new_ratio = _default_count(db, "task_new_ratio", 5)
+        gens = [_gen_dictation(db, lesson, n_dict, new_ratio),
+                _gen_knowledge(db, lesson, n_know, new_ratio),
+                _gen_review(db, lesson, n_dict)]
         if subject == "英语":
             gens.append(_gen_listening(db, lesson))
+        if subject == "数学":
+            gens.append(_gen_math_practice(db, lesson))
         for gen in gens:
             if gen is not None:
                 gen.user_id = user_id
@@ -114,7 +161,7 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date):
     db.commit()
 
 
-def generate_daily_tasks(db: Session, day: date):
-    """定时任务入口：为所有孩子生成当天任务。"""
+def generate_daily_tasks(db: Session, day: date, force: bool = False):
+    """定时任务入口：为所有孩子生成当天任务。force=True 时覆盖重生成。"""
     for (uid,) in db.query(User.id).filter_by(role="child").all():
-        generate_tasks_for_user(db, uid, day)
+        generate_tasks_for_user(db, uid, day, force=force)

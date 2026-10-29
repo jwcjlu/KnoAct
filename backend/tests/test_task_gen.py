@@ -115,3 +115,32 @@ def test_generate_tasks_no_lesson_produces_no_tasks():
     generate_tasks_for_user(db, uid, date.today())  # 两科均无课，不应抛异常
     assert db.query(Task).filter_by(user_id=uid, date=date.today()).count() == 0
     db.close()
+
+
+def test_dictation_picks_new_and_due_words():
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 第1课：白鹭、矗立 两个生词
+    # 再建第2课，含 2 个生词，其中一个到期
+    doc = db.query(PdfDocument).first()
+    l2 = Lesson(document_id=doc.id, subject="语文", title="第2课", start_page=3, end_page=4,
+                extract_status="done", audit_status="approved")
+    db.add(l2); db.flush()
+    db.add(WordBank(lesson_id=l2.id, subject="语文", word="旧词A", extra=""))
+    wb_b = WordBank(lesson_id=l2.id, subject="语文", word="旧词B", extra="")
+    db.add(wb_b); db.flush()
+    db.add(WordMastery(word_bank_id=wb_b.id, is_weak=True,
+                       next_review_at=datetime.utcnow() - timedelta(days=1), user_id=uid))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    assert t is not None
+    words = json.loads(t.content)
+    got = {w["word"] for w in words}
+    # 新（当前进度课=第1课）应含白鹭、矗立；旧（到期）应含旧词B
+    assert "白鹭" in got and "矗立" in got
+    assert "旧词B" in got
+    # 到期旧词只有1个，凑不满2个 → 不硬补，总数为 2(新) + 1(旧) = 3
+    assert len(words) == 3
+    db.close()
