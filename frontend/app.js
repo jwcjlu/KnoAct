@@ -66,7 +66,7 @@ let uid = 1;
 let isParent = false;
 let parentTab = '教材';
 let wrongFilter = '全部';
-let currentSubject = '语文';   // 首页科目切换：'语文' | '英语'
+let currentSubject = '语文';   // 首页科目切换：'语文' | '英语' | '数学'
 
 // 家长端数据缓存
 let pdfDocs = [];
@@ -94,11 +94,6 @@ let parentTasks = [];      // 当天全部任务（含待审核）
 let dictWords = [];   // [{id, word, extra}]
 let dictState = null; // {idx, phase, wrong:[], correct:0}
 
-// 新课学习状态
-let nlState = null;   // {phase:'read'|'quiz', questions:[], picks:[], result:null}
-let nlChat = [];
-let nlNotes = [];
-let nlNoteSel = '';
 let currentText = '';
 let currentLessonId = 1;
 
@@ -107,33 +102,14 @@ let listenMaterial = null;
 let readMaterial = null;
 let centerTab = '听力理解';
 
-// —— 与 prototype/index.html 一致的展示态（数据仍走后端）——
 let completed = [];
-const tasks = [
-  {id:1,title:'第 12 课生词听写',detail:'今日新学 · 15 个重点生词',meta:'约 8 分钟',icon:'pen',color:'blue',points:20,tag:'当前进度',tagColor:'blue'},
-  {id:2,title:'第 12 课阅读理解',detail:'重点段落 · 2 道理解题',meta:'约 12 分钟',icon:'book',color:'orange',points:30,tag:'重点巩固',tagColor:'orange'},
-  {id:3,title:'旧课到期复习',detail:'第 8、10 课 · 易错知识点',meta:'约 10 分钟',icon:'brain',color:'green',points:25,tag:'遗忘曲线',tagColor:'green'}
-];
-let lessonProgress = {current:12, total:28, mastered:11};
 let homeSnapshot = null;   // 学习首页快照（来自 /api/home/snapshot）
 let dailyTasks = [];       // 今日任务（来自 /api/tasks）
-let newLesson = {
-  title:'第 13 课 · 精读课文',
-  subject:'语文',
-  text:'白鹭是一首精巧的诗。色素的配合，身段的大小，一切都很适宜。白鹤太大而嫌生硬，即使如粉红的朱鹭或灰色的苍鹭，也觉得大了一些，而且太不寻常了。然而白鹭却因为它的常见，而被人忘却了它的美。',
-  questions:[
-    {q:'作者把白鹭比作什么？',opts:['一首精巧的诗','一幅画','一首歌'],ans:0},
-    {q:'文中提到"白鹤太大而嫌生硬"，是为了说明什么？',opts:['白鹤不好看','白鹭大小适宜、恰到好处','白鹤很稀有'],ans:1},
-    {q:'作者认为白鹭的美被什么所掩盖？',opts:['它的颜色','它的常见','它的叫声'],ans:1}
-  ]
-};
-const vizDemo = {
-  math:'<div class="viz-minimap"><div class="viz-node root">分数</div><div class="viz-line"></div><div class="viz-node">分子 / 分母</div><div class="viz-line"></div><div class="viz-branch"><span class="viz-node">真分数</span><span class="viz-node">假分数</span><span class="viz-node">带分数</span></div></div><div class="viz-hint">🧭 思维导图讲解（原型示意）</div>'
-};
 let excerpt = '', answer = '', question = '';
 let chatMessages = [];  // 沉浸页对话记录 [{role:'user'|'ai', text, citations, mode}]
 let chatBusy = false;   // 是否正在等待 AI 回复
 let thinkingText = '正在思考…';   // 流式期间显示的占位文案
+let pendingThinking = '';   // 累积当前 turn 的推理文字（thinking 事件先于 final 到达）
 let navOpen = true;     // 沉浸页左栏目录开关
 let chatOpen = true;    // 沉浸页右栏对话开关
 let navWidth = readPanelWidth('nav', 200);   // 左栏目录宽度（可拖拽）
@@ -158,6 +134,10 @@ let plLessons = [];     // [{id, title, subject, start_page, end_page, texts, pa
 let activeDocId = null;
 let activeLessonId = null;
 let lessonSearch = '';  // 课文下拉搜索关键字
+// 作业（做作业出题/判分 → 推进进度）
+let plQuiz = [];          // 作业题 [{question, answer}]
+let plQuizPicks = {};     // {idx: 用户答案}
+let plQuizResult = null;  // {correct, total, passed, rate}
 // 阅读模式：整本（全书连续懒加载） vs 分课时（单课页区间）
 let readMode = 'lesson';   // 'book' | 'lesson'
 let fullScreen = false;    // 全屏沉浸页开关
@@ -291,7 +271,6 @@ async function render(){
   else if(active==='错题本') html = await renderWrongBook();
   else if(active==='学习首页') html = await renderHome();
   else if(active==='听写练习') html = renderDictation();
-  else if(active==='新课学习') html = renderNewLesson();
   else if(active==='学习中心') html = await renderCenter();
   else if(active==='学习报告' || active==='积分商城') html = renderPlaceholder(active);
   else html = renderHome();
@@ -402,7 +381,7 @@ async function renderHome(){
   const hour = today.getHours();
   const greet = hour<6?'夜深了':hour<12?'早上好':hour<18?'下午好':'晚上好';
 
-  const subjectTabs = ['语文','英语'].map(s=>
+  const subjectTabs = ['语文','英语','数学'].map(s=>
     `<button class="filter-btn ${currentSubject===s?'active':''}" style="border-radius:10px;padding:6px 16px;font-size:13px;font-weight:600;color:${currentSubject===s?'#3158e8':'#778079'};background:${currentSubject===s?'#fff':'transparent'}" onclick="setSubject('${s}')">${s}</button>`
   ).join('');
 
@@ -446,7 +425,7 @@ async function renderHome(){
     </div>
     <div class="p-bar"><div class="p-fill" style="width:${masteredPct}%"></div></div>
     <span class="p-txt">${totalLessons > 0 ? `${lp.mastered} / ${lp.total} 课` : '—'}</span>
-    <button class="next-lesson-btn" onclick="startNewLesson()">进入下一课 ${icon('arrow',16)}</button>
+    <button class="next-lesson-btn" onclick="setPage('个性化学习')">进入下一课 ${icon('arrow',16)}</button>
   </div>
 
   <section class="tasks-section" id="tasks-anchor">
@@ -523,7 +502,7 @@ async function redeemHome(cost, device, minutes){
 
 // ===== 听写练习 =====
 async function startDictation(){
-  dictWords = await api(`/api/dictation/words?user_id=${uid}`);
+  dictWords = await api(`/api/dictation/words?user_id=${uid}&subject=${encodeURIComponent(currentSubject)}`);
   if(!dictWords || !dictWords.length){ toast('当前词库暂无生词'); return; }
   dictState = {idx:0, phase:'listen', wrong:[], correct:0, input:''};
   setPage('听写练习');
@@ -630,7 +609,7 @@ function renderDictation(){
 
   if(s.phase==='done'){
     const wrongCount = s.wrong.length;
-    return `<header class="page-head"><div><h1>第 12 课生词听写</h1></div></header>
+    return `<header class="page-head"><div><h1>${currentSubject}生词听写</h1></div></header>
     <div class="dict-wrap">
       <div class="dict-done">
         <div class="big">${icon('check',24)} 听写完成！</div>
@@ -656,7 +635,7 @@ function renderDictation(){
   })() : '';
 
   return `<header class="page-head">
-    <div><h1>第 12 课生词听写</h1></div>
+    <div><h1>${currentSubject}生词听写</h1></div>
     <button class="btn-ghost" onclick="setPage('学习首页')">退出练习</button>
   </header>
   <div class="dict-wrap">
@@ -678,150 +657,6 @@ function renderDictation(){
   </div>`;
 }
 
-// ===== 新课学习（与 prototype 一致 + API）=====
-async function startNewLesson(){
-  nlState = {phase:'read', picks:[], result:null, pass:false};
-  nlChat = []; nlNotes = []; nlNoteSel = '';
-  try {
-    const mat = await api(`/api/reading/material?lesson_id=${currentLessonId}`);
-    if(mat.text) newLesson = {...newLesson, text: mat.text};
-  } catch (_) { /* 使用默认课文 */ }
-  currentText = newLesson.text;
-  setPage('新课学习');
-}
-function nlStartQuiz(){ nlState.phase='quiz'; render(); }
-function nlPick(qi, oi){ nlState.picks[qi]=oi; render(); }
-function nlSubmit(){
-  const s=nlState; let right=0;
-  newLesson.questions.forEach((q,i)=>{ if(s.picks[i]===q.ans) right++; });
-  const total=newLesson.questions.length;
-  const rate=right/total;
-  s.pass = rate >= 0.6;
-  s.result={right,total,rate};
-  render();
-}
-async function nlAdvance(){
-  const s=nlState;
-  const correct = s.result ? s.result.right : newLesson.questions.length;
-  const total = s.result ? s.result.total : newLesson.questions.length;
-  const d = await api('/api/progress/advance', {method:'POST', body:{user_id:uid, correct, total}});
-  if(d.passed){
-    lessonProgress.current += 1;
-    lessonProgress.mastered += 1;
-    await loadPoints();
-    setPage('学习首页');
-    toast('进度已推进到第 '+(lessonProgress.current+1)+' 课');
-  } else {
-    toast('正确率未达标，请重看内容再试');
-  }
-}
-function nlRetryRead(){ nlState.phase='read'; nlState.picks=[]; nlState.result=null; render(); }
-async function nlAsk(){
-  const v=(document.getElementById('nlAskInput')||{}).value||'';
-  if(!v.trim()) return;
-  nlChat.push({role:'q',text:v.trim()});
-  const isMath = newLesson.subject==='数学';
-  try {
-    const d = await api('/api/ask', {method:'POST', body:{lesson_id:currentLessonId, question:v.trim(), context:currentText}});
-    nlChat.push({role:'a', text: d.answer || `关于「${v.trim().slice(0,14)}」，结合这段课文的意思是……`, viz: isMath?vizDemo.math:null});
-  } catch (_) {
-    nlChat.push({role:'a', text: isMath?'让我用思维导图给你讲清楚这个概念：':`关于「${v.trim().slice(0,14)}」，结合这段课文的意思是……`, viz: isMath?vizDemo.math:null});
-  }
-  render();
-  const el=document.querySelector('.nl-chat-body'); if(el) el.scrollTop=el.scrollHeight;
-}
-function nlQuick(q){ document.getElementById('nlAskInput').value=q; nlAsk(); }
-function nlCaptureSel(){ const sel = window.getSelection ? window.getSelection().toString().trim() : ''; nlNoteSel = sel; render(); }
-function nlAddNote(){
-  const v=(document.getElementById('nlNoteInput')||{}).value||'';
-  if(!v.trim()) return;
-  api('/api/notes', {method:'POST', body:{lesson_id:currentLessonId, author_role:'child', content:v.trim(), anchor_text:nlNoteSel||''}});
-  nlNotes.push({id:Date.now(), anchor:nlNoteSel||'', text:v.trim(), page:'第 38–41 页', time:'刚刚'});
-  nlNoteSel=''; render();
-}
-function nlDelNote(id){ nlNotes = nlNotes.filter(n=>n.id!==id); render(); }
-function nlNoteHint(){ toast('划词记笔记：先用鼠标选中教材里的一段文字'); }
-function renderNewLesson(){
-  const s=nlState;
-  if(!s) return '<div class="placeholder-page"><h2>新课学习</h2><p>请从首页进入。</p></div>';
-
-  if(s.phase==='read'){
-    const isMath = newLesson.subject==='数学';
-    const chatMsgs = nlChat.map(m=>`
-      <div class="nl-msg ${m.role}">
-        ${m.role==='q'?'<div class="bubble q">'+m.text+'</div>':'<div class="bubble a">'+m.text+(m.viz?'<div class="viz-wrap">'+m.viz+'</div>':'')+'</div>'}
-      </div>`).join('');
-    const noteItems = nlNotes.map(n=>`
-      <div class="nl-note-item">
-        ${n.anchor?`<div class="nl-note-anchor">「${n.anchor.length>18?n.anchor.slice(0,18)+'…':n.anchor}」</div>`:''}
-        <div class="nl-note-text">${n.text}</div>
-        <div class="nl-note-meta">${n.page} · ${n.time}<span class="nl-note-del" onclick="nlDelNote(${n.id})">删除</span></div>
-      </div>`).join('');
-    return `<header class="page-head"><div><h1>进入下一课</h1></div><button class="btn-ghost" onclick="setPage('学习首页')">退出</button></header>
-    <div class="newlesson-wrap nl-full">
-      <div class="nl-read-top">
-        <span class="nl-tag read" style="display:inline-flex">${icon('book',14)} 第 1 步 · 阅读教材内容${isMath?' · 数学':''}</span>
-        <span class="nl-read-hint">${icon('sparkles',14)} 边读边问 · 不懂就问</span>
-      </div>
-      <div class="nl-immersive">
-        <div class="nl-reader">
-          <div class="nl-reader-head"><span class="nl-unit">${isMath?'第 5 单元':'第十二课'}</span><span>原版教材页面</span></div>
-          <div class="nl-page" onmouseup="nlCaptureSel()">
-            <h2 class="serif">${newLesson.title}</h2>
-            <div class="nl-content">${newLesson.text}</div>
-            ${isMath?'<div class="nl-math-note">📐 数学内容以思维导图 / 动画 / 交互图讲解，选中公式或概念即可提问</div>':''}
-            <div class="nl-note-tip" onclick="nlNoteHint()">${icon('pen',14)} 划词记笔记：选中文字后到这里写笔记</div>
-          </div>
-          <button class="nl-read-done" onclick="nlStartQuiz()">我已读完，去答题 ${icon('arrow',16)}</button>
-        </div>
-        <div class="nl-chat">
-          <div class="nl-chat-head">${icon('sparkles',16)} 不懂就问 · AI 讲解${isMath?'（可视化）':''}</div>
-          <div class="nl-chat-body">
-            ${nlChat.length?chatMsgs:`<div class="nl-chat-empty">${icon('sparkles',24)}<p>看到不懂的地方，划词或输入问题，AI 结合教材为你讲解。</p></div>`}
-          </div>
-          <div class="nl-quick" onclick="nlQuick('${isMath?'这道题的解题思路是什么？':'这段话是什么意思？'}')">${isMath?'这道题的解题思路是什么？':'这段话是什么意思？'}｜${isMath?'这个公式怎么推导？':'帮我总结知识点'}</div>
-          <div class="nl-chat-input"><input id="nlAskInput" placeholder="输入不懂的地方…" onkeydown="if(event.key==='Enter')nlAsk()"><button class="send-btn" onclick="nlAsk()">提问</button></div>
-        </div>
-      </div>
-      <div class="nl-notes">
-        <div class="nl-notes-head">${icon('pen',16)} 我的笔记（本课）<span class="nl-notes-count">${nlNotes.length} 条</span></div>
-        ${nlNoteSel?`<div class="nl-note-editor">
-          <div class="nl-note-anchor">${icon('check',13)} 已选中：「${nlNoteSel.length>20?nlNoteSel.slice(0,20)+'…':nlNoteSel}」</div>
-          <div class="nl-note-input-row"><input id="nlNoteInput" placeholder="写下你的笔记…" onkeydown="if(event.key==='Enter')nlAddNote()"><button class="send-btn" onclick="nlAddNote()">保存</button></div>
-        </div>`:`<div class="nl-note-editor"><div class="nl-note-input-row"><input id="nlNoteInput" placeholder="写一条自由笔记…" onkeydown="if(event.key==='Enter')nlAddNote()"><button class="send-btn" onclick="nlAddNote()">保存</button></div></div>`}
-        <div class="nl-note-list">${nlNotes.length?noteItems:`<div class="nl-chat-empty" style="padding:16px">还没有笔记，选中教材文字或直接写一条吧。</div>`}</div>
-      </div>
-    </div>`;
-  }
-
-  const items = newLesson.questions.map((q,qi)=>{
-    const opts = q.opts.map((o,oi)=>`<button class="nl-opt ${s.picks[qi]===oi?'sel':''}" onclick="nlPick(${qi},${oi})">${String.fromCharCode(65+oi)}. ${o}</button>`).join('');
-    return `<div class="nl-quiz-item"><div class="qq">${qi+1}. ${q.q}</div><div class="nl-options">${opts}</div></div>`;
-  }).join('');
-
-  const answered = s.picks.filter(p=>p!==undefined).length;
-  const allAnswered = answered === newLesson.questions.length;
-
-  let result='';
-  if(s.result){
-    const retryOn = s.pass ? 'nlAdvance()' : 'nlRetryRead()';
-    result = `<div class="nl-result ${s.pass?'pass':'fail'}">
-      <div class="r-head">${s.pass?icon('check',18)+'答对了！通过':icon('pen',18)+'还没达标'}</div>
-      <div class="r-body">${s.pass?'正确率 '+Math.round(s.result.rate*100)+'%，可以进入下一课':'正确率 '+Math.round(s.result.rate*100)+'%，需达到 60% 才能推进，重看内容再试一次'}</div>
-    </div>
-    <button class="nl-retry" onclick="${retryOn}">${s.pass?'进入下一课':'返回重看内容'}</button>`;
-  }
-
-  return `<header class="page-head"><div><h1>进入下一课</h1></div><button class="btn-ghost" onclick="setPage('学习首页')">退出</button></header>
-  <div class="newlesson-wrap">
-    <div class="nl-step">
-      <span class="nl-tag quiz">${icon('pen',14)} 第 2 步 · 回答理解题</span>
-      <h2>检验是否读懂</h2>
-      ${items}
-      ${result || `<button class="nl-submit" onclick="nlSubmit()" ${allAnswered?'':'disabled'}>提交答案</button>`}
-    </div>
-  </div>`;
-}
 
 async function loadCenter(){
   listenMaterial = await api(`/api/listening/material?user_id=${uid}`);
@@ -890,8 +725,8 @@ async function renderCenter(){
         <div class="center-panel">
           <div class="center-material">
             <div class="cm-head">${icon('volume',16)} 听力对话</div>
-            <div class="cm-text">${m.text}</div>
             <button class="center-play" onclick="playListening()">${icon('play',16)} 播放对话</button>
+            <div class="cm-hint">点击上方按钮播放对话，认真听，不要看文本哦</div>
           </div>
           <div class="center-questions">${qs}</div>
         </div>`;
@@ -945,8 +780,8 @@ async function renderWrongBook(){
     api(`/api/mistakes/report?user_id=${uid}`)
   ]);
   mistakes = mistakeList;
-  const subjOf = s => s==='dictation'||s==='reading'?'语文':'英语';
-  const srcName = {dictation:'第 12 课 · 生词听写', review:'基础知识复习', listening:'Unit 4 · 单词听写', reading:'第 10 课 · 阅读理解', goal:'目标考核'};
+  const subjOf = s => s==='math'?'数学':(s==='dictation'||s==='reading'?'语文':'英语');
+  const srcName = {dictation:'生词听写', review:'基础知识复习', listening:'单词听写', reading:'阅读理解', goal:'目标考核', math:'数学练习'};
   const reasonOf = m => m.mistake_count > 2 ? '反复出错，需加强' : (m.source_type==='dictation'?'形近字混淆':'理解偏差');
   const visible = mistakes.filter(m => (wrongFilter==='全部'||subjOf(m.source_type)===wrongFilter) && m.consecutive_correct < 3);
   const pending = mistakes.filter(m => m.consecutive_correct < 3).length;
@@ -995,7 +830,7 @@ async function renderWrongBook(){
     <div class="head">
       <div><h2>错题列表</h2><div class="sub">AI 会分析错误原因，并在合适的时间生成同类题</div></div>
       <div class="filter">
-        ${['全部','语文','英语'].map(s=>`<button class="${wrongFilter===s?'active':''}" onclick="setFilter('${s}')">${s}</button>`).join('')}
+        ${['全部','语文','英语','数学'].map(s=>`<button class="${wrongFilter===s?'active':''}" onclick="setFilter('${s}')">${s}</button>`).join('')}
       </div>
     </div>
     <div class="wrong-items">${empty}</div>
@@ -1028,6 +863,23 @@ function selectLesson(id){
   }
   render();
   loadAnnotations();
+}
+async function startAssignment(){
+  if(!activeLessonId){ toast('请先选择课程'); return; }
+  const res = await api(`/api/learning/assignment`, {method:'POST', body:{user_id:uid, lesson_id:activeLessonId, subject:currentSubject}});
+  plQuiz = res.questions || [];
+  plQuizPicks = {};
+  plQuizResult = null;
+  render();
+}
+async function submitAssignment(){
+  let correct = 0;
+  plQuiz.forEach((q,i)=>{ if((plQuizPicks[i]||'').trim() === (q.answer||'').trim()) correct++; });
+  const total = plQuiz.length;
+  const d = await api(`/api/learning/assignment/grade`, {method:'POST', body:{user_id:uid, lesson_id:activeLessonId, subject:currentSubject, correct, total}});
+  plQuizResult = {correct, total, passed: d.passed, rate: d.rate};
+  render();
+  toast(d.passed ? '作业通过，课程进度已更新' : '未达标，请重看内容再试');
 }
 function chooseReadMode(mode){
   readMode = mode;
@@ -1099,6 +951,11 @@ function renderLessonOptions(){
   const inp = sel.querySelector('#lesson-search-input');
   if(inp){ inp.focus(); const v = inp.value; inp.setSelectionRange(v.length, v.length); }
 }
+// AI 对话开关：configMap 里 personalized_disable_chat !== 'false'（即未显式设为 false = 默认禁用）时关闭对话
+function chatDisabled(){
+  if(!configMap || typeof configMap['personalized_disable_chat'] === 'undefined') return true;
+  return configMap['personalized_disable_chat'] !== 'false';
+}
 async function renderPersonalized(){
   if(plDocs.length===0){
     plDocs = await api('/api/pdf/documents');
@@ -1161,6 +1018,40 @@ async function renderPersonalized(){
     annotationList = `<section class="pl-sentences" id="annotation-list" style="margin-top:12px"></section>`;
   }
 
+  // 作业区块（做作业出题/判分 → 推进进度）
+  let assignmentBlock = '';
+  if(lesson){
+    if(plQuizResult){
+      const pass = plQuizResult.passed;
+      assignmentBlock = `<section class="pl-ask">
+        <h3>${icon('pen',16)} 本课作业</h3>
+        <div style="padding:14px;border-radius:10px;background:${pass?'#e8f5ec':'#fdeeee'};font-size:13px;line-height:1.6">
+          <div style="font-weight:700;color:${pass?'#1f8a4c':'#c0392b'}">${pass?'✓ 作业通过':'✕ 未达标'}</div>
+          <div style="color:#555;margin-top:4px">答对 ${plQuizResult.correct} / ${plQuizResult.total} 题${plQuizResult.rate!=null?`（正确率 ${Math.round(plQuizResult.rate*100)}%）`:''}</div>
+          ${pass?'<div style="color:#1f8a4c;margin-top:4px">课程进度已更新，可去学习首页查看下一课。</div>':'<div style="color:#c0392b;margin-top:4px">请重看教材内容后再试一次。</div>'}
+        </div>
+        <button class="qa-btn" style="margin-top:10px" onclick="startAssignment()">重新做作业</button>
+      </section>`;
+    } else if(plQuiz.length){
+      const items = plQuiz.map((q,i)=>`
+        <div style="margin-bottom:12px">
+          <div style="font-size:13px;font-weight:600;color:#333;margin-bottom:6px">${i+1}. ${escapeAttr(q.question)}</div>
+          <input style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e6e3;border-radius:8px;font-size:13px" placeholder="写下你的回答…" oninput="plQuizPicks[${i}]=this.value">
+        </div>`).join('');
+      assignmentBlock = `<section class="pl-ask">
+        <h3>${icon('pen',16)} 本课作业</h3>
+        ${items}
+        <button class="qa-btn" style="width:100%;background:#3158e8;color:#fff" onclick="submitAssignment()">提交作业</button>
+      </section>`;
+    } else {
+      assignmentBlock = `<section class="pl-ask">
+        <h3>${icon('pen',16)} 本课作业</h3>
+        <div style="font-size:13px;color:#8e9691">读完课文后，做几道理解题检验掌握情况，答对即可推进到下一课。</div>
+        <button class="qa-btn" style="margin-top:10px;background:#3158e8;color:#fff" onclick="startAssignment()">去做作业</button>
+      </section>`;
+    }
+  }
+
   // ===== 全屏沉浸页（三栏：目录 / 阅读器 / 对话）=====
   if(fullScreen && activeDoc && activeDoc.storage_path){
     const isBook = readMode === 'book';
@@ -1210,7 +1101,7 @@ async function renderPersonalized(){
         <span class="im-divider"></span>
         <button class="im-tool" onclick="speakLesson()" title="朗读">${icon('volume',18)}</button>
         <button class="im-tool" onclick="startQuiz()" title="测验">${icon('list',18)}</button>
-        <button class="im-tool" onclick="startAskQuestions()" title="主动提问">${icon('sparkles',18)}</button>
+        ${chatDisabled() ? '' : `<button class="im-tool" onclick="startAskQuestions()" title="主动提问">${icon('sparkles',18)}</button>`}
         <button class="im-tool" onclick="exitImmersive()" title="退出全屏">${icon('expand',18)}</button>
         <button class="im-tool" onclick="toast('更多功能开发中')" title="菜单">${icon('menu',18)}</button>
         <span class="im-divider"></span>
@@ -1236,6 +1127,7 @@ async function renderPersonalized(){
           ${excerpt ? `<div class="im-ctx" title="${escapeAttr(excerpt)}"><span class="q">引用：${escapeAttr(excerpt)}</span><span class="x" onclick="excerpt='';render()">×</span></div>` : ''}
           <div class="im-chat-body" id="im-chat-body">${chatList}</div>
           <div class="im-composer">
+            ${chatDisabled() ? `<div class="im-empty" style="padding:18px 16px"><div class="hint">测试阶段暂不开放 AI 对话</div></div>` : `
             <div class="im-chips" id="im-chips">
               <button class="im-chip ${chatModel?'on':''}" onclick="toggleChatMenu('model', event)">
                 ${icon('brain',14)}<span>${chatModel ? shortModelName(chatModel) : '默认模型'}</span><span class="caret">▾</span>
@@ -1253,7 +1145,7 @@ async function renderPersonalized(){
             <div class="row">
               <textarea id="im-input" placeholder="针对这段教材提问…" oninput="question=this.value" onkeydown="imInputKey(event)"></textarea>
               <button class="send-btn" id="im-send" onclick="chatAsk()" title="发送">${icon('arrow',18)}</button>
-            </div>
+            </div>`}
           </div>
         </aside>` : ''}
       </div>
@@ -1292,16 +1184,18 @@ async function renderPersonalized(){
         <h3>选中的教材内容</h3>
         <textarea class="ta" placeholder="在正文里拖选一段文字，自动填入…" oninput="excerpt=this.value">${excerpt}</textarea>
         <div class="quick-actions">
-          <button class="qa-btn" onclick="ask('这段话是什么意思？')">这段话是什么意思？</button>
+          ${chatDisabled() ? `<span style="font-size:12px;color:#a0a7a2">测试阶段暂不开放 AI 对话</span>`
+            : `<button class="qa-btn" onclick="ask('这段话是什么意思？')">这段话是什么意思？</button>
           <button class="qa-btn" onclick="ask('帮我总结知识点')">帮我总结知识点</button>
-          <button class="qa-btn" onclick="ask('给我出一道练习题')">给我出一道练习题</button>
+          <button class="qa-btn" onclick="ask('给我出一道练习题')">给我出一道练习题</button>`}
         </div>
       </section>
       ${annotationList}
-      <section class="pl-question">
+      ${assignmentBlock}
+      ${chatDisabled() ? '' : `<section class="pl-question">
         <h3>针对这段教材提问</h3>
         <div class="qa-input"><input placeholder="针对这段教材提问…" oninput="question=this.value"><button class="send-btn" onclick="ask()">发送问题</button></div>
-      </section>
+      </section>`}
       ${answer?`<section class="pl-answer"><h3>${icon('sparkles',16)}AI 讲解</h3><div class="ans">${renderAnswer(answer)}</div></section>`:''}
     </div>
   </div>`;
@@ -1830,12 +1724,58 @@ function focusAnnotation(a){
 }
 
 let _mmdSeq = 0;
+let _mermaidReady = false;
+function sanitizeMermaidCode(code){
+  const esc = t => String(t||'').replace(/"/g,"'").replace(/[\n#;`|]/g,' ').trim().slice(0,36);
+  let s = String(code || '').replace(/\u200b|\ufeff/g, '').replace(/（/g,'(').replace(/）/g, ')');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
+  const labels = [];
+  const seen = new Set();
+  const add = t => { t = esc(t); if(t.length<2 || seen.has(t)) return; seen.add(t); labels.push(t); };
+  s.split('\n').forEach(ln=>{
+    const line = ln.trim();
+    if(!line || /^(graph|flowchart|mindmap)\b/i.test(line)) return;
+    let m;
+    const reQ = /\["([^"]+)"\]|\[([^\]]+)\]|\(\(([^)]+)\)\)|\(([^)]+)\)/g;
+    while((m = reQ.exec(line))) add(m[1]||m[2]||m[3]||m[4]);
+    if(!/[-->\[\(]/.test(line) && line.length<=32) add(line.replace(/^root\s*/i,''));
+  });
+  const pts = labels.slice(0,8);
+  const root = esc('本课要点');
+  if(!pts.length){
+    return 'graph TD\n  root["本课要点"]\n  n0["详见上方说明"]\n  root --> n0';
+  }
+  let g = 'graph TD\n  root["'+root+'"]\n';
+  pts.forEach((p,i)=>{ g += '  n'+i+'["'+esc(p)+'"]\n  root --> n'+i+'\n'; });
+  return g.trim();
+}
+
+function mermaidSvgLooksBroken(svg){
+  return /Syntax error|syntax-error|fa-bomb|error-text/i.test(String(svg||''));
+}
+
+function ensureMermaid(){
+  if(_mermaidReady || !window.mermaid) return;
+  try{
+    mermaid.initialize({
+      startOnLoad:false,
+      securityLevel:'loose',
+      theme:'neutral',
+      suppressErrorRendering:true,
+    });
+    _mermaidReady = true;
+  }catch(e){ /* CDN 未加载 */ }
+}
+
 function renderAnswer(ans){
   // 把 [第N句] 渲染成可点击跳转的出处按钮
   let html = escapeAttr(ans);
+  html = html.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\[第\s*(\d+)\s*句\]/g, (m, n) => `<button class="citation" onclick="jumpToSentence(${n})" title="跳转到课文第${n}句">${escapeAttr(m)}</button>`);
   // 把 ```mermaid 代码块换成占位容器，稍后由 renderMermaids 异步渲染成图
-  html = html.replace(/```mermaid\s*([\s\S]*?)```/g, (m, code) => {
+  let _mmdInAnswer = 0;
+  html = html.replace(/```mermaid\s*([\s\S]*?)```/gi, (m, code) => {
+    if(++_mmdInAnswer > 1) return '';
     const id = 'mmd' + (++_mmdSeq);
     return `<div class="mmd" data-mmd="${id}"><pre style="display:none">${escapeAttr(code.trim())}</pre><div class="mmd-loading" style="color:#8e9691;font-size:12px">正在画图…</div></div>`;
   });
@@ -1844,18 +1784,53 @@ function renderAnswer(ans){
 
 // 把气泡里的 mermaid 占位容器渲染成 SVG 图
 function renderMermaids(container){
-  if(!window.mermaid || !container) return;
-  container.querySelectorAll('.mmd[data-mmd]').forEach(async box=>{
-    if(box._done) return; box._done = true;
+  ensureMermaid();
+  if(!container) return;
+  if(!window.mermaid){
+    container.querySelectorAll('.mmd[data-mmd]').forEach(box=>{
+      if(box.dataset.mmdDone === '1') return;
+      const pre = box.querySelector('pre');
+      box.innerHTML = '<div style="color:#c05b4a;font-size:12px">Mermaid 库未加载，请检查网络后刷新</div>'
+        + (pre ? `<pre class="mmd-src">${escapeAttr(pre.textContent.trim())}</pre>` : '');
+      box.dataset.mmdDone = '1';
+    });
+    return;
+  }
+  container.querySelectorAll('.mmd[data-mmd]').forEach(box=>{
+    if(box.dataset.mmdDone === '1' || box.dataset.mmdBusy === '1') return;
     const pre = box.querySelector('pre');
     if(!pre) return;
-    const code = pre.textContent;
-    try{
-      const {svg} = await mermaid.render(box.dataset.mmd + '-svg', code);
-      box.innerHTML = svg;
-    }catch(err){
-      box.innerHTML = `<div style="color:#c05b4a;font-size:12px">图示渲染失败</div>`;
+    let code = sanitizeMermaidCode(pre.textContent.trim());
+    if(!code){
+      box.innerHTML = '<div style="color:#8e9691;font-size:12px">暂无图示代码</div>';
+      box.dataset.mmdDone = '1';
+      return;
     }
+    box.dataset.mmdBusy = '1';
+    const renderId = box.dataset.mmd + '-svg-' + Date.now();
+    (async ()=>{
+      try{
+        const timer = new Promise((_, rej)=>setTimeout(()=>rej(new Error('timeout')), 15000));
+        let svgOut;
+        const fallback = 'graph TD\n  root["本课要点"]\n  n0["详见上方文字说明"]\n  root --> n0';
+        try{
+          if(typeof mermaid.parse === 'function') await mermaid.parse(code);
+          svgOut = (await Promise.race([mermaid.render(renderId, code), timer])).svg;
+          if(mermaidSvgLooksBroken(svgOut)) throw new Error('broken');
+        }catch(e1){
+          svgOut = (await mermaid.render(renderId + '-fb', fallback)).svg;
+        }
+        box.innerHTML = mermaidSvgLooksBroken(svgOut)
+          ? `<div style="color:#8e9691;font-size:12px">图示简版</div>${svgOut}`
+          : svgOut;
+        box.dataset.mmdDone = '1';
+      }catch(err){
+        box.innerHTML = `<div style="color:#c05b4a;font-size:12px;margin-bottom:6px">图示渲染失败，以下为源码：</div><pre class="mmd-src">${escapeAttr(code)}</pre>`;
+        box.dataset.mmdDone = '1';
+      }finally{
+        box.dataset.mmdBusy = '0';
+      }
+    })();
   });
 }
 
@@ -1914,13 +1889,17 @@ let askState  = {questions:[], replies:{}};
 
 async function startQuiz(){
   chatOpen = true;
-  chatBusy = true; renderImmersiveChat();
+  chatBusy = true; thinkingText = '正在出题…'; renderImmersiveChat();
+  let reason = '';
   try{
     const d = await api('/api/quiz/generate', {method:'POST', body:{lesson_id:currentLessonId}});
     quizState = {quiz_id:d.quiz_id, questions:d.questions||[], answers:{}, submitted:false, results:[]};
+    if(!quizState.questions.length) reason = d.detail || '';
   }catch(e){
-    toast('出题失败，请确认已配置 AI');
     quizState = {quiz_id:null, questions:[], answers:{}, submitted:false, results:[]};
+  }
+  if(!quizState.questions.length){
+    chatMessages.push({role:'ai', text:`出题失败${reason ? '（' + reason + '）' : ''}，请稍后再试一次。`, citations:[], mode:'quiz'});
   }
   chatBusy = false; renderImmersiveChat();
 }
@@ -1929,7 +1908,18 @@ async function submitQuiz(){
   const answers = quizState.questions.map(q=>({question_id:q.id, selected_index:quizState.answers[q.id]}));
   try{
     const d = await api('/api/quiz/submit', {method:'POST', body:{quiz_id:quizState.quiz_id, answers}});
-    quizState.results = d.answers; quizState.submitted = true;
+    quizState.results = (d.answers || []).map((r, idx) => {
+      const q = quizState.questions[idx];
+      const qid = q ? q.id : r.question_id;
+      return {
+        ...r,
+        question_id: r.question_id != null ? r.question_id : qid,
+        correct_index: r.correct_index != null ? Number(r.correct_index) : null,
+        selected_index: r.selected_index != null ? Number(r.selected_index)
+          : (quizState.answers[qid] != null ? Number(quizState.answers[qid]) : null),
+      };
+    });
+    quizState.submitted = true;
   }catch(e){ toast('提交失败，测验可能已过期'); }
   renderImmersiveChat();
 }
@@ -1963,8 +1953,12 @@ async function chatAsk(preset){
   const ctx = excerpt && excerpt.trim() ? excerpt.trim() : currentText;
   chatMessages.push({role:'user', text:q});
   question = '';
+  // 后端没有 quiz / questions capability，走自由对话会把答案直接写出来；改走答案不下发的卡片流程
+  if(chatMode === 'quiz'){ startQuiz(); return; }
+  if(chatMode === 'questions'){ startAskQuestions(); return; }
   chatBusy = true;
   thinkingText = '正在思考…';
+  pendingThinking = '';
   renderImmersiveChat();
   const body = {lesson_id:currentLessonId, question:q, context:ctx, mode:chatMode, sentences: splitSentences(ctx)};
   if(chatModel) body.model = chatModel;
@@ -2007,11 +2001,17 @@ function updateThinking(text){
 }
 
 function handleStreamEvent(evt){
-  if(evt.type === 'tool_call'){
+  if(evt.type === 'thinking'){
+    pendingThinking += (evt.data.text || '');
+  } else if(evt.type === 'tool_call'){
     updateThinking(`正在${toolLabel(evt.data.tool)}…`);
   } else if(evt.type === 'final'){
     const d = evt.data;
     const msg = {role:'ai', text:d.answer || '（暂无回答）', citations:d.citations || [], mode:d.mode || chatMode};
+    if(pendingThinking.trim()){
+      msg.thinking = pendingThinking.trim();
+    }
+    pendingThinking = '';
     if(d.render_task_id){
       msg.renderTaskId = d.render_task_id;
       msg.renderStatus = 'rendering';
@@ -2030,7 +2030,7 @@ async function pollRenderTask(taskId, msgIndex){
     if(url) m.renderVideo = url;
     renderImmersiveChat();
   };
-  for(let i = 0; i < 60; i++){  // 最多 60 × 3s = 180s
+  for(let i = 0; i < 160; i++){  // 最多 160 × 3s = 480s（LLM 生成代码约 3-4 分钟，必须等够）
     try{
       const r = await fetch(API + '/api/render/' + taskId);
       const d = await r.json();
@@ -2062,7 +2062,7 @@ function renderImmersiveChat(){
         if(isUser) return `<div class="im-msg user" data-i="${i}"><div class="bubble">${escapeAttr(m.text)}</div></div>`;
         const modeName = CHAT_MODES.find(x=>x.id===(m.mode||'chat'))?.name;
         const modeTag = modeName && modeName !== '对话' ? `<span class="mm-tag">${modeName}</span>` : '';
-        return `<div class="im-msg ai" data-i="${i}">${modeTag}<div class="bubble">${renderAnswer(m.text)}</div>${m.renderTaskId?renderTaskCard(m):''}${m.citations&&m.citations.length?`<div class="meta">出处：第 ${m.citations.join('、')} 句</div>`:''}</div>`;
+        return `<div class="im-msg ai" data-i="${i}">${modeTag}<div class="bubble">${renderAnswer(m.text)}</div>${m.thinking?thinkingCard(m.thinking):''}${m.renderTaskId?renderTaskCard(m):''}${m.citations&&m.citations.length?`<div class="meta">出处：第 ${m.citations.join('、')} 句</div>`:''}</div>`;
       }).join('')
     : `<div class="im-empty"><div class="mark">${welcomeMark()}</div><div class="big">边读边问，随时解惑</div><div class="hint">选中正文里任意一段，就能追问、解释或翻译它；AI 的回答会指明出自原文的哪一处。</div></div>`;
   const cards = quizCardHtml() + askCardHtml();
@@ -2084,22 +2084,45 @@ function renderTaskCard(m){
   if(m.renderStatus === 'error'){
     return `<div class="render-card">动画生成失败，请稍后再试。</div>`;
   }
-  const label = {rendering:'渲染中…', generating:'生成中…', mixing:'合成音轨…', queued:'排队中…', submitted:'已提交…'}[m.renderStatus] || '渲染中…';
+  const label = {rendering:'渲染中…', generating:'正在生成动画（约 3-4 分钟，请稍候）…', mixing:'合成音轨…', queued:'排队中…', submitted:'已提交…'}[m.renderStatus] || '渲染中…';
   return `<div class="render-card"><span class="render-progress">${label}</span></div>`;
+}
+function thinkingCard(text){
+  // 仿 DeepTutor ModelThinkingCard：可折叠的「思考过程」卡片，默认折叠
+  return `<details class="thinking-card">
+    <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1.27A7 7 0 0 1 13 22h-2a7 7 0 0 1-6.73-4H3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/></svg>思考过程</summary>
+    <div class="thinking-body">${renderAnswer(text)}</div>
+  </details>`;
 }
 function quizCardHtml(){
   if(!quizState.questions.length) return '';
-  return `<div class="quiz-card">
-    ${quizState.questions.map(q=>{
+  return `<div class="quiz-card${quizState.submitted ? ' submitted' : ''}">
+    ${quizState.questions.map((q, qi)=>{
+      const qid = String(q.id);
       const chosen = quizState.answers[q.id];
-      const r = quizState.submitted ? quizState.results.find(x=>x.question_id===q.id) : null;
+      const r = quizState.submitted
+        ? (quizState.results.find(x => String(x.question_id) === qid) || quizState.results[qi])
+        : null;
       return `<div class="quiz-q">
         <div class="qq-prompt">${escapeAttr(q.prompt)}</div>
-        ${q.choices.map((c,i)=>`
-          <label class="qq-choice ${chosen===i?'on':''} ${r?(r.is_correct?'ok':'bad'):''}" onclick="pickQuizAnswer('${q.id}',${i})">
-            ${String.fromCharCode(65+i)}. ${escapeAttr(c)}
-            ${quizState.submitted && r ? (r.is_correct?' ✓':' ✗') : ''}
-          </label>`).join('')}
+        ${q.choices.map((c,i)=>{
+          let cls = (Number(chosen) === i && !quizState.submitted) ? 'on' : '';
+          let mark = '';
+          if(quizState.submitted && r){
+            const ci = r.correct_index != null ? Number(r.correct_index) : -1;
+            const sel = r.selected_index != null ? Number(r.selected_index)
+              : (chosen != null ? Number(chosen) : -1);
+            const hasKey = ci >= 0 && ci < q.choices.length;
+            if(hasKey && i === ci){ cls = 'ok'; mark = ' ✓'; }
+            else if(hasKey && i === sel && sel !== ci){ cls = 'bad'; mark = ' ✗'; }
+            else if(!hasKey && r.is_correct && i === sel){ cls = 'ok'; mark = ' ✓'; }
+            else if(!hasKey && !r.is_correct && i === sel){ cls = 'bad'; mark = ' ✗'; }
+          }
+          const click = quizState.submitted ? '' : ` onclick="pickQuizAnswer('${qid}',${i})"`;
+          return `<label class="qq-choice ${cls}"${click}>
+            ${String.fromCharCode(65+i)}. ${escapeAttr(c)}${mark}
+          </label>`;
+        }).join('')}
       </div>`;
     }).join('')}
     <div class="quiz-foot">
@@ -2343,6 +2366,7 @@ function renderTaskTab(){
         <div class="ic blue">${icon('list',20)}</div>
         <div><h3>任务管理</h3><div class="sub">${parentTaskDate} · 内容审核与完成审核</div></div>
         <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn-ghost" onclick="generateTodayTasks()">生成今日任务</button>
           <button class="btn-ghost" onclick="approveAllTasks()">全部通过</button>
           <button class="btn-primary" style="padding:8px 16px" onclick="showAddTask()">新增任务</button>
         </div>
@@ -2354,6 +2378,12 @@ function renderTaskTab(){
   </div>`;
 }
 async function approveTask(id){ await api(`/api/tasks/${id}/approve`,{method:'POST'}); await loadParentTasks(); render(); }
+async function generateTodayTasks(){
+  if(!confirm('将重新生成本日任务（含听写生词/单词），覆盖当前已有任务。确定吗？')) return;
+  await api(`/api/tasks/generate?user_id=${uid}&d=${parentTaskDate}&force=true`, {method:'POST'});
+  toast('今日任务已重新生成');
+  await loadParentTasks(); render();
+}
 async function approveAllTasks(){ await api(`/api/tasks/approve-all`,{method:'POST',body:{user_id:uid,date:parentTaskDate}}); await loadParentTasks(); render(); }
 async function deleteTask(id){ await api(`/api/tasks/${id}`,{method:'DELETE'}); await loadParentTasks(); render(); }
 async function confirmTask(id){ await api(`/api/tasks/${id}/confirm`,{method:'POST'}); toast('已确认，积分已发放'); await loadParentTasks(); render(); }
@@ -2396,12 +2426,12 @@ function renderPdfTab(){
           <div class="upload-drop" onclick="document.getElementById('pdfFile').click()">
             <div class="ic">${icon('book',28)}</div>
             <div class="t">点击上传 PDF 教材</div>
-            <div class="s">支持语文 / 英语教材，上传后自动识别目录并拆课</div>
+            <div class="s">支持语文 / 英语 / 数学教材，上传后自动识别目录并拆课</div>
           </div>
           <input type="file" id="pdfFile" accept="application/pdf" style="display:none" onchange="uploadPdf(this)">
           <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
             <span style="font-size:13px;color:var(--gray2)">学科：</span>
-            <select id="pdfSubject" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px"><option>语文</option><option>英语</option></select>
+            <select id="pdfSubject" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px"><option>语文</option><option>英语</option><option>数学</option></select>
           </div>
           <div style="margin-top:12px"><span class="pdf-back" onclick="pdfTab=null;render()">${icon('arrow',14)} 返回教材列表</span></div>
         </div>
@@ -2537,9 +2567,10 @@ async function uploadPdf(input){
 
 // ---- 知识点 ----
 function renderKnowledgeTab(){
-  const subjColor = s => s==='语文'?'var(--blue-soft);color:var(--blue2)':'var(--orange-soft);color:var(--orange2)';
+  const subjColor = s => s==='语文'?'var(--blue-soft);color:var(--blue2)':(s==='英语'?'var(--orange-soft);color:var(--orange2)':'var(--green-soft2);color:var(--green)');
   const yw = knowledgeRows.filter(p=>p.subject==='语文');
   const en = knowledgeRows.filter(p=>p.subject==='英语');
+  const ma = knowledgeRows.filter(p=>p.subject==='数学');
   const block = (subject, rows, color) => {
     const byCat = {};
     rows.forEach(p=>{ (byCat[p.category] = byCat[p.category]||[]).push(p); });
@@ -2556,12 +2587,13 @@ function renderKnowledgeTab(){
   return `<div class="parent-grid">
     ${block('语文', yw, subjColor('语文'))}
     ${block('英语', en, subjColor('英语'))}
+    ${block('数学', ma, subjColor('数学'))}
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic purple">${icon('sparkles',20)}</div><div><h3>添加知识点</h3><div class="sub">手动补充教材外的基础知识，AI 据此出题</div></div></div>
       <div class="bd">
         <div style="display:flex;gap:8px">
-          <select id="kpSubject" style="border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"><option>语文</option><option>英语</option></select>
-          <select id="kpCategory" style="border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"><option>字词</option><option>拼音</option><option>句式</option><option>古诗文</option><option>语法</option><option>句型</option></select>
+          <select id="kpSubject" style="border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"><option>语文</option><option>英语</option><option>数学</option></select>
+          <select id="kpCategory" style="border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"><option>字词</option><option>拼音</option><option>句式</option><option>古诗文</option><option>语法</option><option>句型</option><option>计算</option><option>图形</option><option>应用题</option></select>
           <input id="kpContent" placeholder="知识点内容，如：动词第三人称单数加 s" style="flex:1;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px">
           <button class="btn-primary" style="padding:10px 20px" onclick="addKnowledge()">添加</button>
         </div>
@@ -2585,7 +2617,7 @@ async function delKnowledge(id){
 // ---- 目标 ----
 function renderGoalsTab(){
   const goals = goalRows.map(g=>{
-    const statusMap = {pending:['待开始','#eef0ed','#78817b','#d5dad5',0,'3 个知识点 · 待开始'], in_progress:['学习中','var(--orange-soft)','var(--orange2)','var(--orange)',72,'15 个生词 · 已掌握 11 个'], done:['已掌握','var(--green-soft2)','var(--green)','var(--green)',100,'20 个单词 · 全部掌握']};
+    const statusMap = {pending:['待开始','#eef0ed','#78817b','#d5dad5',0,'尚未开始'], in_progress:['学习中','var(--orange-soft)','var(--orange2)','var(--orange)',50,'进行中'], done:['已掌握','var(--green-soft2)','var(--green)','var(--green)',100,'已达成']};
     const [label,bg,fg,fc,progress,meta] = statusMap[g.status]||statusMap.pending;
     return `<div class="goal-item">
       <div class="g-top"><span class="g-name">${g.content}</span><span class="g-status" style="background:${bg};color:${fg}">${label}</span></div>
