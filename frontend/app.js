@@ -875,9 +875,13 @@ async function startAssignment(){
 }
 async function submitAssignment(){
   let correct = 0;
-  plQuiz.forEach((q,i)=>{ if((plQuizPicks[i]||'').trim() === (q.answer||'').trim()) correct++; });
+  const answers = plQuiz.map((q,i)=>{
+    const isCorrect = (plQuizPicks[i]||'').trim() === (q.answer||'').trim();
+    if(isCorrect) correct++;
+    return {knowledge_point_id: q.knowledge_point_id ?? null, is_correct: isCorrect};
+  });
   const total = plQuiz.length;
-  const d = await api(`/api/learning/assignment/grade`, {method:'POST', body:{user_id:uid, lesson_id:activeLessonId, subject:currentSubject, correct, total}});
+  const d = await api(`/api/learning/assignment/grade`, {method:'POST', body:{user_id:uid, lesson_id:activeLessonId, subject:currentSubject, answers}});
   plQuizResult = {correct, total, passed: d.passed, rate: d.rate};
   render();
   toast(d.passed ? '作业通过，课程进度已更新' : '未达标，请重看内容再试');
