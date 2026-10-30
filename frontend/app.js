@@ -94,6 +94,11 @@ let parentTasks = [];      // 当天全部任务（含待审核）
 let dictWords = [];   // [{id, word, extra}]
 let dictState = null; // {idx, phase, wrong:[], correct:0}
 
+// 数学练习状态
+let mathState = null; // {taskId, title, questions:[{question, answer}], answers:[], result}
+// 基础知识复习状态
+let knowState = null; // {taskId, title, points:[{id, content, category, question, answer, keywords}], inputs:[string], results:[(null|{is_correct, answer})], done}
+
 let currentText = '';
 let currentLessonId = 1;
 
@@ -271,6 +276,8 @@ async function render(){
   else if(active==='错题本') html = await renderWrongBook();
   else if(active==='学习首页') html = await renderHome();
   else if(active==='听写练习') html = renderDictation();
+  else if(active==='数学练习') html = renderMath();
+  else if(active==='知识点复习') html = renderKnowledge();
   else if(active==='学习中心') html = await renderCenter();
   else if(active==='学习报告' || active==='积分商城') html = renderPlaceholder(active);
   else html = renderHome();
@@ -336,6 +343,7 @@ async function renderHome(){
     review:{icon:'brain',color:'green',tag:'遗忘曲线',tagColor:'green',meta:'约 10 分钟'},
     reading:{icon:'book',color:'orange',tag:'阅读理解',tagColor:'orange',meta:'约 12 分钟'},
     listening:{icon:'headphones',color:'blue',tag:'听力理解',tagColor:'blue',meta:'约 8 分钟'},
+    math:{icon:'pen',color:'orange',tag:'数学练习',tagColor:'orange',meta:'约 10 分钟'},
     custom:{icon:'sparkles',color:'orange',tag:'自定义',tagColor:'orange',meta:''},
   };
 
@@ -344,6 +352,10 @@ async function renderHome(){
     let btn;
     if(t.submit_status==='approved'){
       btn = `<button class="task-btn done">${icon('check',17)}已完成</button>`;
+    } else if(t.submit_status==='submitted' && t.task_type==='math'){
+      btn = `<button class="task-btn todo" onclick="startMath(${t.id})">${icon('clock',17)}等待家长确认 · 修改答案</button>`;
+    } else if(t.submit_status==='submitted' && t.task_type==='knowledge'){
+      btn = `<button class="task-btn todo" onclick="startKnowledge(${t.id})">${icon('clock',17)}等待家长确认 · 修改</button>`;
     } else if(t.submit_status==='submitted'){
       btn = `<button class="task-btn done">${icon('clock',17)}等待家长确认</button>`;
     } else {
@@ -479,9 +491,11 @@ function finishTask(id, reward){
 }
 async function doTask(id, type){
   if(type==='dictation'){ await startDictation(); return; }
+  if(type==='math'){ startMath(id); return; }
+  if(type==='knowledge'){ startKnowledge(id); return; }
   if(type==='reading'){ await loadCenter(); centerTab='阅读理解'; setPage('学习中心'); }
   else if(type==='listening'){ await loadCenter(); centerTab='听力理解'; setPage('学习中心'); }
-  else if(type==='knowledge' || type==='review'){ setPage('学习中心'); }
+  else if(type==='review'){ setPage('学习中心'); }
   // 完成练习后标记已提交，等待家长完成审核（听写类在 finishDictation 提交）
   if(type!=='dictation'){
     await api(`/api/tasks/${id}/submit`, {method:'POST'});
@@ -657,6 +671,147 @@ function renderDictation(){
   </div>`;
 }
 
+
+// ===== 数学练习（题目来自任务 content）=====
+function startMath(taskId){
+  const t = dailyTasks.find(x => x.id === taskId);
+  let questions = [];
+  try { questions = JSON.parse(t?.content || '[]'); } catch(e){ questions = []; }
+  if(!Array.isArray(questions) || !questions.length){ toast('本次数学练习暂无题目'); return; }
+  if(mathState?.taskId === taskId){ setPage('数学练习'); return; }
+  const answers = questions.map(q => q.your_answer || '');
+  const graded = t.submit_status === 'submitted' && questions.every(q => typeof q.is_correct === 'boolean');
+  const result = graded ? {
+    results: questions.map(q => ({is_correct: q.is_correct, correct_answer: q.answer})),
+    correct: questions.filter(q => q.is_correct).length, total: questions.length,
+  } : null;
+  mathState = {taskId, title: t.title, questions, answers, result};
+  setPage('数学练习');
+}
+function mathInput(i, v){ if(mathState) mathState.answers[i] = v; }
+function editMath(){ if(mathState){ mathState.result = null; render(); } }
+async function submitMath(){
+  const s = mathState;
+  if(!s || s.result) return;
+  if(s.answers.some(a => !a.trim())){ toast('还有题目没作答哦'); return; }
+  const d = await api(`/api/math/task/${s.taskId}/grade`, {method:'POST', body:{user_id:uid, answers:s.answers}});
+  if(!d || !d.ok){ toast(d?.error || '判分失败，请重试'); return; }
+  s.result = d;
+  await api(`/api/tasks/${s.taskId}/submit`, {method:'POST'});
+  render();
+  toast(d.correct === d.total ? '全部答对，已提交等待家长确认' : `答错 ${d.total - d.correct} 题，已收录进错题本`);
+}
+function renderMath(){
+  const s = mathState;
+  if(!s) return '<div class="placeholder-page"><h2>数学练习</h2><p>请从首页点击任务进入。</p></div>';
+  const r = s.result;
+  const qs = s.questions.map((q,i)=>{
+    const res = r?.results?.[i];
+    return `<div class="center-question">
+      <div class="cq-q">${i+1}. ${q.question}</div>
+      ${res
+        ? `<div class="cq-ans ${res.is_correct?'right':'wrong'}">${icon('check',15)} 你的答案：${s.answers[i]}${res.is_correct?'':`　正确答案：${res.correct_answer}`}</div>`
+        : `<div class="cq-form"><input class="cq-input" placeholder="输入答案（只写数字）" value="${s.answers[i]}" oninput="mathInput(${i}, this.value)"/></div>`}
+    </div>`;
+  }).join('');
+  const foot = r
+    ? `<div class="dict-done"><div class="big">${icon('check',24)} 练习完成！</div>
+        <div class="stat"><div><div class="k">正确</div><div class="v g">${r.correct}</div></div><div><div class="k">错误</div><div class="v r">${r.total - r.correct}</div></div></div>
+        <div style="display:flex;justify-content:center;gap:12px">
+          <button class="dict-next" style="background:#fff;color:var(--blue);border:1px solid var(--line3)" onclick="editMath()">修改答案</button>
+          <button class="dict-next" onclick="setPage('学习首页')">返回首页</button>
+        </div></div>`
+    : `<div style="text-align:center"><button class="dict-next" onclick="submitMath()">提交答案</button></div>`;
+  return `<header class="page-head">
+    <div><h1>${s.title}</h1></div>
+    <button class="btn-ghost" onclick="setPage('学习首页')">退出练习</button>
+  </header>
+  <div class="dict-wrap"><div class="center-questions" style="margin-top:20px">${qs}</div>${foot}</div>`;
+}
+
+// ===== 基础知识复习（知识点来自任务 content，孩子逐条自评）=====
+function startKnowledge(taskId){
+  const t = dailyTasks.find(x => x.id === taskId);
+  let points = [];
+  try { points = JSON.parse(t?.content || '[]'); } catch(e){ points = []; }
+  if(!Array.isArray(points) || !points.length){ toast('本次任务暂无知识点'); return; }
+  const inputs = points.map(() => '');
+  knowState = {taskId, title: t.title, points, inputs, results: points.map(()=>null), done: false};
+  setPage('知识点复习');
+}
+
+function knowInput(i, v){ if(knowState){ knowState.inputs[i] = v; } }
+
+function localGrade(p, userAnswer){
+  const kws = p.keywords || [];
+  if(!kws.length) return false;
+  const hit = kws.filter(kw => (userAnswer||'').includes(kw)).length;
+  return hit / kws.length >= 0.6;
+}
+
+async function knowSubmit(i){
+  const s = knowState;
+  if(!s) return;
+  const p = s.points[i];
+  const ua = (s.inputs[i]||'').trim();
+  if(!ua){ toast('先写下你的答案哦'); return; }
+  const d = await api(`/api/tasks/${s.taskId}/knowledge-review`, {method:'POST', body:{user_id:uid, answers:[{id:p.id, user_answer:ua}]}});
+  if(!d || !d.ok){ toast(d?.error || '判分失败，请重试'); return; }
+  const r = (d.results && d.results[0]) || {is_correct:false, answer:''};
+  s.results[i] = r;
+  render();
+}
+
+function knowReAnswer(i){
+  const s = knowState;
+  if(!s) return;
+  const p = s.points[i];
+  const ua = (s.inputs[i]||'').trim();
+  if(!ua){ toast('先写下你的答案哦'); return; }
+  const ok = localGrade(p, ua);
+  s.results[i] = {is_correct: ok, answer: p.answer || ''};
+  render();
+}
+
+function renderKnowledge(){
+  const s = knowState;
+  if(!s) return '<div class="placeholder-page"><h2>基础知识复习</h2><p>请从首页点击任务进入。</p></div>';
+  const items = s.points.map((p,i)=>{
+    const r = s.results[i];
+    if(r){
+      return `<div class="center-question">
+        <div class="cq-q">${i+1}. ${p.question || p.content}</div>
+        <div class="cq-ans ${r.is_correct?'right':'wrong'}">${icon('check',15)} ${r.is_correct?'答对了':'答错了'} · 标准答案：${escapeAttr(r.answer || '(无标准答案)')}</div>
+        ${!r.is_correct ? `<div class="cq-form">
+          <input class="cq-input" placeholder="再看一遍答案，重新作答巩固" value="${escapeAttr(s.inputs[i])}" oninput="knowInput(${i}, this.value)"/>
+          <button class="cq-btn" onclick="knowReAnswer(${i})">重新作答</button>
+        </div>` : ''}
+      </div>`;
+    }
+    return `<div class="center-question">
+      <div class="cq-q">${i+1}. ${p.question || p.content}</div>
+      <div class="cq-form">
+        <input class="cq-input" placeholder="凭记忆作答…" value="${escapeAttr(s.inputs[i])}" oninput="knowInput(${i}, this.value)"/>
+        <button class="cq-btn" onclick="knowSubmit(${i})">提交</button>
+      </div>
+    </div>`;
+  }).join('');
+  const answered = s.results.filter(r => r !== null).length;
+  const correct = s.results.filter(r => r && r.is_correct).length;
+  const allDone = s.results.every(r => r !== null);
+  const foot = allDone
+    ? `<div class="dict-done"><div class="big">${icon('check',24)} 复习完成！</div>
+        <div class="stat"><div><div class="k">答对</div><div class="v g">${correct}</div></div><div><div class="k">答错</div><div class="v r">${answered - correct}</div></div></div>
+        <div style="display:flex;justify-content:center;gap:12px">
+          <button class="dict-next" onclick="setPage('学习首页')">返回首页</button>
+        </div></div>`
+    : `<div style="text-align:center;color:#9aa39c;font-size:13px">已作答 ${answered} / ${s.points.length} 题</div>`;
+  return `<header class="page-head">
+    <div><h1>${s.title}</h1></div>
+    <button class="btn-ghost" onclick="setPage('学习首页')">退出复习</button>
+  </header>
+  <div class="dict-wrap"><div class="center-questions" style="margin-top:20px">${items}</div>${foot}</div>`;
+}
 
 async function loadCenter(){
   listenMaterial = await api(`/api/listening/material?user_id=${uid}`);
