@@ -1,4 +1,5 @@
 """任务接口：列/审核/改/删/增/提交/上传/确认。"""
+import json
 import os
 from datetime import date
 
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Task, Point
-from ..services.task_gen import generate_daily_tasks
+from ..services.task_gen import generate_tasks_for_user
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -25,6 +26,11 @@ class EditReq(BaseModel):
     title: str = ""
     detail: str = ""
     content: str = ""
+
+
+class KnowledgeReviewReq(BaseModel):
+    user_id: int
+    answers: list[dict] = []   # [{id: 知识点id, user_answer: 孩子答案}]
 
 
 class AddReq(BaseModel):
@@ -63,8 +69,9 @@ def list_tasks(user_id: int, date: date, role: str = "child", db: Session = Depe
 
 
 @router.post("/generate")
-def generate(d: date, db: Session = Depends(get_db)):
-    generate_daily_tasks(db, d)
+def generate(user_id: int, d: date, force: bool = False, db: Session = Depends(get_db)):
+    """手动生成当天任务。默认补缺失（幂等），force=true 覆盖重生成。"""
+    generate_tasks_for_user(db, user_id, d, force=force)
     return {"ok": True}
 
 
@@ -141,6 +148,40 @@ def submit(task_id: int, db: Session = Depends(get_db)):
         t.submit_status = "submitted"
         db.commit()
     return {"ok": True}
+
+
+@router.post("/{task_id}/knowledge-review")
+def knowledge_review(task_id: int, req: KnowledgeReviewReq, db: Session = Depends(get_db)):
+    """基础知识任务：孩子逐题简答，混合判分，落知识点掌握度，然后提交待家长确认。"""
+    from ..services.mastery import record_attempt
+    from ..services.knowledge_quiz import grade_knowledge_answer
+    t = db.get(Task, task_id)
+    if not t or t.task_type != "knowledge":
+        return {"ok": False, "error": "任务不存在"}
+    if t.submit_status == "approved":
+        return {"ok": False, "error": "家长已确认，不能再修改"}
+    try:
+        points = json.loads(t.content or "[]")
+    except ValueError:
+        points = []
+    by_id = {p.get("id"): p for p in points}
+    results = []
+    for a in req.answers:
+        p = by_id.get(a.get("id"))
+        if p is None:
+            continue
+        user_answer = (a.get("user_answer") or "").strip()
+        is_correct, _ = grade_knowledge_answer(
+            user_answer, p.get("keywords") or [], p.get("answer") or "", db=db)
+        if p.get("id"):
+            record_attempt(db, req.user_id, "knowledge", p["id"], is_correct)
+        p["last_correct"] = is_correct
+        results.append({"id": p.get("id"), "is_correct": is_correct, "answer": p.get("answer") or ""})
+    t.content = json.dumps(points, ensure_ascii=False)
+    t.submit_status = "submitted"
+    db.commit()
+    correct = sum(1 for r in results if r["is_correct"])
+    return {"ok": True, "results": results, "correct": correct, "total": len(results)}
 
 
 @router.post("/{task_id}/upload-photo")

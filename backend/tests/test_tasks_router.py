@@ -137,3 +137,87 @@ def test_upload_photo_rejects_unsupported_ext():
         files={"file": ("bad.txt", b"hello", "text/plain")},
     )
     assert resp.json() == {"ok": False, "error": "unsupported file type"}
+
+
+def _make_knowledge_task(uid, kp_id, content_extra=None):
+    import json
+    point = {"id": kp_id, "content": "形近字辨析", "category": "字词",
+             "question": "「白鹭」和「白露」有什么区别？",
+             "answer": "白鹭是鸟，白露是节气",
+             "keywords": ["鸟", "节气"]}
+    if content_extra:
+        point.update(content_extra)
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "knowledge", "title": "基础知识",
+        "content": json.dumps([point], ensure_ascii=False),
+    })
+    return r.json()["id"]
+
+
+def test_knowledge_review_grade_records_mastery():
+    import json
+    from app.models import KnowledgeMastery
+    uid = _seed()
+    db = SessionLocal()
+    kp = db.query(KnowledgePoint).first()
+    kp_id = kp.id
+    db.close()
+    tid = _make_knowledge_task(uid, kp_id)
+
+    # 关键词命中的答案 → 判对，落掌握度
+    d = client.post(f"/api/tasks/{tid}/knowledge-review",
+                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "白鹭是鸟，白露是节气"}]}).json()
+    assert d["ok"] is True
+    assert d["correct"] == 1
+    assert d["total"] == 1
+    assert d["results"][0]["is_correct"] is True
+    assert d["results"][0]["answer"] == "白鹭是鸟，白露是节气"
+
+    db = SessionLocal()
+    t = db.get(Task, tid)
+    assert t.submit_status == "submitted"
+    saved = json.loads(t.content)[0]
+    assert saved["last_correct"] is True
+    km = db.query(KnowledgeMastery).filter_by(user_id=uid, knowledge_point_id=kp_id).first()
+    assert km is not None
+    assert json.loads(km.attempts) == [True]
+    db.close()
+
+
+def test_knowledge_review_wrong_answer_records_false():
+    import json
+    from app.models import KnowledgeMastery
+    uid = _seed()
+    db = SessionLocal()
+    kp = db.query(KnowledgePoint).first()
+    kp_id = kp.id
+    db.close()
+    tid = _make_knowledge_task(uid, kp_id)
+
+    d = client.post(f"/api/tasks/{tid}/knowledge-review",
+                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "不知道"}]}).json()
+    assert d["ok"] is True
+    assert d["results"][0]["is_correct"] is False
+
+    db = SessionLocal()
+    km = db.query(KnowledgeMastery).filter_by(user_id=uid, knowledge_point_id=kp_id).first()
+    assert json.loads(km.attempts) == [False]
+    db.close()
+
+
+def test_knowledge_review_refused_after_approval():
+    import json
+    uid = _seed()
+    db = SessionLocal()
+    kp = db.query(KnowledgePoint).first()
+    kp_id = kp.id
+    db.close()
+    tid = _make_knowledge_task(uid, kp_id)
+    db = SessionLocal()
+    db.get(Task, tid).submit_status = "approved"
+    db.commit()
+    db.close()
+
+    d = client.post(f"/api/tasks/{tid}/knowledge-review",
+                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "白鹭是鸟"}]}).json()
+    assert d["ok"] is False
