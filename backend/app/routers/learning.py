@@ -223,15 +223,18 @@ class AssignmentReq(BaseModel):
 
 @router.post("/api/learning/assignment")
 def assignment(req: AssignmentReq, db: Session = Depends(get_db)):
-    """AI 现场出作业：读配置的题数与难度，基于本课正文出题。"""
+    """AI 现场出作业：读配置的题数与难度，基于本课正文出题，并关联本课知识点。"""
     from ..models import Text
     from ..services.assignment import generate_assignment
     t = db.query(Text).filter_by(lesson_id=req.lesson_id).first()
     if not t or not t.content.strip():
         return {"questions": []}
+    kps = db.query(KnowledgePoint).filter_by(lesson_id=req.lesson_id).all()
+    knowledge_points = [{"id": p.id, "category": p.category, "content": p.content} for p in kps]
     n = _cfg_int(db, "assignment_question_count", 4)
     diff = _cfg_str(db, f"difficulty_{req.subject}", "中等")
-    qs = generate_assignment(db, t.content, subject=req.subject, difficulty=diff, n=n)
+    qs = generate_assignment(db, t.content, subject=req.subject, difficulty=diff, n=n,
+                             knowledge_points=knowledge_points)
     return {"questions": qs}
 
 
@@ -239,19 +242,26 @@ class AssignmentGradeReq(BaseModel):
     user_id: int
     lesson_id: int
     subject: str = "语文"
-    correct: int
-    total: int
+    answers: list[dict] = []  # [{knowledge_point_id: int|null, is_correct: bool}]
 
 
 @router.post("/api/learning/assignment/grade")
 def assignment_grade(req: AssignmentGradeReq, db: Session = Depends(get_db)):
-    """判分：正确率 >= 阈值则推进进度。"""
+    """判分：正确率 >= 阈值则推进进度；逐题落知识点掌握度（驱动遗忘曲线）。"""
+    from ..services.mastery import record_attempt
     try:
         threshold = float(_cfg_str(db, "assignment_pass_threshold", "0.6"))
     except ValueError:
         threshold = 0.6
-    rate = req.correct / req.total if req.total else 0
+    total = len(req.answers)
+    correct = sum(1 for a in req.answers if a.get("is_correct"))
+    rate = correct / total if total else 0
     passed = rate >= threshold
+    # 无论通过与否，逐题落知识点掌握度（掌握度反映真实答题历史）
+    for a in req.answers:
+        kpid = a.get("knowledge_point_id")
+        if isinstance(kpid, int):
+            record_attempt(db, req.user_id, "knowledge", kpid, bool(a.get("is_correct")))
     if passed:
         lessons = db.query(Lesson).filter_by(subject=req.subject).order_by(Lesson.id).all()
         prog = db.query(LearningProgress).filter_by(user_id=req.user_id, subject=req.subject).first()

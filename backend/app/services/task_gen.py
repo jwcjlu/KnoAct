@@ -66,8 +66,11 @@ def _gen_knowledge(db, lesson, user_id, count, new_ratio=5):
     due_pts = []
     if due_ids:
         due_pts = (db.query(KnowledgePoint)
-                   .filter(KnowledgePoint.id.in_(due_ids), KnowledgePoint.lesson_id != lesson.id)
-                   .order_by(KnowledgePoint.id).limit(max(0, count - new_ratio)).all())
+                   .join(KnowledgeMastery, KnowledgeMastery.knowledge_point_id == KnowledgePoint.id)
+                   .filter(KnowledgePoint.id.in_(due_ids), KnowledgePoint.lesson_id != lesson.id,
+                           KnowledgeMastery.user_id == user_id)
+                   .order_by(KnowledgeMastery.mastery.asc(), KnowledgePoint.id)
+                   .limit(max(0, count - new_ratio)).all())
     pts = new_pts + due_pts
     if not pts:
         return None

@@ -191,7 +191,14 @@ def test_assignment_grade_passes_advances_progress(setup_db):
 
     # 正确率 >= 默认阈值 0.6 → 通过，推进到下一课
     resp = _client().post("/api/learning/assignment/grade",
-                          json={"user_id": 1, "lesson_id": l1_id, "subject": "语文", "correct": 4, "total": 5})
+                          json={"user_id": 1, "lesson_id": l1_id, "subject": "语文",
+                                "answers": [
+                                    {"knowledge_point_id": None, "is_correct": True},
+                                    {"knowledge_point_id": None, "is_correct": True},
+                                    {"knowledge_point_id": None, "is_correct": True},
+                                    {"knowledge_point_id": None, "is_correct": True},
+                                    {"knowledge_point_id": None, "is_correct": False},
+                                ]})
     assert resp.status_code == 200
     body = resp.json()
     assert body["passed"] is True
@@ -214,13 +221,52 @@ def test_assignment_grade_below_threshold_does_not_advance(setup_db):
     s.commit(); s.close()
 
     resp = _client().post("/api/learning/assignment/grade",
-                          json={"user_id": 1, "lesson_id": l1_id, "subject": "语文", "correct": 1, "total": 5})
+                          json={"user_id": 1, "lesson_id": l1_id, "subject": "语文",
+                                "answers": [
+                                    {"knowledge_point_id": None, "is_correct": True},
+                                    {"knowledge_point_id": None, "is_correct": False},
+                                    {"knowledge_point_id": None, "is_correct": False},
+                                    {"knowledge_point_id": None, "is_correct": False},
+                                    {"knowledge_point_id": None, "is_correct": False},
+                                ]})
     body = resp.json()
     assert body["passed"] is False
 
     s = SessionLocal()
     prog = s.query(LearningProgress).filter_by(user_id=1, subject="语文").first()
     assert prog.current_lesson_id == l1_id
+    s.close()
+
+
+def test_assignment_grade_records_knowledge_mastery(setup_db):
+    """判分后对每道题的知识点落 KnowledgeMastery（无论整体通过与否）。"""
+    from app.models import Lesson, LearningProgress, KnowledgePoint, KnowledgeMastery
+    from app.database import SessionLocal
+    s = SessionLocal()
+    l1 = Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3, audit_status="approved")
+    s.add(l1); s.flush()
+    l1_id = l1.id
+    kp = KnowledgePoint(lesson_id=l1_id, subject="语文", category="修辞", content="比喻")
+    s.add(kp); s.flush()
+    kp_id = kp.id
+    s.commit(); s.close()
+
+    # 未达标（2/5 = 0.4 < 0.6），但知识点掌握度仍要落
+    resp = _client().post("/api/learning/assignment/grade",
+                          json={"user_id": 1, "lesson_id": l1_id, "subject": "语文",
+                                "answers": [
+                                    {"knowledge_point_id": kp_id, "is_correct": True},
+                                    {"knowledge_point_id": kp_id, "is_correct": False},
+                                    {"knowledge_point_id": None, "is_correct": False},
+                                ]})
+    body = resp.json()
+    assert body["passed"] is False
+
+    s = SessionLocal()
+    m = s.query(KnowledgeMastery).filter_by(user_id=1, knowledge_point_id=kp_id).first()
+    assert m is not None
+    assert m.attempts == "[true, false]"
+    assert m.next_review_at is not None
     s.close()
 
 
