@@ -117,6 +117,22 @@ def test_generate_tasks_no_lesson_produces_no_tasks():
     db.close()
 
 
+def test_gen_knowledge_content_has_question_fields():
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="knowledge").first()
+    assert t is not None
+    content = json.loads(t.content)
+    assert len(content) >= 1
+    p = content[0]
+    # fake provider 下 question 为空字符串，但字段必须存在
+    assert "question" in p and "answer" in p and "keywords" in p
+    assert "id" in p and "content" in p
+    db.close()
+
+
 def test_dictation_picks_new_and_due_words():
     db = SessionLocal()
     uid, l1_id = _setup(db)  # 第1课：白鹭、矗立 两个生词

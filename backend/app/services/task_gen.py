@@ -74,10 +74,13 @@ def _gen_knowledge(db, lesson, user_id, count, new_ratio=5):
     pts = new_pts + due_pts
     if not pts:
         return None
+    from .knowledge_quiz import generate_knowledge_questions
+    raw = [{"id": p.id, "content": p.content, "category": p.category} for p in pts]
+    qs = generate_knowledge_questions(db, raw, subject)
     return Task(
         task_type="knowledge", subject=subject, title=f"{lesson.title} 基础知识",
         detail=f"重点巩固 · {len(pts)} 个知识点（新课 {len(new_pts)} + 复习 {len(due_pts)}）",
-        content=json.dumps([{"id": p.id, "content": p.content, "category": p.category} for p in pts], ensure_ascii=False),
+        content=json.dumps(qs, ensure_ascii=False),
         points=20,
     )
 
