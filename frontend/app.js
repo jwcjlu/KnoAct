@@ -652,7 +652,12 @@ function browserSpeak(text){
     speechSynthesis.cancel(); speechSynthesis.speak(u);
   }
 }
-function dictInput(v){ if(dictState) dictState.input = v; }
+function dictInput(v){
+  if(dictState) dictState.input = v;
+  // 输入后实时刷新「确认提交」按钮的可用态，否则按钮一直 disabled 无法提交
+  const btn = document.querySelector('.dict-enter');
+  if(btn) btn.disabled = !(v && v.trim());
+}
 async function submitDict(){
   const s = dictState, w = dictWord();
   const right = s.input.trim() === w.w;
