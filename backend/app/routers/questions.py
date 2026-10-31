@@ -1,3 +1,5 @@
+from datetime import date as date_type
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -58,5 +60,62 @@ def delete_question(question_id: int, db: Session = Depends(get_db)):
     if not q:
         raise HTTPException(status_code=404, detail="题目不存在")
     db.delete(q)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/review")
+def review_questions(d: date_type, subject: str = "", db: Session = Depends(get_db)):
+    """待审核题目，按学科→课程分组。"""
+    q = db.query(Question).filter(Question.status == "pending")
+    if d:
+        q = q.filter(Question.date == d)
+    if subject:
+        q = q.filter(Question.subject == subject)
+    qs = q.order_by(Question.subject, Question.lesson_id, Question.id).all()
+    grouped = {}
+    for item in qs:
+        grouped.setdefault((item.subject, item.lesson_id), []).append({
+            "id": item.id, "qtype": item.qtype, "question": item.question,
+            "answer": item.answer, "extra": item.extra, "task_type": item.task_type,
+        })
+    return {"groups": [
+        {"subject": subj, "lesson_id": lid, "questions": items}
+        for (subj, lid), items in grouped.items()
+    ]}
+
+
+@router.post("/{question_id}/approve")
+def approve_question(question_id: int, db: Session = Depends(get_db)):
+    q = db.get(Question, question_id)
+    if not q:
+        raise HTTPException(status_code=404, detail="题目不存在")
+    q.status = "published"
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{question_id}/reject")
+def reject_question(question_id: int, db: Session = Depends(get_db)):
+    q = db.get(Question, question_id)
+    if not q:
+        raise HTTPException(status_code=404, detail="题目不存在")
+    q.status = "rejected"
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/approve-by-lesson")
+def approve_by_lesson(lesson_id: int, d: date_type, db: Session = Depends(get_db)):
+    db.query(Question).filter_by(lesson_id=lesson_id, date=d, status="pending").update(
+        {"status": "published"}, synchronize_session=False)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/approve-by-subject")
+def approve_by_subject(subject: str, d: date_type, db: Session = Depends(get_db)):
+    db.query(Question).filter_by(subject=subject, date=d, status="pending").update(
+        {"status": "published"}, synchronize_session=False)
     db.commit()
     return {"ok": True}
