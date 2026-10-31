@@ -173,6 +173,9 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
     force=True 时先删除该孩子当天全部任务再重新生成（家长手动触发覆盖重生成）。"""
     if force:
         db.query(Task).filter_by(user_id=user_id, date=day).delete(synchronize_session=False)
+        # 同时删除当天该孩子的生成类题目，避免重复累积（Question 无 user_id，按 date 删）
+        from ..models import Question
+        db.query(Question).filter_by(date=day).delete(synchronize_session=False)
     subjects = ["语文", "英语", "数学"]
     for subject in subjects:
         exists = db.query(Task).filter_by(user_id=user_id, subject=subject, date=day).first()
