@@ -614,6 +614,7 @@ async function startDictation(){
     idx:0, phase:'listen',   // listen | upload | grading | result | rewrite | done
     wrong:[], correct:0, hints:{},   // hints: {idx: 'pinyin'|'meaning'}
     image:null, results:null, rewriteIdx:0, rewriting:false,
+    firstRoundWrong:[],   // 首轮写错的词（重写改对也保留，供错题本收录）
   };
   setPage('听写练习');
 }
@@ -749,7 +750,7 @@ async function gradeDict(){
     else { s.wrong = []; s.phase = 'done'; }
   } else {
     // 首次批改：按 index 匹配结果，记录每词对错 / 孩子写的内容
-    s.correct = 0; s.wrong = [];
+    s.correct = 0; s.wrong = []; s.firstRoundWrong = [];
     for(let i=0;i<dictWords.length;i++){
       const w = dictWords[i];
       const ww = w.w ? w : {w: w.word, id: w.id};
@@ -758,7 +759,9 @@ async function gradeDict(){
       const r = s.results.find(x => x.index === i);
       if(r && r.is_correct){ s.correct++; }
       else {
-        s.wrong.push({word: ww.w, w: ww.w, pinyin, meaning, id: ww.id, yours: (r && r.written) || ''});
+        const wrongItem = {word: ww.w, w: ww.w, pinyin, meaning, id: ww.id, yours: (r && r.written) || ''};
+        s.wrong.push(wrongItem);
+        s.firstRoundWrong.push(wrongItem);   // 首轮写错，重写改对也保留供错题本
       }
     }
     s.phase = 'result';
@@ -779,8 +782,11 @@ function dictRewrite(){
 }
 async function finishDictation(){
   const s = dictState;
-  const wrongWords = s.wrong.map(x=>({word:x.word, your_answer:x.yours, word_id:x.id}));
-  const d = await api('/api/dictation/complete', {method:'POST', body:{user_id:uid, correct:s.correct, wrong:s.wrong.length, wrong_words:wrongWords}});
+  // 错题本收录「首轮写错」的词（即使重写改对了也收，符合「第一次写错就进错题本」）
+  const wrongWords = (s.firstRoundWrong && s.firstRoundWrong.length ? s.firstRoundWrong : s.wrong)
+    .map(x=>({word:x.word, your_answer:x.yours, word_id:x.id}));
+  const wrongCount = wrongWords.length;
+  const d = await api('/api/dictation/complete', {method:'POST', body:{user_id:uid, correct:s.correct, wrong:wrongCount, wrong_words:wrongWords}});
   if(!completed.includes(1)) completed.push(1);
 
   // 查找今天的听写任务，标记已提交并引导拍照上传，家长核对后发放积分
