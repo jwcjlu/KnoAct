@@ -2524,8 +2524,9 @@ async function approveAllQuestions(){
   await loadReviewQuestions(); render();
 }
 function toggleLesson(id){
-  if(expandedLessons.has(id)) expandedLessons.delete(id);
-  else expandedLessons.add(id);
+  const key = String(id);  // 统一转字符串，与渲染时 expandedLessons.has(g.lesson_id) 的 g.lesson_id 数字需一致
+  if(expandedLessons.has(key)) expandedLessons.delete(key);
+  else expandedLessons.add(key);
   render();
 }
 
@@ -2569,7 +2570,7 @@ function renderQuestionTab(){
 
     const lessonGroups = groups.map(g=>{
       const qs = g.questions || [];
-      const open = expandedLessons.has(g.lesson_id);
+      const open = expandedLessons.has(String(g.lesson_id));
       const chev = open ? '▾' : '▸';
       const qItems = qs.map(q=>{
         const label = QTYPE_LABEL[q.qtype] || q.task_type || '题目';
