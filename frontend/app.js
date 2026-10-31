@@ -2359,7 +2359,7 @@ function setParentTab(t){
   parentTab=t;
   if(t==='教材'){ loadPdfDocs().then(()=>render()); return; }
   if(t==='知识点'){ loadKnowledge().then(()=>render()); return; }
-  if(t==='题目'){ loadQuestionData().then(()=>render()); return; }
+  if(t==='题目'){ loadReviewQuestions().then(()=>render()); return; }
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
@@ -2396,86 +2396,139 @@ async function loadConfig(){
   ttsConfig.repeat = parseInt(configMap.tts_repeat || '2');
 }
 
-// ---- 题目管理 ----
-let questionLessons = [];   // [{id, subject, title, questions:[{id,question,answer}]}]
-async function loadQuestionData(){
-  // 拉取所有已提取课文的课程，再逐课拉题目
-  const docs = await api('/api/pdf/documents');
-  const out = [];
-  for(const d of docs){
-    const lessons = await api(`/api/pdf/documents/${d.id}/lessons`);
-    for(const l of lessons){
-      if(!(l.texts && l.texts.length)) continue;  // 无课文不列出
-      const qs = await api(`/api/questions?lesson_id=${l.id}`);
-      out.push({id:l.id, subject:l.subject, title:l.title, questions:qs||[]});
-    }
-  }
-  questionLessons = out;
+// ---- 题目审核台 ----
+const QTYPE_LABEL = {knowledge:'基础知识', listening:'听力', reading:'阅读理解', math:'数学练习'};
+let reviewGroups = [];          // [{subject, lesson_id, questions:[{id, qtype, question, answer, extra, task_type}]}]
+let expandedLessons = new Set(); // 展开的 lesson_id 集合
+
+function todayStr(){
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
 }
-function renderQuestionTab(){
-  if(questionLessons.length===0){
-    return `<div class="parent-grid"><div class="parent-panel" style="grid-column:1/-1">
-      <div class="head"><div class="ic blue">${icon('book',20)}</div><div><h3>题目管理</h3><div class="sub">管理每课的阅读理解题：重新生成、添加或删除</div></div></div>
-      <div class="bd" style="text-align:center;padding:32px 0;color:#8e9691">暂无已提取课文的课程，请先在「教材」中上传并提取。</div>
-    </div></div>`;
+
+async function loadReviewQuestions(){
+  const d = await api(`/api/questions/review?d=${todayStr()}`);
+  reviewGroups = (d && d.groups) || [];
+}
+
+async function approveQuestion(id){
+  await api(`/api/questions/${id}/approve`, {method:'POST'});
+  await loadReviewQuestions(); render();
+}
+async function rejectQuestion(id){
+  await api(`/api/questions/${id}/reject`, {method:'POST'});
+  await loadReviewQuestions(); render();
+}
+async function approveByLesson(lessonId){
+  await api(`/api/questions/approve-by-lesson?lesson_id=${lessonId}&d=${todayStr()}`, {method:'POST'});
+  await loadReviewQuestions(); render();
+}
+async function approveBySubject(subject){
+  await api(`/api/questions/approve-by-subject?subject=${encodeURIComponent(subject)}&d=${todayStr()}`, {method:'POST'});
+  await loadReviewQuestions(); render();
+}
+async function approveAllQuestions(){
+  for(const g of reviewGroups){
+    await api(`/api/questions/approve-by-subject?subject=${encodeURIComponent(g.subject)}&d=${todayStr()}`, {method:'POST'});
   }
-  const rows = questionLessons.map(l=>{
-    const qCards = (l.questions.length===0)
-      ? `<div style="color:#a0a7a2;font-size:13px;padding:8px 0">本课暂无题目</div>`
-      : l.questions.map(q=>`
-        <div class="q-card" style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:#f7f9f7;border:1px solid var(--line3);border-radius:10px;margin-top:8px">
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:#333">${q.question}</div>
-            <div style="font-size:12px;color:#778079;margin-top:2px">答案：${q.answer||'—'}</div>
-          </div>
-          <button class="btn-ghost" style="color:#c05b4a;flex-shrink:0" onclick="delQuestion(${q.id})">删除</button>
-        </div>`).join('');
-    return `<div class="parent-panel" style="grid-column:1/-1">
-      <div class="head">
-        <div class="ic ${l.subject==='语文'?'blue':'orange'}">${icon('book',20)}</div>
-        <div><h3>${l.subject} · ${l.title}</h3><div class="sub">共 ${l.questions.length} 道阅读理解题</div></div>
-        <div style="margin-left:auto;display:flex;gap:6px">
-          <button class="btn-ghost" onclick="addQuestion(${l.id})">+ 添加</button>
-          <button class="btn-ghost" onclick="regenerateQuestions(${l.id})">重新生成</button>
+  await loadReviewQuestions(); render();
+}
+function toggleLesson(id){
+  if(expandedLessons.has(id)) expandedLessons.delete(id);
+  else expandedLessons.add(id);
+  render();
+}
+
+function renderQuestionTab(){
+  const total = reviewGroups.reduce((n,g)=>n+(g.questions?g.questions.length:0),0);
+
+  const head = `<div class="parent-panel" style="grid-column:1/-1">
+    <div class="head">
+      <div class="ic blue">${icon('book',20)}</div>
+      <div><h3>题目审核台</h3><div class="sub">${todayStr()} · 按学科/课程审核每日生成的题目</div></div>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        ${total>0?`<button class="btn-ghost" onclick="approveAllQuestions()">全部通过</button>`:''}
+      </div>
+    </div>
+  </div>`;
+
+  if(reviewGroups.length===0 || total===0){
+    return `<div class="parent-grid">
+      ${head}
+      <div class="parent-panel" style="grid-column:1/-1">
+        <div class="bd" style="text-align:center;padding:40px 0;color:#8e9691">
+          <div style="font-size:15px;font-weight:600;color:#5c6761;margin-bottom:6px">今日暂无待审核题目</div>
+          <div style="font-size:13px">每日 03:00 自动出题，通过审核后孩子才能在任务中看到并作答。</div>
         </div>
       </div>
-      <div class="bd">${qCards}</div>
+    </div>`;
+  }
+
+  // 按 subject 分组（保持后端返回顺序）
+  const bySubject = {};
+  for(const g of reviewGroups){
+    const s = g.subject || '未分类';
+    if(!bySubject[s]) bySubject[s] = [];
+    bySubject[s].push(g);
+  }
+
+  const subjectCards = Object.entries(bySubject).map(([subject, groups])=>{
+    const subjTotal = groups.reduce((n,g)=>n+(g.questions?g.questions.length:0),0);
+    const subjectIcon = {语文:'语', 数学:'数'}[subject] || subject.slice(0,1);
+    const subjectColor = {语文:'#3158e8', 数学:'#2e8b5a'}[subject] || '#dc872d';
+
+    const lessonGroups = groups.map(g=>{
+      const qs = g.questions || [];
+      const open = expandedLessons.has(g.lesson_id);
+      const chev = open ? '▾' : '▸';
+      const qItems = qs.map(q=>{
+        const label = QTYPE_LABEL[q.qtype] || q.task_type || '题目';
+        const ansText = (q.answer!=null && q.answer!=='') ? `答案：${q.answer}` : '';
+        const extraText = (q.extra!=null && q.extra!=='') ? `<div style="font-size:12px;color:#778079;margin-top:2px">${q.extra}</div>` : '';
+        return `<div class="q-item" style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:#fafbf9;border:1px solid var(--line3);border-radius:10px;margin-bottom:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;color:#333;line-height:1.5"><span class="q-type" style="font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px;background:#edf1ff;color:#4566e8">${label}</span>${q.question||''}</div>
+            ${ansText?`<div style="font-size:12px;color:#8e9691;margin-top:3px">${ansText}</div>`:''}
+            ${extraText}
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn-ghost" style="color:#2e8b5a;padding:4px 10px" onclick="approveQuestion(${q.id})">通过</button>
+            <button class="btn-ghost" style="color:#c05b4a;padding:4px 10px" onclick="rejectQuestion(${q.id})">驳回</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      return `<div class="lesson-group" style="border-top:1px solid var(--line2);padding:12px 20px">
+        <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="toggleLesson('${g.lesson_id}')">
+          <span style="color:#8e9691;font-size:12px">${chev}</span>
+          <span style="font-size:14px;font-weight:600">${g.subject||''} · 课程 ${g.lesson_id}</span>
+          <span style="font-size:12px;color:#8e9691">${qs.length} 题待审</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
+            <button class="btn-ghost" style="padding:4px 10px" onclick="approveByLesson('${g.lesson_id}')">通过本课</button>
+          </div>
+        </div>
+        <div style="margin-top:10px;padding-left:20px;${open?'':'display:none'}">${qItems}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="subject-card" style="border:1px solid var(--line);border-radius:16px;background:#fff;margin-bottom:20px;overflow:hidden">
+      <div class="subject-head" style="display:flex;align-items:center;gap:10px;padding:16px 20px">
+        <div style="width:32px;height:32px;border-radius:8px;background:${subjectColor};color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px">${subjectIcon}</div>
+        <span style="font-size:15px;font-weight:700">${subject}</span>
+        <span style="font-size:12px;color:#8e9691">${groups.length} 门课 · ${subjTotal} 题待审</span>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <span style="font-size:11px;font-weight:600;border-radius:6px;padding:2px 8px;background:#fff2df;color:#c97629">${subjTotal} 待审</span>
+          <button class="btn-ghost" style="color:#2e8b5a;padding:6px 14px;font-weight:600" onclick="approveBySubject('${subject.replace(/'/g,"\\'")}')">通过${subject}全部</button>
+        </div>
+      </div>
+      ${lessonGroups}
     </div>`;
   }).join('');
-  return `<div class="parent-grid">${rows}</div>`;
-}
-async function addQuestion(lessonId){
-  const question = prompt('请输入题目：');
-  if(!question) return;
-  const answer = prompt('请输入答案（可留空）：') || '';
-  const r = await api('/api/questions', {method:'POST', body:{lesson_id:lessonId, question, answer}});
-  if(r && r.id!==undefined){
-    toast('已添加');
-    await loadQuestionData(); render();
-  } else {
-    toast('添加失败');
-  }
-}
-async function regenerateQuestions(lessonId){
-  if(!confirm('重新生成将覆盖本课现有题目，确定吗？')) return;
-  toast('正在生成…');
-  const r = await api('/api/questions/generate', {method:'POST', body:{lesson_id:lessonId, n:3}});
-  if(r && r.count!==undefined){
-    await loadQuestionData(); render();
-    toast('已重新生成 ' + r.count + ' 题');
-  } else {
-    toast('生成失败');
-  }
-}
-async function delQuestion(id){
-  if(!confirm('确定删除这道题吗？')) return;
-  const r = await api(`/api/questions/${id}`, {method:'DELETE'});
-  if(r && r.ok){
-    await loadQuestionData(); render();
-    toast('已删除');
-  } else {
-    toast('删除失败');
-  }
+
+  return `<div class="parent-grid" style="display:block">
+    ${head}
+    ${subjectCards}
+  </div>`;
 }
 
 // ---- 任务审核 ----
