@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, date, timedelta
 from app.database import SessionLocal, Base, engine
-from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task
+from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question
 from app.services.task_gen import generate_tasks_for_user, _current_lesson
 
 
@@ -159,6 +159,18 @@ def test_dictation_picks_new_and_due_words():
     assert "旧词B" in got
     # 到期旧词只有1个，凑不满2个 → 不硬补，总数为 2(新) + 1(旧) = 3
     assert len(words) == 3
+    db.close()
+
+
+def test_generated_questions_land_in_question_table():
+    db = SessionLocal()
+    db.query(Question).delete()
+    db.commit()
+    uid, l1_id = _setup(db)  # 语文第1课含知识点
+    generate_tasks_for_user(db, uid, date.today())
+    qs = db.query(Question).filter_by(task_type="knowledge", date=date.today(), status="pending").all()
+    assert len(qs) >= 1
+    assert qs[0].subject == "语文"
     db.close()
 
 

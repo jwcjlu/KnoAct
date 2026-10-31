@@ -75,8 +75,18 @@ def _gen_knowledge(db, lesson, user_id, count, new_ratio=5):
     if not pts:
         return None
     from .knowledge_quiz import generate_knowledge_questions
+    from ..models import Question
     raw = [{"id": p.id, "content": p.content, "category": p.category} for p in pts]
     qs = generate_knowledge_questions(db, raw, subject)
+    for item in qs:
+        db.add(Question(
+            lesson_id=lesson.id, qtype="knowledge",
+            question=item.get("question") or item.get("content") or "",
+            answer=item.get("answer") or "",
+            subject=subject, date=datetime.utcnow().date(),
+            status="pending", task_type="knowledge",
+            extra=json.dumps({"keywords": item.get("keywords") or [], "content": item.get("content") or ""}, ensure_ascii=False),
+        ))
     return Task(
         task_type="knowledge", subject=subject, title=f"{lesson.title} 基础知识",
         detail=f"重点巩固 · {len(pts)} 个知识点（新课 {len(new_pts)} + 复习 {len(due_pts)}）",
@@ -110,8 +120,17 @@ def _gen_listening(db, lesson):
         return None
     from ..tools.generation import generate_listening
     from ..core.context import UnifiedContext
+    from ..models import Question
     ctx = UnifiedContext(user_id=0, lesson_id=lesson.id, question="")
     result = generate_listening.run({"words": words, "knowledge_points": kps}, ctx)
+    db.add(Question(
+        lesson_id=lesson.id, qtype="listening",
+        question=result.get("question") or "",
+        answer=result.get("answer") or "",
+        subject=lesson.subject, date=datetime.utcnow().date(),
+        status="pending", task_type="listening",
+        extra=json.dumps({"dialogue": result.get("dialogue") or ""}, ensure_ascii=False),
+    ))
     return Task(
         task_type="listening", subject=lesson.subject, title="英语听力练习",
         detail=f"基于 {len(words)} 个已学生词",
@@ -124,12 +143,22 @@ def _gen_listening(db, lesson):
 def _gen_math_practice(db, lesson):
     """数学练习：基于本课正文出计算/应用题，content 存题目 JSON。"""
     from .math_gen import generate_math_questions
+    from ..models import Question
     text = db.query(Text).filter_by(lesson_id=lesson.id).first()
     if not text or not text.content.strip():
         return None
     qs = generate_math_questions(db, text.content, n=3)
     if not qs:
         return None
+    for q in qs:
+        db.add(Question(
+            lesson_id=lesson.id, qtype="math",
+            question=q.get("question") or q.get("q") or "",
+            answer=str(q.get("answer") or q.get("ans") or ""),
+            subject=lesson.subject, date=datetime.utcnow().date(),
+            status="pending", task_type="math",
+            extra=json.dumps({k: q.get(k) for k in q if k not in ("question", "answer", "q", "ans")}, ensure_ascii=False),
+        ))
     return Task(
         task_type="math", subject=lesson.subject, title=f"{lesson.title} 数学练习",
         detail=f"今日练习 · {len(qs)} 道计算/应用题",
