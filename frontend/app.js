@@ -2501,7 +2501,7 @@ function renderQuestionTab(){
       return `<div class="lesson-group" style="border-top:1px solid var(--line2);padding:12px 20px">
         <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="toggleLesson('${g.lesson_id}')">
           <span style="color:#8e9691;font-size:12px">${chev}</span>
-          <span style="font-size:14px;font-weight:600">${g.subject||''} · 课程 ${g.lesson_id}</span>
+          <span style="font-size:14px;font-weight:600">${g.subject||''} · ${g.lesson_title||('课程 '+g.lesson_id)}</span>
           <span style="font-size:12px;color:#8e9691">${qs.length} 题待审</span>
           <div style="margin-left:auto;display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
             <button class="btn-ghost" style="padding:4px 10px" onclick="approveByLesson('${g.lesson_id}')">通过本课</button>
