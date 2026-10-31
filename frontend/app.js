@@ -2523,6 +2523,7 @@ async function approveBySubject(subject){
   await loadReviewQuestions(); render();
 }
 async function approveAllQuestions(){
+  if(!confirm('将全部通过今日所有待审核题目，确定吗？')) return;
   for(const g of reviewGroups){
     await api(`/api/questions/approve-by-subject?subject=${encodeURIComponent(g.subject)}&d=${todayStr()}`, {method:'POST'});
   }
@@ -2533,6 +2534,25 @@ function toggleLesson(id){
   if(expandedLessons.has(key)) expandedLessons.delete(key);
   else expandedLessons.add(key);
   render();
+}
+
+function formatQuestionExtra(extra){
+  // 把 extra（JSON 字符串）解析成友好的结构化展示：对话/知识点原文/关键词
+  if(extra==null || extra==='') return '';
+  let obj = null;
+  try { obj = JSON.parse(extra); } catch(e){ obj = null; }
+  if(!obj || typeof obj !== 'object') return `<div style="font-size:12px;color:#778079;margin-top:2px">${extra}</div>`;
+  const parts = [];
+  if(obj.dialogue){
+    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:4px"><b>对话：</b>${escapeAttr(obj.dialogue)}</div>`);
+  }
+  if(obj.content){
+    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:4px"><b>原文：</b>${escapeAttr(obj.content)}</div>`);
+  }
+  if(obj.keywords && Array.isArray(obj.keywords) && obj.keywords.length){
+    parts.push(`<div style="font-size:12px;color:#778079;margin-top:4px"><b>关键词：</b>${obj.keywords.map(k=>escapeAttr(k)).join('、')}</div>`);
+  }
+  return parts.length ? parts.join('') : `<div style="font-size:12px;color:#778079;margin-top:2px">${escapeAttr(extra)}</div>`;
 }
 
 function renderQuestionTab(){
@@ -2580,7 +2600,7 @@ function renderQuestionTab(){
       const qItems = qs.map(q=>{
         const label = QTYPE_LABEL[q.qtype] || q.task_type || '题目';
         const ansText = (q.answer!=null && q.answer!=='') ? `答案：${q.answer}` : '';
-        const extraText = (q.extra!=null && q.extra!=='') ? `<div style="font-size:12px;color:#778079;margin-top:2px">${q.extra}</div>` : '';
+        const extraText = formatQuestionExtra(q.extra);
         return `<div class="q-item" style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:#fafbf9;border:1px solid var(--line3);border-radius:10px;margin-bottom:8px">
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:#333;line-height:1.5"><span class="q-type" style="font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px;background:#edf1ff;color:#4566e8">${label}</span>${q.question||''}</div>
