@@ -24,7 +24,18 @@
         → 孩子作答 → 判分 → 掌握度 → 下次出题（遗忘曲线）
 ```
 
-## 第一部分：统一题目模型
+## 第一部分：统一题目模型（只覆盖「生成类」题目）
+
+### 关键区分：两类每日内容
+
+每日任务分两类，审核要求不同：
+
+| 类型 | 任务 | 内容来源 | 需要审核？ |
+|------|------|---------|-----------|
+| **听写类** | 生词听写（语文）/ 单词拼写（英语） | 从 `WordBank` 取教材生词（教材已审核） | ❌ 不需要，直接发布 |
+| **生成类** | 听力 / 基础知识 / 阅读理解 / 数学 | AI 生成的对话/题目 | ✅ 需要家长审核 |
+
+**`Question` 表只存「生成类」题目**（需要审核的那部分）。听写词/单词继续从 `WordBank` 取，不进 `Question` 表、不审核、孩子端直接显示。
 
 ### `Question` 表扩展
 
@@ -34,22 +45,21 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `subject` | String(16) | 学科：语文/英语/数学（显式存，避免靠 lesson 关联） |
+| `subject` | String(16) | 学科：语文/英语/数学（显式存） |
 | `date` | Date | 题目归属日期（每日生成的题标当天，历史累积） |
 | `status` | String(16) | 审核状态：`pending` / `published` / `rejected`（默认 pending） |
-| `extra` | TextCls | 附加数据 JSON（听写的拼音/释义、基础知识的关键词等） |
-| `task_type` | String(16) | 关联任务类型：dictation/knowledge/listening/reading/math |
+| `extra` | TextCls | 附加数据 JSON（基础知识的关键词、听力的对话等） |
+| `task_type` | String(16) | 关联任务类型：knowledge/listening/reading/math |
 
-### `qtype` 扩展
+### `qtype` 取值（仅生成类）
 
-现有 `reading | listening | math`，扩展为覆盖所有任务类型的题目：
-`dictation | knowledge | listening | reading | math`
+`knowledge | listening | reading | math`（不含 dictation——听写词不落 Question 表）
 
 ### 每日生成（累积式，方案 A）
 
-- 每日任务生成（`task_gen`）时，把各任务的题目**统一落 `Question` 表**（带当天 `date`、`status=pending`、`subject`、`qtype`）
+- 每日任务生成（`task_gen`）时，把「生成类」任务的题目**统一落 `Question` 表**（带当天 `date`、`status=pending`、`subject`、`qtype`）
+- 「听写类」任务（dictation）不落 Question，继续从 WordBank 取，孩子端直接展示
 - 历史题目累积（不覆盖），审核台按 `date=今天 AND status=pending` 过滤
-- `Task.content` 仍保留（任务快照），但题目的「权威来源」转为 `Question` 表
 
 ## 第二部分：家长端题目审核台
 
@@ -101,7 +111,10 @@
 
 ### 与审核联动
 
-家长审核通过 → 题目 `status=published` → 孩子端首页对应学科 tab 出现待完成任务。
+孩子端首页的「待完成」任务 = **审核通过的生成类题目**（`Question.status=published`）+ **直接发布的听写类词条**（dictation，无需审核）。
+
+- 家长审核通过 → 生成类题目 `status=published` → 孩子端对应学科 tab 出现
+- 听写词/单词 → 生成即发布 → 孩子端对应学科 tab 直接出现
 
 ## 第四部分：家长端信息架构重组（9 → 7）
 
@@ -124,11 +137,16 @@
 ## 数据流
 
 ```
-task_gen 每日生成 → Question 表（status=pending, date=今天）
-  → 家长端题目审核台（按 date=今天 列出，学科/课程分组）
-    → 审核通过 → status=published
-      → 孩子端首页（按 subject+date 取 published 题目，学科 tab 分组展示）
-        → 孩子作答 → 判分 → record_attempt 落掌握度 → next_review_at 更新
+task_gen 每日生成
+  ├─ 生成类（听力/基础/阅读/数学）→ Question 表（status=pending, date=今天）
+  │     → 家长端题目审核台（按学科/课程审）
+  │       → 审核通过 → status=published
+  │         → 孩子端首页（published 题目）
+  └─ 听写类（生词/单词）→ 直接发布（不审核）
+        → 孩子端首页（直接显示）
+
+孩子端首页 = published 生成类题目 + 直接发布的听写词条
+  → 孩子作答 → 判分 → record_attempt 落掌握度 → next_review_at 更新
 ```
 
 ## 接口
