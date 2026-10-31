@@ -21,3 +21,17 @@ def test_word_bank_roundtrip(db):
     db.commit()
     got = db.query(WordBank).filter_by(word="徘徊").first()
     assert got.extra == "pái huái"
+
+
+def test_question_has_new_fields():
+    from app.database import SessionLocal
+    from app.models import Question
+    db = SessionLocal()
+    q = Question(lesson_id=1, qtype="knowledge", question="测试题",
+                 subject="语文", status="pending", extra='{"keywords":["a"]}', task_type="knowledge")
+    db.add(q); db.flush()
+    assert q.subject == "语文"
+    assert q.status == "pending"
+    assert q.extra == '{"keywords":["a"]}'
+    assert q.task_type == "knowledge"
+    db.close()

@@ -43,8 +43,12 @@ class Textbook(Base):
 
 class LearningProgress(Base):
     __tablename__ = "learning_progress"
+    __table_args__ = (
+        UniqueConstraint("user_id", "subject", name="uq_progress_user_subject"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    subject: Mapped[str] = mapped_column(String(16), default="语文")  # '语文' | '英语' | '数学'
     current_lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)
 
 class WordBank(Base):
@@ -73,9 +77,14 @@ class Question(Base):
     __tablename__ = "questions"
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
-    qtype: Mapped[str] = mapped_column(String(16), default="reading")   # reading | listening
+    qtype: Mapped[str] = mapped_column(String(16), default="reading")   # knowledge | listening | reading | math
     question: Mapped[str] = mapped_column(TextCls)
     answer: Mapped[str] = mapped_column(TextCls, default="")
+    subject: Mapped[str] = mapped_column(String(16), default="")        # 学科：语文/英语/数学
+    date: Mapped[date] = mapped_column(Date, nullable=True)             # 题目归属日期（每日生成的题）
+    status: Mapped[str] = mapped_column(String(16), default="published") # pending | published | rejected
+    extra: Mapped[str] = mapped_column(TextCls, default="")             # 附加数据 JSON
+    task_type: Mapped[str] = mapped_column(String(16), default="reading") # knowledge | listening | reading | math
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class Note(Base):
