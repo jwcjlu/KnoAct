@@ -2359,7 +2359,7 @@ function setParentTab(t){
   parentTab=t;
   if(t==='教材'){ loadPdfDocs().then(()=>render()); return; }
   if(t==='知识点'){ loadKnowledge().then(()=>render()); return; }
-  if(t==='题目'){ loadReviewQuestions().then(()=>render()); return; }
+  if(t==='题目审核台'){ loadReviewQuestions().then(()=>render()); return; }
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
@@ -2610,14 +2610,14 @@ async function showAddTask(){
 }
 
 function renderParent(){
-  const tabs = ['教材','知识点','题目','目标','报告','任务','规则','学习配置','设置'].map(t=>
+  const tabs = ['教材','知识点','题目审核台','目标','报告','任务','规则','学习配置','设置'].map(t=>
     `<button class="filter-btn ${parentTab===t?'active':''}" style="border-radius:10px;padding:8px 16px;font-size:13px;font-weight:600;color:${parentTab===t?'#3158e8':'#778079'};background:${parentTab===t?'#fff':'transparent'}" onclick="setParentTab('${t}')">${t}</button>`
   ).join('');
 
   let body='';
   if(parentTab==='教材') body = renderPdfTab();
   else if(parentTab==='知识点') body = renderKnowledgeTab();
-  else if(parentTab==='题目') body = renderQuestionTab();
+  else if(parentTab==='题目审核台') body = renderQuestionTab();
   else if(parentTab==='目标') body = renderGoalsTab();
   else if(parentTab==='报告') body = renderReportTab();
   else if(parentTab==='任务') body = renderTaskTab();
