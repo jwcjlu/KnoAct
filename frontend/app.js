@@ -32,7 +32,8 @@ const ICONS = {
   chat:'<path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/><path d="M9 11h.01M12 11h.01M15 11h.01"/>',
   highlighter:'<path d="M9 3 4 8l3 3-1 1a2 2 0 0 0 0 2.8l3.2 3.2a2 2 0 0 0 2.8 0l1-1 3 3L21 15l-3-3 1-1a2 2 0 0 0 0-2.8L15.8 5a2 2 0 0 0-2.8 0l-1-1Z"/>',
   underline:'<path d="M6 4v6a6 6 0 0 0 12 0V4"/><path d="M4 20h16"/>',
-  note:'<path d="M15 3h5v5"/><path d="M20 8 9 19l-4 1 1-4L17 5Z"/><path d="M7 14l3 3"/>'
+  note:'<path d="M15 3h5v5"/><path d="M20 8 9 19l-4 1 1-4L17 5Z"/><path d="M7 14l3 3"/>',
+  camera:'<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z"/><circle cx="12" cy="13" r="3"/>'
 };
 function icon(name, size=18){
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]||''}</svg>`;
@@ -604,11 +605,16 @@ async function redeemHome(cost, device, minutes){
   }
 }
 
-// ===== 听写练习 =====
+// ===== 听写练习（手写拍照批改）=====
+// 流程状态机：listen（听写）→ upload（拍照）→ grading（批改中）→ result（结果/申诉）→ rewrite（错词重写）→ done（完成）
 async function startDictation(){
   dictWords = await api(`/api/dictation/words?user_id=${uid}&subject=${encodeURIComponent(currentSubject)}`);
   if(!dictWords || !dictWords.length){ toast('当前词库暂无生词'); return; }
-  dictState = {idx:0, phase:'listen', wrong:[], correct:0, input:''};
+  dictState = {
+    idx:0, phase:'listen',   // listen | upload | grading | result | rewrite | done
+    wrong:[], correct:0, hints:{},   // hints: {idx: 'pinyin'|'meaning'}
+    image:null, results:null, rewriteIdx:0,
+  };
   setPage('听写练习');
 }
 function dictWord(){
@@ -618,8 +624,13 @@ function dictWord(){
   const parts = (raw.extra||'').split(/\s+/);
   return {w: raw.word, pinyin: parts[0]||'', meaning: parts.slice(1).join(' ')||raw.extra||'', id: raw.id};
 }
+// 当前是否在「错词重写」子流程：重写阶段只针对 s.wrong 里的错词，逐词 idx 用 rewriteIdx
+function dictIsRewrite(){ return dictState && dictState.phase === 'rewrite'; }
+// 重写子流程里，当前正在重听的错词在 s.wrong 中的下标
+function dictRewriteWordIndex(){ return dictState.rewriteIdx || 0; }
 function speakDict(){
-  const w = dictWord();
+  const s = dictState;
+  const w = dictIsRewrite() ? s.wrong[dictRewriteWordIndex()] : dictWord();
   const text = w.w;
   playTts(text);
   const btn = document.querySelector('.dict-play');
@@ -652,26 +663,117 @@ function browserSpeak(text){
     speechSynthesis.cancel(); speechSynthesis.speak(u);
   }
 }
-function dictInput(v){
-  if(dictState) dictState.input = v;
-  // 输入后实时刷新「确认提交」按钮的可用态，否则按钮一直 disabled 无法提交
-  const btn = document.querySelector('.dict-enter');
-  if(btn) btn.disabled = !(v && v.trim());
-}
-async function submitDict(){
-  const s = dictState, w = dictWord();
-  const right = s.input.trim() === w.w;
-  s.tried = true; s.phase = 'feedback';
-  await api('/api/dictation/grade', {method:'POST', body:{user_id:uid, word:w.w, word_id:w.id, answer:s.input}});
-  if(right){ s.correct++; }
-  else { s.wrong.push({word:w.w, pinyin:w.pinyin, meaning:w.meaning, yours:s.input.trim(), id:w.id}); }
+// 提示：生词先拼音后释义；英语单词提示中文
+function dictHint(){
+  const s = dictState;
+  const key = dictIsRewrite() ? s.wrong[dictRewriteWordIndex()].w : s.idx;
+  const isEnglish = currentSubject === '英语';
+  if(isEnglish){
+    if(!s.hints[key]) s.hints[key] = 'meaning';
+  } else {
+    if(!s.hints[key]) s.hints[key] = 'pinyin';
+    else if(s.hints[key] === 'pinyin') s.hints[key] = 'meaning';
+  }
   render();
 }
+// 听下一个词：普通听写 idx 前进；错词重写 rewriteIdx 前进
 function dictNext(){
   const s = dictState;
-  s.idx++;
-  if(s.idx >= dictWords.length){ s.phase='done'; }
-  else { s.phase='listen'; s.tried=false; s.input=''; }
+  if(dictIsRewrite()){
+    s.rewriteIdx++;
+    if(s.rewriteIdx >= s.wrong.length){ s.phase = 'upload'; s.rewriteIdx = 0; }
+  } else {
+    s.idx++;
+    if(s.idx >= dictWords.length){ s.phase = 'upload'; }
+  }
+  render();
+}
+// 拍照：读文件转 base64（剥掉 data:...;base64, 前缀）后批改
+function onDictPhoto(input){
+  const f = input.files && input.files[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const dataUrl = reader.result;  // "data:image/png;base64,..."
+    const base64 = (dataUrl || '').split(',')[1] || '';
+    dictState.image = base64;
+    dictState.phase = 'grading';
+    render();
+    await gradeDict();
+  };
+  reader.readAsDataURL(f);
+}
+function dictPickPhoto(){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.capture = 'environment';   // 手机优先调起后置摄像头
+  input.onchange = () => onDictPhoto(input);
+  input.click();
+}
+// 批改：首次批全部词，错词重写时只批错词（用错词的原始 index）
+async function gradeDict(){
+  const s = dictState;
+  let words;
+  if(dictIsRewrite()){
+    words = s.wrong.map((x, i) => ({index: i, word: x.word}));
+  } else {
+    words = dictWords.map((raw, i) => {
+      const w = raw.w ? raw : {w: raw.word, id: raw.id};
+      return {index: i, word: w.w};
+    });
+  }
+  const d = await api('/api/dictation/grade-handwriting', {method:'POST', body:{user_id:uid, words, image_base64: s.image}});
+  s.results = (d && d.results) || [];
+  if(!s.results || !s.results.length){
+    toast('批改失败，请重新拍照或稍后再试');
+    s.phase = 'upload';
+    render();
+    return;
+  }
+  if(dictIsRewrite()){
+    // 错词重写：按结果把仍然写对的词从 s.wrong 移除，写错的继续留在 s.wrong 下一轮重写
+    const stillWrong = [];
+    for(let i=0;i<s.wrong.length;i++){
+      const r = s.results.find(x => x.index === i);
+      if(r && r.is_correct){ s.correct++; s.wrong[i].written = r.written; }
+      else {
+        const keep = s.wrong[i];
+        keep.written = r ? r.written : '';
+        keep.yours = keep.written;
+        stillWrong.push(keep);
+      }
+    }
+    if(stillWrong.length){ s.wrong = stillWrong; s.phase = 'result'; s.rewriteIdx = 0; }
+    else { s.wrong = []; s.phase = 'done'; }
+  } else {
+    // 首次批改：按 index 匹配结果，记录每词对错 / 孩子写的内容
+    s.correct = 0; s.wrong = [];
+    for(let i=0;i<dictWords.length;i++){
+      const w = dictWords[i];
+      const ww = w.w ? w : {w: w.word, id: w.id};
+      const pinyin = w.pinyin || (w.extra || '').split(/\s+/)[0] || '';
+      const meaning = w.meaning || (w.extra || '').split(/\s+/).slice(1).join(' ') || (w.extra || '');
+      const r = s.results.find(x => x.index === i);
+      if(r && r.is_correct){ s.correct++; }
+      else {
+        s.wrong.push({word: ww.w, w: ww.w, pinyin, meaning, id: ww.id, yours: (r && r.written) || ''});
+      }
+    }
+    s.phase = 'result';
+  }
+  render();
+}
+// 申诉：批改可能有误，落记录待家长复核
+async function dictAppeal(word, wordId){
+  await api('/api/dictation/appeal', {method:'POST', body:{user_id:uid, word, word_id:wordId, reason:'批改可能有误'}});
+  toast('已提交申诉，家长将复核');
+}
+// 错词重写：仅针对错词，重新 listen → upload → grading
+function dictRewrite(){
+  const s = dictState;
+  if(!s.wrong.length){ s.phase = 'done'; render(); return; }
+  s.phase = 'rewrite'; s.rewriteIdx = 0; s.hints = {};
   render();
 }
 async function finishDictation(){
@@ -710,19 +812,23 @@ async function finishDictation(){
   setPage('学习首页');
   toast(`完成打卡，获得 ${d.points_awarded} 积分`);
 }
+// 结果页里展示孩子写的内容（空则提示未识别）
+function dictWritten(v){ return v && v.trim() ? v.trim() : '<span style="color:var(--gray2)">（未识别）</span>'; }
 function renderDictation(){
   const s = dictState;
   if(!s) return '<div class="placeholder-page"><h2>听写练习</h2><p>请从首页点击任务进入。</p></div>';
   const total = dictWords.length;
-  const progress = Math.round(s.idx / total * 100);
+  const isEnglish = currentSubject === '英语';
+  const wordLabel = isEnglish ? '单词' : '生词';
 
+  // ---------- done ----------
   if(s.phase==='done'){
     const wrongCount = s.wrong.length;
-    return `<header class="page-head"><div><h1>${currentSubject}生词听写</h1></div></header>
+    return `<header class="page-head"><div><h1>${currentSubject}${wordLabel}听写</h1></div></header>
     <div class="dict-wrap">
       <div class="dict-done">
         <div class="big">${icon('check',24)} 听写完成！</div>
-        <div class="sub">本次共听写 ${total} 个生词</div>
+        <div class="sub">本次共听写 ${total} 个${wordLabel}</div>
         <div class="stat">
           <div><div class="k">正确</div><div class="v g">${s.correct}</div></div>
           <div><div class="k">错误</div><div class="v r">${wrongCount}</div></div>
@@ -733,35 +839,96 @@ function renderDictation(){
     </div>`;
   }
 
-  const w = dictWord();
-  const feedback = s.phase==='feedback' ? (()=>{
-    const right = !s.wrong.some(x=>x.word===w.w);
-    return `<div class="dict-feedback ${right?'right':'wrong'}">
-      <div class="fb-head">${right?icon('check',18)+'回答正确':icon('pen',18)+'写错了，看这里'}</div>
-      <div class="fb-body">${right?`「${w.w}」拼写正确，${w.meaning}`:`正确写法是「${w.w}」（${w.pinyin}）<br>${w.meaning}`}</div>
-    </div>
-    <button class="dict-next" onclick="dictNext()">${s.idx===total-1?'查看结果':'下一个词'} ${icon('arrow',16)}</button>`;
-  })() : '';
+  // ---------- upload（拍照）----------
+  if(s.phase==='upload'){
+    return `<header class="page-head">
+      <div><h1>${currentSubject}${wordLabel}听写</h1></div>
+      <button class="btn-ghost" onclick="setPage('学习首页')">退出练习</button>
+    </header>
+    <div class="dict-wrap">
+      <div class="dict-card">
+        <div class="dict-word-ic">${icon('camera',40)}</div>
+        <div class="dict-hint">${dictIsRewrite()?'听写完了，拍下重写的那几个错词':'听写完了，拍下整页字迹'}</div>
+        <p style="margin-top:12px;font-size:13px;color:var(--gray2)">把写好的字迹平整放在镜头下，光线充足、不要遮挡</p>
+        <button class="dict-play" onclick="dictPickPhoto()">${icon('camera',17)} 拍照上传</button>
+      </div>
+    </div>`;
+  }
+
+  // ---------- grading（批改中）----------
+  if(s.phase==='grading'){
+    return `<header class="page-head"><div><h1>${currentSubject}${wordLabel}听写</h1></div></header>
+    <div class="dict-wrap">
+      <div class="dict-card">
+        <div class="dict-word-ic">${icon('sparkles',40)}</div>
+        <div class="dict-hint">正在批改…</div>
+        <p style="margin-top:12px;font-size:13px;color:var(--gray2)">AI 正在仔细辨认你的字迹，请稍等</p>
+      </div>
+    </div>`;
+  }
+
+  // ---------- result（结果 + 申诉）----------
+  if(s.phase==='result'){
+    const rows = s.wrong.map((x, i) => {
+      const hint = x.pinyin ? `<span class="ptxt">${x.pinyin}</span>` : '';
+      const meaning = x.meaning ? `<span class="ptxt" style="margin-left:8px">${x.meaning}</span>` : '';
+      return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line3);text-align:left">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:16px;font-weight:700">${icon('pen',16)} ${x.word}</div>
+          <div style="margin-top:2px;font-size:12px;color:var(--gray2)">${hint}${meaning}</div>
+          <div style="margin-top:4px;font-size:13px;color:#b65f52">你写的：${dictWritten(x.yours)}</div>
+        </div>
+        <button class="btn-ghost" style="flex-shrink:0" onclick="dictAppeal('${x.word.replace(/'/g,"\\'")}', ${x.id||0})">申诉</button>
+      </div>`;
+    }).join('');
+    const wrongCount = s.wrong.length;
+    return `<header class="page-head">
+      <div><h1>${currentSubject}${wordLabel}听写</h1></div>
+      <button class="btn-ghost" onclick="setPage('学习首页')">退出练习</button>
+    </header>
+    <div class="dict-wrap">
+      <div class="dict-card" style="text-align:left">
+        <div class="big" style="font-size:20px;font-weight:700">${icon('check',20)} 批改完成</div>
+        <div class="sub" style="margin-top:8px;font-size:13px;color:var(--gray2)">本次共 ${total} 个${wordLabel}，写对 ${s.correct} 个，写错 ${wrongCount} 个</div>
+        ${wrongCount ? `<div style="margin-top:16px;font-size:14px;font-weight:700;color:#b65f52">写错的${wordLabel}（可申诉）：</div>${rows}` : `<div style="margin-top:16px;font-size:14px;color:var(--green)">全部写对，太棒了！</div>`}
+        <div style="margin-top:20px;text-align:center">
+          ${wrongCount ? `<button class="dict-next" onclick="dictRewrite()">${icon('pen',17)} 错词重写</button>` : ''}
+          <button class="dict-next" style="margin-left:${wrongCount?'12px':'0'}" onclick="finishDictation()">${icon('star',17)} 完成打卡</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ---------- listen / rewrite（听写中，逐词播放）----------
+  const w = dictIsRewrite() ? s.wrong[dictRewriteWordIndex()] : dictWord();
+  const curKey = dictIsRewrite() ? w.w : s.idx;
+  const hint = s.hints[curKey];
+  let hintHtml = '<div class="dict-hint">点击播放，在纸上写下你听到的词</div>';
+  if(hint === 'pinyin') hintHtml = `<div class="dict-hint" style="color:var(--blue2);font-weight:700">拼音提示：${w.pinyin || ''}</div>`;
+  else if(hint === 'meaning') hintHtml = `<div class="dict-hint" style="color:var(--blue2);font-weight:700">${isEnglish ? '中文意思' : '释义'}：${w.meaning || ''}</div>`;
+
+  const curTotal = dictIsRewrite() ? s.wrong.length : total;
+  const curPos = dictIsRewrite() ? s.rewriteIdx + 1 : s.idx + 1;
+  const progress = Math.round((curPos - 1) / curTotal * 100);
 
   return `<header class="page-head">
-    <div><h1>${currentSubject}生词听写</h1></div>
+    <div><h1>${currentSubject}${wordLabel}听写</h1></div>
     <button class="btn-ghost" onclick="setPage('学习首页')">退出练习</button>
   </header>
   <div class="dict-wrap">
     <div class="dict-progress">
-      <span class="ptxt">第 ${s.idx+1} / ${total} 个</span>
+      <span class="ptxt">${dictIsRewrite()?'重写':'第'} ${curPos} / ${curTotal} 个</span>
       <div class="pbar"><div class="pfill" style="width:${progress}%"></div></div>
-      <span class="ptxt">${total-s.idx} 个剩余</span>
+      <span class="ptxt">${curTotal - curPos} 个剩余</span>
     </div>
     <div class="dict-card">
       <div class="dict-word-ic">${icon('headphones',40)}</div>
-      <div class="dict-hint">点击播放，听写这个词</div>
-      <button class="dict-play" onclick="speakDict()">${icon('play',17)} 播放词语</button>
-      <div style="margin-top:24px">
-        <input class="dict-input" placeholder="输入你听到的词语" value="${s.input||''}" oninput="dictInput(this.value)" ${s.phase==='feedback'?'disabled':''}>
+      ${hintHtml}
+      <button class="dict-play" onclick="speakDict()">${icon('play',17)} 播放${wordLabel}</button>
+      <div style="margin-top:20px;display:flex;justify-content:center;gap:12px">
+        <button class="dict-enter" style="background:var(--gray);color:#fff" onclick="dictHint()">提示</button>
+        <button class="dict-next" onclick="dictNext()">${curPos===curTotal?'听完了，去拍照':'下一个词'} ${icon('arrow',16)}</button>
       </div>
-      <button class="dict-enter" onclick="submitDict()" ${s.phase==='feedback'||!s.input.trim()?'disabled':''}>确认提交</button>
-      ${feedback}
     </div>
   </div>`;
 }
