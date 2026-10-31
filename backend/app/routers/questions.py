@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Question, Text
+from ..models import Question, Lesson, Text
 from ..services.question_gen import generate_reading_questions
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
@@ -74,13 +74,17 @@ def review_questions(d: date_type, subject: str = "", db: Session = Depends(get_
         q = q.filter(Question.subject == subject)
     qs = q.order_by(Question.subject, Question.lesson_id, Question.id).all()
     grouped = {}
+    lesson_titles = {}
     for item in qs:
         grouped.setdefault((item.subject, item.lesson_id), []).append({
             "id": item.id, "qtype": item.qtype, "question": item.question,
             "answer": item.answer, "extra": item.extra, "task_type": item.task_type,
         })
+        if item.lesson_id not in lesson_titles:
+            lesson = db.get(Lesson, item.lesson_id)
+            lesson_titles[item.lesson_id] = lesson.title if lesson else f"课程{item.lesson_id}"
     return {"groups": [
-        {"subject": subj, "lesson_id": lid, "questions": items}
+        {"subject": subj, "lesson_id": lid, "lesson_title": lesson_titles.get(lid, ""), "questions": items}
         for (subj, lid), items in grouped.items()
     ]}
 

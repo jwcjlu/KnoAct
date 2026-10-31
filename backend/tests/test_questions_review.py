@@ -41,6 +41,9 @@ def test_review_groups_by_subject_and_lesson(client, setup_db):
     by_subject = {g["subject"]: g for g in groups}
     assert by_subject["数学"]["questions"][0]["id"] == ids[0]
     assert by_subject["语文"]["questions"][0]["id"] == ids[1]
+    # lesson_title 已带上课程标题
+    assert by_subject["数学"]["lesson_title"] == "第1课"
+    assert by_subject["语文"]["lesson_title"] == "第1课"
 
 
 def test_review_filters_by_subject(client, setup_db):
