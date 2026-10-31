@@ -124,6 +124,51 @@
   .task-btn.todo:hover{background:var(--blue);color:#fff}
   .task-btn.done{background:var(--green-soft2);color:var(--green)}
 
+  /* ===== 孩子端首页：古诗勉励区（竹/兰/梅/菊 水墨渐变）===== */
+  .hero-poem{position:relative;overflow:hidden;border-radius:24px;padding:40px 44px;color:#fff;margin-top:24px;min-height:200px;display:flex;flex-direction:column;justify-content:center;box-shadow:0 14px 35px rgba(0,0,0,.15)}
+  .hero-poem.bamboo{background:linear-gradient(135deg,#2f4f3e 0%,#3d6b4f 35%,#4a7a5a 70%,#5b8a68 100%)}
+  .hero-poem.orchid{background:linear-gradient(135deg,#5a4a7a 0%,#6d5b8e 35%,#7e6ca1 70%,#8d7bb0 100%)}
+  .hero-poem.plum{background:linear-gradient(135deg,#8a3d3d 0%,#a14a4a 35%,#b35656 70%,#c26464 100%)}
+  .hero-poem.chrys{background:linear-gradient(135deg,#8a6a2e 0%,#a07c38 35%,#b38c44 70%,#c29a52 100%)}
+  .hero-poem .ink-branch{position:absolute;right:-20px;bottom:-30px;width:240px;height:300px;opacity:.35;pointer-events:none}
+  .hero-poem .poem-tag{font-size:13px;opacity:.85;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .hero-poem .poem-tag .flower{width:8px;height:8px;border-radius:50%;background:#fff;opacity:.9}
+  .hero-poem .poem-title{font-size:26px;font-weight:700;margin-bottom:8px;letter-spacing:2px}
+  .hero-poem .poem-text{font-size:16px;line-height:2;opacity:.95;letter-spacing:1px}
+  .hero-poem .poem-author{font-size:13px;opacity:.7;margin-top:10px}
+  .hero-poem .poem-rotate{position:absolute;top:20px;right:28px;font-size:12px;opacity:.6;display:flex;gap:6px;align-items:center}
+  .hero-poem .poem-rotate .r-dot{width:6px;height:6px;border-radius:50%;background:#fff;opacity:.5}
+  .hero-poem .poem-rotate .r-dot.on{opacity:1}
+
+  /* ===== 孩子端首页：今日总进度 ===== */
+  .progress-card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px 24px;margin-top:20px}
+  .progress-head{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+  .progress-num{font-size:32px;font-weight:800;color:var(--blue)}
+  .progress-num small{font-size:15px;color:var(--muted,var(--gray2));font-weight:500}
+  .progress-txt{font-size:15px;color:var(--ink3)}
+  .progress-txt b{color:var(--blue)}
+  .progress-sub{margin-top:2px;font-size:12px;color:var(--gray2)}
+  .progress-bar{height:10px;border-radius:999px;background:#eef0ed;overflow:hidden}
+  .progress-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--blue),var(--blue5));transition:width .4s ease}
+
+  /* ===== 孩子端首页：学科 tab ===== */
+  .subject-tabs{display:flex;gap:6px;background:#f2f4f1;border-radius:12px;padding:4px;width:max-content;margin-top:20px;margin-bottom:16px}
+  .subject-tab{display:flex;align-items:center;gap:8px;padding:9px 20px;font-size:14px;font-weight:600;color:#778079;border-radius:9px;cursor:pointer;border:1px solid transparent}
+  .subject-tab.active{background:#fff;color:var(--blue);box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .subject-tab .t-dot{width:8px;height:8px;border-radius:50%}
+  .subject-tab .t-badge{background:var(--orange-soft);color:var(--orange2);border-radius:999px;padding:0 7px;font-size:11px;font-weight:700}
+  .subject-tab .t-badge.zero{background:var(--green-soft);color:var(--green)}
+
+  /* ===== 孩子端首页：任务区（待完成/已完成分区）===== */
+  .task-panel{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;margin-top:16px}
+  .task-panel .tp-head{padding:14px 18px;border-bottom:1px solid var(--line2);font-size:13px;color:var(--gray2);display:flex;align-items:center;gap:8px}
+  .task-panel .tp-head .tp-count{color:var(--orange2)}
+  .task-panel .tp-head.tp-done{border-top:1px solid var(--line2);border-bottom:none;padding-top:6px}
+  .task-panel .task-card{border:1px solid var(--line2);background:var(--card);border-radius:14px;padding:18px;transition:.15s;margin:14px 18px}
+  .task-panel .task-card:first-of-type{margin-top:14px}
+  .task-panel .task-card.task-done{opacity:.55}
+  .empty-subject{padding:32px;text-align:center;font-size:13px;color:var(--gray2)}
+
   /* 智能复习 + 积分兑换 */
   .review-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:20px;margin-top:36px}
   .review-card{border:1px solid var(--line2);background:var(--card);border-radius:24px;padding:24px}
@@ -773,6 +818,6 @@
   window.pdfjsWasmUrl = new URL('./vendor/pdfjs/wasm/', import.meta.url).href;
 </script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<script src="app.js?v=33"></script>
+<script src="app.js?v=34"></script>
 </body>
 </html>

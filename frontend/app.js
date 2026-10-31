@@ -110,6 +110,19 @@ let centerTab = '听力理解';
 let completed = [];
 let homeSnapshot = null;   // 学习首页快照（来自 /api/home/snapshot）
 let dailyTasks = [];       // 今日任务（来自 /api/tasks）
+
+// 孩子端首页古诗勉励区：竹/兰/梅/菊四君子按日轮换（水墨渐变背景）
+const POEMS = [
+  {name:'竹', title:'竹石', text:'咬定青山不放松，立根原在破岩中。\n千磨万击还坚劲，任尔东西南北风。', author:'清 · 郑板桥', bg:'bamboo'},
+  {name:'兰', title:'幽兰', text:'幽兰在山谷，本自无人识。\n只为馨香重，求者遍山隅。', author:'陈毅', bg:'orchid'},
+  {name:'梅', title:'梅花', text:'墙角数枝梅，凌寒独自开。\n遥知不是雪，为有暗香来。', author:'宋 · 王安石', bg:'plum'},
+  {name:'菊', title:'菊花', text:'不是花中偏爱菊，此花开尽更无花。', author:'唐 · 元稹', bg:'chrys'},
+];
+function todayPoem(){
+  const d = new Date();
+  const dayIndex = Math.floor(d.getTime() / 86400000);  // 从 epoch 起的天数
+  return POEMS[dayIndex % 4];
+}
 let excerpt = '', answer = '', question = '';
 let chatMessages = [];  // 沉浸页对话记录 [{role:'user'|'ai', text, citations, mode}]
 let chatBusy = false;   // 是否正在等待 AI 回复
@@ -322,6 +335,13 @@ async function loadTasks(){
   dailyTasks = dailyTasks.filter(t => !t.subject || t.subject === currentSubject);
   return dailyTasks;
 }
+// 拉取今日全部学科任务（不按 subject 过滤），用于首页「今日总进度」与学科 tab 角标
+async function loadAllTasks(){
+  const t = new Date();
+  const d = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  const all = await api(`/api/tasks?user_id=${uid}&date=${d}&role=child`);
+  return Array.isArray(all) ? all : [];
+}
 async function renderHome(){
   await loadHome();
   await loadTasks();
@@ -347,8 +367,27 @@ async function renderHome(){
     custom:{icon:'sparkles',color:'orange',tag:'自定义',tagColor:'orange',meta:''},
   };
 
-  const taskCards = dailyTasks.map(t=>{
+  // 今日全部学科任务（用于总进度 + 学科 tab 角标），不依赖当前科目
+  const allTasks = await loadAllTasks();
+  const isApproved = t => t && t.submit_status === 'approved';
+  const totalAll = allTasks.length;
+  const doneAll = allTasks.filter(isApproved).length;
+  const remainAll = Math.max(0, totalAll - doneAll);
+  const progressPct = totalAll > 0 ? Math.round((doneAll / totalAll) * 100) : 0;
+  const SUBJECTS = ['语文','英语','数学'];
+  // 各学科「待完成」数（not_started / submitted 都算待完成）
+  const subjectRemain = {};
+  const subjectDone = {};
+  SUBJECTS.forEach(s => {
+    const list = allTasks.filter(t => t.subject === s);
+    subjectRemain[s] = list.filter(t => !isApproved(t)).length;
+    subjectDone[s] = list.filter(isApproved).length;
+  });
+  const subjBreakdown = SUBJECTS.map(s => `${s} ${subjectDone[s]}`).join(' · ');
+
+  const renderTaskCard = t => {
     const m = taskTypeMeta[t.task_type] || taskTypeMeta.custom;
+    const done = t.submit_status === 'approved';
     let btn;
     if(t.submit_status==='approved'){
       btn = `<button class="task-btn done">${icon('check',17)}已完成</button>`;
@@ -361,7 +400,7 @@ async function renderHome(){
     } else {
       btn = `<button class="task-btn todo" onclick="doTask(${t.id},'${t.task_type}')">开始练习</button>`;
     }
-    return `<article class="task-card">
+    return `<article class="task-card ${done?'task-done':''}">
       <div class="top">
         <div class="task-ic ${m.color}">${icon(m.icon,23)}</div>
         <div style="min-width:0;flex:1">
@@ -376,11 +415,21 @@ async function renderHome(){
       </div>
       ${btn}
     </article>`;
-  }).join('');
+  };
+
+  // 当前学科任务分「待完成 / 已完成」两区，待完成在前、已完成置灰在后
+  const todoTasks = dailyTasks.filter(t => !isApproved(t));
+  const doneTasks = dailyTasks.filter(isApproved);
+  const todoHtml = todoTasks.map(renderTaskCard).join('');
+  const doneHtml = doneTasks.map(renderTaskCard).join('');
 
   const taskGridHtml = dailyTasks.length
-    ? taskCards
-    : `<div class="task-empty" style="grid-column:1/-1;text-align:center;padding:28px 16px;color:#9aa39c;font-size:14px;background:#fafbf9;border:1px dashed #e2e6e1;border-radius:14px">${icon('book',20)}<div style="margin-top:8px">今天还没有任务，先去学习中心看看吧</div></div>`;
+    ? `<div class="task-panel">
+        <div class="tp-head">📌 ${currentSubject} · 待完成 <b class="tp-count">${todoTasks.length}</b> 项</div>
+        ${todoHtml || `<div class="empty-subject">本学科任务都完成啦，去别的学科看看吧 🎉</div>`}
+        ${doneHtml ? `<div class="tp-head tp-done">✅ 已完成</div>${doneHtml}` : ''}
+      </div>`
+    : `<div class="task-empty" style="text-align:center;padding:28px 16px;color:#9aa39c;font-size:14px;background:#fafbf9;border:1px dashed #e2e6e1;border-radius:14px">${icon('book',20)}<div style="margin-top:8px">今天还没有任务，先去学习中心看看吧</div></div>`;
 
   // TODO: 周统计未实现——后端无数据源（week_stats=null），暂渲染为空态灰条
   const weekBars = [['一',0],['二',0],['三',0],['四',0],['五',0],['六',0],['日',0]].map((d,i)=>
@@ -393,22 +442,63 @@ async function renderHome(){
   const hour = today.getHours();
   const greet = hour<6?'夜深了':hour<12?'早上好':hour<18?'下午好':'晚上好';
 
-  const subjectTabs = ['语文','英语','数学'].map(s=>
-    `<button class="filter-btn ${currentSubject===s?'active':''}" style="border-radius:10px;padding:6px 16px;font-size:13px;font-weight:600;color:${currentSubject===s?'#3158e8':'#778079'};background:${currentSubject===s?'#fff':'transparent'}" onclick="setSubject('${s}')">${s}</button>`
-  ).join('');
+  // 学科 tab：带「待完成」角标（全完成显示 ✓）
+  const subjectTabDot = { '语文':'var(--blue)', '英语':'var(--orange2)', '数学':'var(--green)' };
+  const subjectTabs = SUBJECTS.map(s => {
+    const remain = subjectRemain[s] || 0;
+    const badge = remain > 0
+      ? `<span class="t-badge">${remain}</span>`
+      : `<span class="t-badge zero">✓</span>`;
+    const active = currentSubject === s;
+    return `<button class="subject-tab ${active?'active':''}" onclick="setSubject('${s}')">
+      <span class="t-dot" style="background:${subjectTabDot[s]}"></span>${s}${badge}
+    </button>`;
+  }).join('');
+
+  const poem = todayPoem();
+  const poemText = poem.text.split('\n').map(line => `<div>${line}</div>`).join('');
+  const poemDots = POEMS.map((p,i)=>`<span class="r-dot ${p.name===poem.name?'on':''}"></span>`).join('');
 
   return `
   <header class="page-head">
     <div>
       <div class="date">${dateStr}</div>
       <h1>${greet}，${userName}</h1>
-      <div style="margin-top:10px;display:inline-flex;gap:6px;background:#f2f4f1;border-radius:12px;padding:4px">${subjectTabs}</div>
     </div>
     <div class="head-right">
       <div class="points-pill"><span class="star">${icon('star',18)}</span>${points.toLocaleString()}<span style="font-size:12px;font-weight:400;color:#8a928d">积分</span></div>
       <div class="avatar">晨</div>
     </div>
   </header>
+
+  <div class="hero-poem ${poem.bg}">
+    <div class="poem-rotate"><span style="opacity:.5">竹</span>${poemDots}<span style="opacity:.5">兰梅菊 · 每日轮换</span></div>
+    <div class="poem-tag"><span class="flower"></span> 今日勉励 · ${poem.name}</div>
+    <div class="poem-title">${poem.title}</div>
+    <div class="poem-text">${poemText}</div>
+    <div class="poem-author">—— ${poem.author}</div>
+    <svg class="ink-branch" viewBox="0 0 200 260" fill="none" aria-hidden="true">
+      <path d="M20 250 C60 180, 40 120, 90 60" stroke="#fff" stroke-width="3" opacity=".7"/>
+      <path d="M90 60 C100 40, 120 30, 140 25" stroke="#fff" stroke-width="2" opacity=".6"/>
+      <path d="M60 170 C90 160, 110 170, 130 160" stroke="#fff" stroke-width="2" opacity=".5"/>
+      <path d="M50 130 C80 120, 100 130, 120 122" stroke="#fff" stroke-width="2" opacity=".5"/>
+      <ellipse cx="140" cy="22" rx="18" ry="6" fill="#fff" opacity=".5" transform="rotate(-20 140 22)"/>
+      <ellipse cx="128" cy="40" rx="16" ry="5" fill="#fff" opacity=".4" transform="rotate(10 128 40)"/>
+    </svg>
+  </div>
+
+  <div class="progress-card">
+    <div class="progress-head">
+      <div class="progress-num">${doneAll}<small> / ${totalAll}</small></div>
+      <div class="progress-txt">
+        <div>${remainAll > 0 ? `<b>还差 ${remainAll} 项</b> 今日学习就完成啦` : `<b>全部完成</b>，今天真棒！`}</div>
+        <div class="progress-sub">${subjBreakdown}</div>
+      </div>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" style="width:${progressPct}%"></div></div>
+  </div>
+
+  <div class="subject-tabs">${subjectTabs}</div>
 
   <div class="hero-grid">
     <div class="hero">
