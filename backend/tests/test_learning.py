@@ -303,3 +303,29 @@ def test_dictation_complete_records_wrong_words(setup_db):
     s = SessionLocal()
     assert s.query(Mistake).filter_by(source_type="dictation").count() == 1
     s.close()
+
+
+def test_grade_handwriting_endpoint(setup_db):
+    # 视觉模型未配置/mock 异常时，接口返回空 results 而非 500
+    resp = _client().post("/api/dictation/grade-handwriting", json={
+        "user_id": 1,
+        "words": [{"index": 0, "word": "箩"}],
+        "image_base64": "",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "results" in data
+    assert data["results"] == []
+
+
+def test_appeal_endpoint(setup_db):
+    resp = _client().post("/api/dictation/appeal", json={
+        "user_id": 1, "word": "矗立", "reason": "我写的是对的",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    from app.models import Mistake
+    from app.database import SessionLocal
+    s = SessionLocal()
+    assert s.query(Mistake).filter_by(source_type="appeal").count() == 1
+    s.close()

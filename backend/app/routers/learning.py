@@ -1,3 +1,5 @@
+import base64 as _base64
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -279,3 +281,41 @@ def assignment_grade(req: AssignmentGradeReq, db: Session = Depends(get_db)):
             prog.current_lesson_id = nxt
         db.commit()
     return {"passed": passed, "rate": rate}
+
+
+class GradeHandwritingReq(BaseModel):
+    user_id: int
+    words: list[dict] = []   # [{index, word}]
+    image_base64: str = ""
+
+
+@router.post("/api/dictation/grade-handwriting")
+def grade_handwriting_endpoint(req: GradeHandwritingReq, db: Session = Depends(get_db)):
+    from ..services.handwriting import grade_handwriting
+    image_bytes = _base64.b64decode(req.image_base64) if req.image_base64 else b""
+    results = grade_handwriting(db, image_bytes, req.words)
+    return {"results": results}
+
+
+class AppealReq(BaseModel):
+    user_id: int
+    word: str
+    word_id: int = 0
+    reason: str = ""
+
+
+@router.post("/api/dictation/appeal")
+def appeal(req: AppealReq, db: Session = Depends(get_db)):
+    """孩子申诉：某词批改有误，标记待复核。"""
+    # 本阶段简化：记录申诉到 Mistake 表（source_type="appeal"）或直接返回 ok
+    # 家长复核 UI 是后续，这里先落一条记录供家长端查询
+    from ..models import Mistake
+    db.add(Mistake(
+        user_id=req.user_id, source_type="appeal",
+        question=f"听写申诉：{req.word}",
+        your_answer=req.reason or "（未说明原因）",
+        correct_answer=req.word,
+        word_bank_id=req.word_id if req.word_id else None,
+    ))
+    db.commit()
+    return {"ok": True}

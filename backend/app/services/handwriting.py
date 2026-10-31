@@ -1,5 +1,6 @@
 """手写听写批改：用视觉模型比对标准词列表与手写照片，判每词对错。"""
 import json
+import re
 
 from sqlalchemy.orm import Session
 
@@ -17,11 +18,24 @@ def _grading_instruction(words: list[dict]) -> str:
     )
 
 
+def _strip_fences(s: str) -> str:
+    s = s.strip()
+    # 剥离 ```json ... ``` 围栏
+    m = re.match(r'^```(?:json)?\s*(.*?)\s*```$', s, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return s
+
+
 def parse_grading_result(raw: str) -> list[dict]:
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):
-        return []
+        # 尝试剥离 markdown 围栏再解析
+        try:
+            data = json.loads(_strip_fences(raw))
+        except (ValueError, TypeError):
+            return []
     results = data.get("results") if isinstance(data, dict) else []
     if not isinstance(results, list):
         return []

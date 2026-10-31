@@ -18,6 +18,12 @@ def test_parse_grading_result_bad_json():
     assert parse_grading_result('{"results": "oops"}') == []
 
 
+def test_parse_grading_result_strips_markdown_fences():
+    raw = '```json\n{"results":[{"index":0,"written":"箩","is_correct":true}]}\n```'
+    out = parse_grading_result(raw)
+    assert len(out) == 1 and out[0]["is_correct"] is True
+
+
 def test_grade_handwriting_empty_input_returns_empty():
     db = SessionLocal()
     assert grade_handwriting(db, b"", []) == []
