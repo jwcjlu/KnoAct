@@ -613,7 +613,7 @@ async function startDictation(){
   dictState = {
     idx:0, phase:'listen',   // listen | upload | grading | result | rewrite | done
     wrong:[], correct:0, hints:{},   // hints: {idx: 'pinyin'|'meaning'}
-    image:null, results:null, rewriteIdx:0,
+    image:null, results:null, rewriteIdx:0, rewriting:false,
   };
   setPage('听写练习');
 }
@@ -624,8 +624,9 @@ function dictWord(){
   const parts = (raw.extra||'').split(/\s+/);
   return {w: raw.word, pinyin: parts[0]||'', meaning: parts.slice(1).join(' ')||raw.extra||'', id: raw.id};
 }
-// 当前是否在「错词重写」子流程：重写阶段只针对 s.wrong 里的错词，逐词 idx 用 rewriteIdx
-function dictIsRewrite(){ return dictState && dictState.phase === 'rewrite'; }
+// 当前是否在「错词重写」子流程：用独立标志 rewriting 区分（不依赖 phase，
+// 因为重写流程里 phase 会从 rewrite → upload → grading → result 被覆盖）
+function dictIsRewrite(){ return !!(dictState && dictState.rewriting); }
 // 重写子流程里，当前正在重听的错词在 s.wrong 中的下标
 function dictRewriteWordIndex(){ return dictState.rewriteIdx || 0; }
 function speakDict(){
@@ -773,7 +774,7 @@ async function dictAppeal(word, wordId){
 function dictRewrite(){
   const s = dictState;
   if(!s.wrong.length){ s.phase = 'done'; render(); return; }
-  s.phase = 'rewrite'; s.rewriteIdx = 0; s.hints = {};
+  s.rewriting = true; s.phase = 'rewrite'; s.rewriteIdx = 0; s.hints = {};
   render();
 }
 async function finishDictation(){
