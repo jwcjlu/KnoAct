@@ -150,8 +150,11 @@ async function switchChild(id){
   if(childSwitching) return;
   uid = Number(id) || null;
   try{ localStorage.setItem(CHILD_KEY, String(uid)); }catch(e){}
+  goalRows = []; reportRows = []; masteryReport = null; parentTasks = [];
   childSwitching = true; render();
-  try{ await reloadChildData(); } finally { childSwitching = false; render(); }
+  try{ await reloadChildData(); }
+  catch(e){ toast('加载孩子数据失败，请稍后重试'); }
+  finally { childSwitching = false; render(); }
 }
 function childSelectHtml(){
   if(!children.length) return `<span class="child-empty">暂无孩子</span>`;
@@ -443,6 +446,9 @@ async function showAddTask(){
 }
 
 function renderParent(){
+  const tabs = PARENT_TABS.map(([t])=>
+    `<button class="filter-btn ${parentTab===t?'active':''}" style="border-radius:10px;padding:8px 16px;font-size:13px;font-weight:600;color:${parentTab===t?'#3158e8':'#778079'};background:${parentTab===t?'#fff':'transparent'}" onclick="setParentTab('${t}')">${t}</button>`
+  ).join('');
 
   let body='';
   if(parentTab==='教材') body = renderPdfTab();
@@ -460,6 +466,7 @@ function renderParent(){
   }
   return `<div class="parent-banner">
     <div class="l"><div class="ic">${icon('star',20)}</div><div><div class="t">家长端 · 管理学习目标与规则</div><div class="s">在这里录入教材、设定目标、查看薄弱报告</div></div></div>
+    <div class="parent-tabs-narrow" style="gap:8px;background:#f2f4f1;border-radius:12px;padding:4px">${tabs}</div>
     ${childSelectHtml()}
   </div>${body}`;
 }
@@ -1231,10 +1238,11 @@ async function testVoice(){
 
 // ===== 初始化 =====
 async function init(){
-  await loadChildren();
+  try{ await loadChildren(); }
+  catch(e){ children = []; uid = null; toast('无法连接后端服务，请检查后端是否启动'); }
   try{ await loadConfig(); }catch(e){}
   renderNav();
-  await loadParentData();
+  try{ await loadParentData(); }catch(e){}
   render();
 }
 
