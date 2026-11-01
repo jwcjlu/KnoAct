@@ -10,7 +10,7 @@ def test_seed_creates_data(setup_db):
     assert s.query(Lesson).count() == 1
     assert s.query(WordBank).count() == 5
     assert s.query(KnowledgePoint).filter(KnowledgePoint.lesson_id.isnot(None)).count() == 2  # 课文绑定的 2 条
-    assert s.query(KnowledgePoint).filter(KnowledgePoint.lesson_id.is_(None)).count() == 21  # 基础分类目录
+    assert s.query(KnowledgePoint).filter(KnowledgePoint.lesson_id.is_(None)).count() == 28  # 基础分类目录（语文12+英语9+数学7）
     assert s.query(Text).count() == 1
     assert s.query(ModelConfig).count() == 2
     s.close()

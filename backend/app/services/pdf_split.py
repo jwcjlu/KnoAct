@@ -114,6 +114,203 @@ def _calibrate_page_offset(texts: list[str], toc_entries: list[tuple[int, str]])
     return 0
 
 
+_CN_UNIT = "一二三四五六七八九十"
+_MATH_UNIT_IN_LINE = re.compile(r"第\s*([一二三四五六七八九十百\d]+)\s*单元")
+# 标准「第五单元5」+ 北师大乱码字体「第ʷ单元\\x12」（\\x12–\\x15 对应第 1–4 单元）
+_MATH_UNIT_HEADER = re.compile(
+    r"^(?:\d+\s*)?"
+    r"第(?:\s*([一二三四五六七八九十]+)\s*单元\s*(\d+)"
+    r"|.{1,3}单元([\x12-\x19]))"
+    r"\s*$"
+)
+
+
+def _math_unit_ordinal(title: str) -> str | None:
+    m = _MATH_UNIT_IN_LINE.search(title)
+    return m.group(1) if m else None
+
+
+def _math_unit_index_from_header(m: re.Match) -> int | None:
+    if m.group(1):
+        i = _CN_UNIT.find(m.group(1))
+        if i >= 0:
+            return i + 1
+    if m.group(2) and str(m.group(2)).isdigit():
+        return int(m.group(2))
+    ctrl = m.group(3)
+    if ctrl and len(ctrl) == 1:
+        n = ord(ctrl) - 0x11
+        if 1 <= n <= 9:
+            return n
+    return None
+
+
+def _topic_line_score(text: str) -> float:
+    cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+    allowed = set("（）().，、？！：；· ")
+    bad = sum(
+        1
+        for c in text
+        if not (
+            "\u4e00" <= c <= "\u9fff"
+            or c in allowed
+            or (c.isascii() and (c.isalnum() or c in "+－=×÷"))
+        )
+    )
+    return cjk * 2 - bad * 3
+
+
+def _clean_math_topic(topic: str) -> str:
+    s = re.sub(r"[^\u4e00-\u9fff（）().，、\s]", "", topic)
+    return re.sub(r"\s+", "", s)
+
+
+def _math_unit_topic(lines: list[str], unit_line_index: int) -> str:
+    candidates: list[tuple[int, str, float]] = []
+    for j in range(unit_line_index + 1, min(unit_line_index + 4, len(lines))):
+        nxt = lines[j].strip()
+        if not nxt or re.fullmatch(r"\d{1,3}", nxt):
+            continue
+        if "单元" in nxt or "北师大" in nxt:
+            continue
+        if re.match(r"^第\s*[一二三四五六七八九十百\d]+\s*[课个]", nxt):
+            continue
+        if len(nxt) > 22:
+            continue
+        score = _topic_line_score(nxt)
+        if score >= 2:
+            candidates.append((j, nxt, score))
+    if not candidates:
+        return ""
+
+    def _topic_rank(item: tuple[int, str, float]) -> float:
+        _j, text, score = item
+        cleaned = _clean_math_topic(text)
+        base = max(score, _topic_line_score(cleaned))
+        penalty = len(cleaned) // 6
+        if re.search(r"(探索|练一练|想一想|回顾|测量|交流)", cleaned):
+            penalty += 8
+        return base - penalty
+
+    best_rank = max(_topic_rank(c) for c in candidates)
+    tier = [c for c in candidates if _topic_rank(c) >= best_rank - 2]
+    _j, best_raw, _ = min(tier, key=lambda x: x[0])
+    return _clean_math_topic(best_raw)
+
+
+_MATH_OCR_UNIT = re.compile(r"^第\s*([一二三四五六七八九十\d]+)\s*单元\s*(.*)$")
+
+
+def _math_unit_title_from_ocr(raw: str) -> str | None:
+    """视觉 OCR 常输出「第一单元」+ 换行 + 单元主题，与 PDF 文本层版式不同。"""
+    lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+    for i, line in enumerate(lines):
+        m = _MATH_OCR_UNIT.match(line)
+        if not m:
+            continue
+        idx = m.group(1)
+        if idx.isdigit():
+            n = int(idx)
+            unit_str = f"第{_CN_UNIT[n - 1]}单元" if 1 <= n <= len(_CN_UNIT) else f"第{idx}单元"
+        else:
+            unit_str = f"第{idx}单元"
+        inline = (m.group(2) or "").strip()
+        if inline:
+            topic = _clean_math_topic(inline)
+            return f"{unit_str} {topic}".strip() if topic else unit_str
+        if i + 1 < len(lines):
+            topic = _clean_math_topic(lines[i + 1])
+            return f"{unit_str} {topic}".strip() if topic else unit_str
+    return None
+
+
+def _page_has_garbled_math_unit_header(page_text: str) -> bool:
+    for line in page_text.split("\n"):
+        m = _MATH_UNIT_HEADER.match(line.strip())
+        if m and m.group(3):
+            return True
+    return False
+
+
+def _math_title_quality(title: str) -> float:
+    if " " not in title:
+        return 0.0
+    topic = title.split(" ", 1)[1]
+    return _topic_line_score(_clean_math_topic(topic))
+
+
+def _refine_math_hit_titles(
+    pdf_path: str, hits: list[tuple[int, str]], texts: list[str], db
+) -> list[tuple[int, str]]:
+    """乱码字体单元扉页：用 OCR 补全标准单元主题名。"""
+    if not db:
+        return hits
+    out: list[tuple[int, str]] = []
+    for page_no, title in hits:
+        page_text = texts[page_no - 1] if page_no <= len(texts) else ""
+        topic = title.split(" ", 1)[1] if " " in title else ""
+        cleaned = _clean_math_topic(topic) if topic else ""
+        needs_ocr = (
+            _page_has_garbled_math_unit_header(page_text)
+            or not cleaned
+            or len(cleaned) > 18
+            or _math_title_quality(title) < 6
+        )
+        if needs_ocr:
+            try:
+                raw = _ocr_page(
+                    pdf_path,
+                    page_no - 1,
+                    db,
+                    "识别本页「第×单元」标题行及其下方单元主题名称，只输出这两行汉字原文。",
+                )
+                ocr_title = _math_unit_title_from_ocr(raw)
+                if ocr_title and (
+                    _page_has_garbled_math_unit_header(page_text)
+                    or len(cleaned) > 18
+                    or _math_title_quality(ocr_title) >= max(_math_title_quality(title), 4)
+                ):
+                    title = ocr_title
+            except Exception:
+                pass
+        elif cleaned and cleaned != topic:
+            title = f"{title.split(' ', 1)[0]} {cleaned}"
+        out.append((page_no, title[:80]))
+    return out
+
+
+def _math_unit_title(page_text: str) -> str | None:
+    """北师大等版式：单元行「第五单元5」或乱码「第ʷ单元\\x12」+ 下方课题名。"""
+    lines = [ln.strip() for ln in page_text.split("\n")]
+    for i, line in enumerate(lines):
+        if not line or "单元" not in line:
+            continue
+        m = _MATH_UNIT_HEADER.match(line)
+        if not m:
+            continue
+        idx = _math_unit_index_from_header(m)
+        if not idx or idx > len(_CN_UNIT):
+            continue
+        unit_str = f"第{_CN_UNIT[idx - 1]}单元"
+        topic = _math_unit_topic(lines, i)
+        return f"{unit_str} {topic}".strip() if topic else unit_str
+    return None
+
+
+def _dedupe_math_hits(hits: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """同一「第 N 单元」只保留首次出现的物理页（避免页眉重复命中）。"""
+    out: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for page_no, title in sorted(hits, key=lambda x: x[0]):
+        ord_ = _math_unit_ordinal(title)
+        if ord_:
+            if ord_ in seen:
+                continue
+            seen.add(ord_)
+        out.append((page_no, title))
+    return out
+
+
 def detect_lessons_from_pdf(pdf_path: str, subject: str, db=None) -> list[dict]:
     """从 PDF 文本中按学科锚点切分课程。
 
@@ -132,14 +329,55 @@ def detect_lessons_from_pdf(pdf_path: str, subject: str, db=None) -> list[dict]:
     if not subject_rule:
         return []
 
-    # 优先用学科锚点（第 N 课 / Unit N / 第 N 单元）
     anchor = re.compile(subject_rule["anchor_re"])
     hits = []
-    for i, text in enumerate(texts):
-        m = anchor.search(text)
-        if m:
+    if subject == "数学":
+        # 逐页识别单元扉页行（含乱码字体层），不依赖「第 N 单元」正则锚点
+        for i, text in enumerate(texts):
+            title = _math_unit_title(text)
+            if title:
+                hits.append((i + 1, title[:80]))
+    else:
+        for i, text in enumerate(texts):
+            m = anchor.search(text)
+            if not m:
+                continue
             line = text[m.start():].split("\n")[0].strip()
             hits.append((i + 1, line[:80] or m.group(0)))
+
+    if subject == "数学" and len(hits) < 6:
+        # 文本层乱码时锚点匹配失败：尝试从目录页解析「第 N 单元 + 标题 + 页码」
+        toc_re = re.compile(
+            r"^\s*第\s*([一二三四五六七八九十百\d]+)\s*单元\s*(.+?)[.．…\s]*[.．…]{2,}\s*(\d{1,3})\s*$"
+        )
+        toc_entries: list[tuple[int, str]] = []
+        for text in texts:
+            is_toc = "目录" in text or (text.count(".") > 8 and "单元" in text)
+            if not is_toc:
+                continue
+            for line in text.split("\n"):
+                m = toc_re.match(line.strip())
+                if not m:
+                    continue
+                start_page = int(m.group(3))
+                title = f"第{m.group(1)}单元 {m.group(2).strip()}"
+                if len(m.group(2).strip()) >= 2:
+                    toc_entries.append((start_page, title))
+            if len(toc_entries) >= 6:
+                break
+        if toc_entries:
+            page_offset = _calibrate_page_offset(texts, toc_entries)
+            seen_pages: set[int] = set()
+            for start_page, title in sorted(toc_entries):
+                phys = start_page + page_offset
+                if phys in seen_pages:
+                    continue
+                seen_pages.add(phys)
+                hits.append((phys, title[:80]))
+
+    if subject == "数学" and hits:
+        hits = _dedupe_math_hits(hits)
+        hits = _refine_math_hit_titles(pdf_path, hits, texts, db)
 
     if not hits and subject == "语文":
         # 人教版语文：优先从「目录页」解析「序号 + 标题 + 点线 + 页码」，

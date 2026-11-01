@@ -25,7 +25,7 @@ SYSTEM = (
 )
 
 
-def generate_manim_code(prompt: str) -> str:
+def generate_manim_code(prompt: str, timeout: float = 300.0) -> str:
     from app.services.ai import get_provider
     from app.database import SessionLocal
 
@@ -35,6 +35,7 @@ def generate_manim_code(prompt: str) -> str:
         raw = provider.generate(
             prompt=f"生成一个演示以下数学概念的 manim 动画：{prompt}。公式优先用 MathTex。",
             system=SYSTEM,
+            timeout=timeout,
         )
     except Exception:
         raw = ""
@@ -43,6 +44,6 @@ def generate_manim_code(prompt: str) -> str:
 
     code = (raw or "").strip()
     if not code or "class" not in code or "Scene" not in code:
-        # fake / 失败兜底：返回模板
+        # 超时 / 失败 / fake 兜底：返回模板，保证能渲染出视频
         return TEMPLATE.format(topic=prompt)
     return code

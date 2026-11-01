@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>家长端优化原型 - 知学伴</title>
+<style>
+  :root{
+    --blue:#3158e8; --blue2:#4566e8; --blue3:#3d66f5; --blue-soft:#edf1ff; --blue-soft2:#f5f7ff;
+    --green:#2e8b5a; --green2:#2e9b62; --green-soft:#e8f7ef;
+    --orange:#dc872d; --orange2:#c97629; --orange-soft:#fff2df;
+    --purple:#7457d7; --purple-soft:#f0edff;
+    --bg:#f7f8f5; --card:#fff; --ink:#202723; --ink3:#4b544e;
+    --line:#e3e7e0; --line2:#e2e6e0; --line3:#e1e5df; --muted:#8e9691;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;padding:0 0 60px}
+
+  /* 顶部说明条 */
+  .proto-banner{background:var(--blue);color:#fff;padding:14px 32px;font-size:13px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+  .proto-banner b{font-size:15px}
+  .proto-banner .chip{background:rgba(255,255,255,.2);border-radius:6px;padding:2px 8px;font-size:11px}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 24px}
+
+  h1.sec{font-size:22px;margin:36px 0 6px}
+  .sec-desc{color:var(--muted);font-size:13px;margin-bottom:20px;line-height:1.7}
+
+  /* ===== 侧边栏导航 ===== */
+  .sidebar{position:fixed;inset-y:0;left:0;width:220px;background:var(--card);border-right:1px solid var(--line);padding:24px 16px;display:flex;flex-direction:column;z-index:20}
+  .logo{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:28px}
+  .logo-badge{width:36px;height:36px;border-radius:10px;background:var(--blue3);color:#fff;display:grid;place-items:center;font-size:18px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;font-size:14px;color:var(--ink3);cursor:pointer;margin-bottom:4px;border:1px solid transparent}
+  .nav-item.active{background:var(--blue-soft);color:var(--blue);font-weight:600}
+  .nav-item .dot{width:6px;height:6px;border-radius:50%;background:var(--orange);margin-left:auto}
+  .nav-sec{font-size:11px;color:var(--muted);margin:18px 14px 6px;letter-spacing:.5px}
+  .nav-switch{margin-top:auto;border-radius:14px;background:var(--blue-soft2);padding:14px;font-size:12px;color:var(--ink3);text-align:center}
+  .nav-switch b{color:var(--blue)}
+
+  /* 主内容左移 */
+  .main{margin-left:244px;padding:28px 32px}
+
+  .parent-tabs{display:flex;gap:6px;background:#f2f4f1;border-radius:12px;padding:4px;width:max-content;margin-bottom:24px;flex-wrap:wrap}
+  .parent-tab{padding:8px 16px;font-size:13px;font-weight:600;color:#778079;border-radius:10px;cursor:pointer;border:1px solid transparent}
+  .parent-tab.active{background:#fff;color:var(--blue)}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:16px}
+  .panel-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .panel-head .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:17px}
+  .panel-head h3{font-size:15px;font-weight:700}
+  .panel-head .sub{font-size:12px;color:var(--muted)}
+  .panel-head .right{margin-left:auto;display:flex;gap:8px}
+
+  .btn{border-radius:10px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--line3)}
+  .btn-primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .btn-ghost{background:#fff;color:var(--ink3)}
+  .btn-danger{color:#c05b4a;border-color:#e8d5d1}
+  .btn-green{background:var(--green);color:#fff;border-color:var(--green)}
+
+  /* ===== 题目审核台 ===== */
+  .subject-card{border:1px solid var(--line);border-radius:16px;background:var(--card);margin-bottom:20px;overflow:hidden}
+  .subject-head{display:flex;align-items:center;gap:10px;padding:16px 20px;cursor:pointer}
+  .subject-head .s-ic{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:14px}
+  .subject-head .s-name{font-size:15px;font-weight:700}
+  .subject-head .s-count{font-size:12px;color:var(--muted)}
+  .subject-head .s-actions{margin-left:auto;display:flex;gap:8px}
+  .badge{font-size:11px;font-weight:600;border-radius:6px;padding:2px 8px}
+  .badge-blue{background:var(--blue-soft);color:var(--blue2)}
+  .badge-green{background:var(--green-soft);color:var(--green)}
+  .badge-orange{background:var(--orange-soft);color:var(--orange2)}
+
+  .lesson-group{border-top:1px solid var(--line2);padding:14px 20px}
+  .lesson-head{display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0}
+  .lesson-head .l-title{font-size:14px;font-weight:600}
+  .lesson-head .l-pg{font-size:12px;color:var(--muted)}
+  .lesson-head .l-status{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .chevron{transition:.15s;color:var(--muted);font-size:12px}
+  .chevron.open{transform:rotate(90deg)}
+
+  .q-list{display:none;margin-top:10px;padding-left:28px}
+  .q-list.open{display:block}
+  .q-item{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:#fafbf9;border:1px solid var(--line3);border-radius:10px;margin-bottom:8px}
+  .q-item .q-body{flex:1;min-width:0}
+  .q-item .q-text{font-size:13px;font-weight:600;color:#333;line-height:1.5}
+  .q-item .q-ans{font-size:12px;color:var(--muted);margin-top:3px}
+  .q-item .q-actions{display:flex;gap:6px;flex-shrink:0}
+  .q-type{font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px}
+
+  .empty-state{text-align:center;padding:40px 20px;color:var(--muted);font-size:13px}
+
+  /* 对比：旧 vs 新 */
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:16px}
+  .compare .col{border:1px solid var(--line);border-radius:16px;padding:20px;background:var(--card)}
+  .compare h4{font-size:14px;margin-bottom:12px}
+  .old-tags{display:flex;flex-wrap:wrap;gap:6px}
+  .old-tags span{background:#f0f0ef;color:#8a928d;border-radius:8px;padding:6px 12px;font-size:12px;border:1px dashed #ccc}
+  .new-tags{display:flex;flex-wrap:wrap;gap:6px}
+  .new-tags span{background:var(--blue-soft);color:var(--blue2);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600}
+  .arrow-flow{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;flex-wrap:wrap;margin-top:14px}
+  .arrow-flow .node{background:var(--card);border:1px solid var(--blue-border);color:var(--blue);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  <b>知学伴 · 家长端优化原型</b>
+  <span class="chip">方案 A：温和合并</span>
+  <span style="margin-left:auto;opacity:.85">下面灰色是信息架构，蓝色区域是「题目审核台」核心界面</span>
+</div>
+
+<div class="sidebar">
+  <div class="logo"><div class="logo-badge">知</div>知学伴 · 家长端</div>
+  <div class="nav-sec">内容管理</div>
+  <div class="nav-item">📚 教材管理</div>
+  <div class="nav-item active">📝 题目审核台<span class="dot"></span></div>
+  <div class="nav-item">✅ 任务管理</div>
+  <div class="nav-sec">学习规划</div>
+  <div class="nav-item">🎯 学习目标</div>
+  <div class="nav-item">📊 洞察报告</div>
+  <div class="nav-item">🎁 兑换规则</div>
+  <div class="nav-sec">系统</div>
+  <div class="nav-item">⚙️ 学习配置</div>
+  <div class="nav-item">🔧 模型设置</div>
+  <div class="nav-switch">当前：<b>家长端</b><br><span style="opacity:.7">点击切换到孩子端</span></div>
+</div>
+
+<div class="main">
+
+  <!-- 第一部分：信息架构对比 -->
+  <h1 class="sec">一、信息架构重组（9 → 7）</h1>
+  <div class="sec-desc">把分散的「知识点」「题目」等 tab，按「教材 → 题目 → 任务」生命周期主线重新内聚。</div>
+  <div class="compare">
+    <div class="col">
+      <h4 style="color:#c05b4a">现状 · 9 个平铺 tab</h4>
+      <div class="old-tags">
+        <span>教材</span><span>知识点</span><span>题目</span><span>目标</span><span>报告</span><span>任务</span><span>规则</span><span>学习配置</span><span>设置</span>
+      </div>
+      <div class="arrow-flow" style="margin-top:16px;color:#c05b4a">
+        ⚠️ 知识点 / 题目 与「教材」重复<br>⚠️ 题目审核和任务审核重叠<br>⚠️ 假按钮多（编辑/规则点了没反应）
+      </div>
+    </div>
+    <div class="col">
+      <h4 style="color:var(--green)">目标 · 7 个 tab，按生命周期内聚</h4>
+      <div class="new-tags">
+        <span>📚 教材管理</span><span>📝 题目审核台</span><span>✅ 任务管理</span><span>🎯 学习目标</span><span>📊 洞察报告</span><span>🎁 兑换规则</span>
+      </div>
+      <div style="margin-top:12px;font-size:12px;color:var(--ink3);line-height:1.6">
+        「知识点」并入教材详情；<br>「题目」升级为独立「审核台」；<br>「设置/学习配置」保持不变（你已认可）。
+      </div>
+      <div class="arrow-flow">
+        <span class="node">上传教材</span>→<span class="node">拆课提取</span>→<span class="node">出题审核</span>→<span class="node">生成任务</span>→<span class="node">孩子学习</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 第二部分：题目审核台 -->
+  <h1 class="sec">二、题目审核台（核心新增）</h1>
+  <div class="sec-desc">按 <b>学科</b> → <b>课程</b> 两层组织；每课可展开逐题细看；支持「通过本课全部 / 通过本学科全部」批量审核。审核通过后孩子才能在任务里看到并作答。</div>
+
+  <!-- 顶部操作条 -->
+  <div class="panel">
+    <div class="panel-head">
+      <div class="ic" style="background:var(--blue-soft);color:var(--blue2)">📝</div>
+      <div><h3>今日待审核题目</h3><div class="sub">2026-10-31 · 共 3 门课 12 题待审核</div></div>
+      <div class="right">
+        <button class="btn btn-ghost">＋ 出题（按学科/课程）</button>
+        <button class="btn btn-primary">全部通过</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 语文 -->
+  <div class="subject-card">
+    <div class="subject-head">
+      <div class="s-ic" style="background:var(--blue)">语</div>
+      <span class="s-name">语文</span>
+      <span class="s-count">2 门课 · 5 题待审核</span>
+      <div class="s-actions">
+        <span class="badge badge-blue">5 待审</span>
+        <button class="btn btn-green" style="padding:6px 14px">通过语文全部</button>
+      </div>
+    </div>
+
+    <div class="lesson-group">
+      <div class="lesson-head" onclick="toggle('l1')">
+        <span class="chevron open" id="ch-l1">▶</span>
+        <span class="l-title">第 1 课 · 桂花雨</span>
+        <span class="l-pg">第 3–6 页</span>
+        <div class="l-status">
+          <span class="badge badge-orange">3 待审</span>
+          <button class="btn btn-ghost" style="padding:4px 10px">通过本课</button>
+        </div>
+      </div>
+      <div class="q-list open" id="l1">
+        <div class="q-item">
+          <div class="q-body">
+            <div class="q-text"><span class="q-type" style="background:var(--blue-soft);color:var(--blue2)">阅读理解</span>作者为什么说桂花是「香飘十里」？</div>
+            <div class="q-ans">答案：桂花香气浓郁，开花时满村都能闻到。</div>
+          </div>
+          <div class="q-actions"><button class="btn btn-green" style="padding:4px 10px">通过</button><button class="btn btn-danger" style="padding:4px 10px">驳回</button></div>
+        </div>
+        <div class="q-item">
+          <div class="q-body">
+            <div class="q-text"><span class="q-type" style="background:var(--purple-soft);color:var(--purple)">基础知识</span>「浸」在文中的意思是什么？</div>
+            <div class="q-ans">答案：泡、沉浸，指桂花香气弥漫。</div>
+          </div>
+          <div class="q-actions"><button class="btn btn-green" style="padding:4px 10px">通过</button><button class="btn btn-danger" style="padding:4px 10px">驳回</button></div>
+        </div>
+        <div class="q-item">
+          <div class="q-body">
+            <div class="q-text"><span class="q-type" style="background:var(--blue-soft);color:var(--blue2)">阅读理解</span>母亲为什么要摇桂花？</div>
+            <div class="q-ans">答案：摇下来的桂花可以做桂花糕、泡茶。</div>
+          </div>
+          <div class="q-actions"><button class="btn btn-green" style="padding:4px 10px">通过</button><button class="btn btn-danger" style="padding:4px 10px">驳回</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lesson-group">
+      <div class="lesson-head" onclick="toggle('l2')">
+        <span class="chevron" id="ch-l2">▶</span>
+        <span class="l-title">第 2 课 · 落花生</span>
+        <span class="l-pg">第 7–10 页</span>
+        <div class="l-status">
+          <span class="badge badge-orange">2 待审</span>
+          <button class="btn btn-ghost" style="padding:4px 10px">通过本课</button>
+        </div>
+      </div>
+      <div class="q-list" id="l2">
+        <div class="q-item">
+          <div class="q-body">
+            <div class="q-text"><span class="q-type" style="background:var(--blue-soft);color:var(--blue2)">阅读理解</span>父亲借花生想告诉我们什么道理？</div>
+            <div class="q-ans">答案：做人要做有用的人，不要只讲体面。</div>
+          </div>
+          <div class="q-actions"><button class="btn btn-green" style="padding:4px 10px">通过</button><button class="btn btn-danger" style="padding:4px 10px">驳回</button></div>
+        </div>
+        <div class="q-item">
+          <div class="q-body">
+            <div class="q-text"><span class="q-type" style="background:var(--purple-soft);color:var(--purple)">基础知识</span>「落花生」指什么？</div>
+            <div class="q-ans">答案：花生，因花落结果得名。</div>
+          </div>
+          <div class="q-actions"><button class="btn btn-green" style="padding:4px 10px">通过</button><button class="btn btn-danger" style="padding:4px 10px">驳回</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 英语 -->
+  <div class="subject-card">
+    <div class="subject-head">
+      <div class="s-ic" style="background:var(--orange2)">En</div>
+      <span class="s-name">英语</span>
+      <span class="s-count">1 门课 · 4 题待审核</span>
+      <div class="s-actions">
+        <span class="badge badge-orange">4 待审</span>
+        <button class="btn btn-green" style="padding:6px 14px">通过英语全部</button>
+      </div>
+    </div>
+    <div class="lesson-group">
+      <div class="lesson-head" onclick="toggle('l3')">
+        <span class="chevron" id="ch-l3">▶</span>
+        <span class="l-title">Unit 1 · What do we do at the weekend?</span>
+        <span class="l-pg">第 2–5 页</span>
+        <div class="l-status">
+          <span class="badge badge-orange">4 待审</span>
+          <button class="btn btn-ghost" style="padding:4px 10px">通过本课</button>
+        </div>
+      </div>
+      <div class="q-list" id="l3">
+        <div class="q-item">
+          <div class="q-body">
+            <div class="q-text"><span class="q-type" style="background:var(--orange-soft);color:var(--orange2)">听力</span>What does Tom do on Saturday morning?</div>
+            <div class="q-ans">答案：He plays football with friends.</div>
+          </div>
+          <div class="q-actions"><button class="btn btn-green" style="padding:4px 10px">通过</button><button class="btn btn-danger" style="padding:4px 10px">驳回</button></div>
+        </div>
+        <div class="q-item">
+          <div class="q-body">
+            <div class="q-text"><span class="q-type" style="background:var(--orange-soft);color:var(--orange2)">听力</span>What does Lily like to do?</div>
+            <div class="q-ans">答案：She likes reading books.</div>
+          </div>
+          <div class="q-actions"><button class="btn btn-green" style="padding:4px 10px">通过</button><button class="btn btn-danger" style="padding:4px 10px">驳回</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数学 -->
+  <div class="subject-card">
+    <div class="subject-head">
+      <div class="s-ic" style="background:var(--green)">数</div>
+      <span class="s-name">数学</span>
+      <span class="s-count">1 门课 · 3 题待审核</span>
+      <div class="s-actions">
+        <span class="badge badge-green">3 待审</span>
+        <button class="btn btn-green" style="padding:6px 14px">通过数学全部</button>
+      </div>
+    </div>
+    <div class="lesson-group">
+      <div class="lesson-head" onclick="toggle('l4')">
+        <span class="chevron" id="ch-l4">▶</span>
+        <span class="l-title">第一单元 · 小数乘法</span>
+        <span class="l-pg">第 2–8 页</span>
+        <div class="l-status">
+          <span class="badge badge-green">3 待审</span>
+          <button class="btn btn-ghost" style="padding:4px 10px">通过本课</button>
+        </div>
+      </div>
+      <div class="q-list" id="l4">
+        <div class="q-item">
+          <div class="q-body">
+            <div class="q-text"><span class="q-type" style="background:var(--green-soft);color:var(--green)">数学练习</span>0.25 × 4 = ?</div>
+            <div class="q-ans">答案：1</div>
+          </div>
+          <div class="q-actions"><button class="btn btn-green" style="padding:4px 10px">通过</button><button class="btn btn-danger" style="padding:4px 10px">驳回</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 第三部分：状态说明 -->
+  <h1 class="sec">三、题目状态流转</h1>
+  <div class="arrow-flow" style="font-size:13px">
+    <span class="node" style="background:var(--orange-soft);color:var(--orange2);border-color:var(--orange)">待审核 pending</span>→
+    <span class="node" style="background:var(--green-soft);color:var(--green);border-color:var(--green)">已通过 published</span>→
+    <span class="node">孩子可见可答</span>
+    <span style="color:var(--muted);margin-left:8px">（驳回则回到出题/修改）</span>
+  </div>
+  <div class="sec-desc" style="margin-top:12px">与现有「任务」的 content_status 审核机制对齐：<b>pending_review → published</b>，孩子端只看到 published 的题目。</div>
+
+</div>
+
+<script>
+function toggle(id){
+  const list = document.getElementById(id);
+  const ch = document.getElementById('ch-'+id);
+  list.classList.toggle('open');
+  ch.classList.toggle('open');
+}
+</script>
+</body>
+</html>

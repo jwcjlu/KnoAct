@@ -9,16 +9,20 @@ class AIProvider(ABC):
         self.api_key = api_key
 
     @abstractmethod
-    def generate(self, prompt: str, system: str = "", json_mode: bool = False) -> str:
+    def generate(self, prompt: str, system: str = "", json_mode: bool = False, timeout: float = None) -> str:
         ...
+
+    def generate_with_reasoning(self, prompt: str, system: str = "", json_mode: bool = False):
+        """默认实现：只回 content，reasoning 为空。推理型 provider 覆写此方法。"""
+        return self.generate(prompt, system, json_mode), ""
 
 class DeepSeekProvider(AIProvider):
     name = "deepseek"
-    def generate(self, prompt, system="", json_mode=False):
+    def generate(self, prompt, system="", json_mode=False, timeout=None):
         from openai import OpenAI
         if not self.api_key:
             raise RuntimeError("DeepSeek API Key 未配置")
-        client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com")
+        client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com", timeout=timeout or 600.0, max_retries=0)
         kwargs = {"model": self.model,
                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
         if json_mode:
@@ -28,11 +32,11 @@ class DeepSeekProvider(AIProvider):
 
 class GLMProvider(AIProvider):
     name = "glm"
-    def generate(self, prompt, system="", json_mode=False):
+    def generate(self, prompt, system="", json_mode=False, timeout=None):
         from openai import OpenAI
         if not self.api_key:
             raise RuntimeError("GLM API Key 未配置")
-        client = OpenAI(api_key=self.api_key, base_url="https://open.bigmodel.cn/api/paas/v4")
+        client = OpenAI(api_key=self.api_key, base_url="https://open.bigmodel.cn/api/paas/v4", timeout=timeout or 600.0, max_retries=0)
         kwargs = {"model": self.model,
                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
         if json_mode:
@@ -51,7 +55,24 @@ class OpenAICompatibleProvider(AIProvider):
         super().__init__(model=model, api_key=api_key)
         self.base_url = base_url
 
-    def generate(self, prompt, system="", json_mode=False):
+    def generate(self, prompt, system="", json_mode=False, timeout=None):
+        from openai import OpenAI
+        if not self.api_key:
+            raise RuntimeError("API Key 未配置")
+        if not self.base_url:
+            raise RuntimeError("中转站 Base URL 未配置")
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url,
+                        timeout=timeout or 600.0, max_retries=0)
+        kwargs = {"model": self.model,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        resp = client.chat.completions.create(**kwargs)
+        return resp.choices[0].message.content
+
+    def generate_with_reasoning(self, prompt, system="", json_mode=False):
+        """返回 (content, reasoning) 元组。reasoning 取自推理模型的
+        message.reasoning_content 字段（glm 等）；无则空字符串。"""
         from openai import OpenAI
         if not self.api_key:
             raise RuntimeError("API Key 未配置")
@@ -63,7 +84,9 @@ class OpenAICompatibleProvider(AIProvider):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         resp = client.chat.completions.create(**kwargs)
-        return resp.choices[0].message.content
+        msg = resp.choices[0].message
+        reasoning = getattr(msg, "reasoning_content", "") or ""
+        return msg.content, reasoning
 
     def list_models(self) -> list[str]:
         """调中转站 /models 接口，返回模型 id 列表。"""
@@ -80,7 +103,7 @@ class OpenAICompatibleProvider(AIProvider):
 class FakeProvider(AIProvider):
     """本地兜底/测试用：不调外部 API，返回固定可预测文本。"""
     name = "fake"
-    def generate(self, prompt, system="", json_mode=False):
+    def generate(self, prompt, system="", json_mode=False, timeout=None):
         return f"[fake] {prompt[:20]}"
 
 PROVIDERS = {"deepseek": DeepSeekProvider, "glm": GLMProvider, "openai": OpenAICompatibleProvider, "fake": FakeProvider}

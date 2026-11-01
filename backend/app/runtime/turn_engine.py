@@ -23,13 +23,34 @@ class TurnEngine:
 
         for step in range(1, self.MAX_STEPS + 1):
             prompt = self._build_prompt(ctx, history)
-            raw = await asyncio.to_thread(
-                self.provider.generate, prompt, self._system(ctx), True
+            raw, reasoning = await asyncio.to_thread(
+                self.provider.generate_with_reasoning, prompt, self._system(ctx), True
             )
+            if reasoning:
+                stream.emit(StreamEvent(type="thinking", data={"text": reasoning}))
             parsed = self._parse(raw)
 
             if parsed.get("final_answer") is not None:
                 answer = str(parsed["final_answer"]).strip()
+                if (
+                    ctx.mode == "visualize"
+                    and "```mermaid" not in answer
+                    and not any(h.get("tool") == "render_mermaid" for h in history)
+                    and step < self.MAX_STEPS
+                ):
+                    history.append(
+                        {
+                            "tool": "_hint",
+                            "result": {
+                                "error": (
+                                    "可视化模式：请先调用 render_mermaid 工具生成图，"
+                                    "再在 final_answer 里附上 ```mermaid ... ``` 代码块；"
+                                    "不要只写文字版思维导图。"
+                                )
+                            },
+                        }
+                    )
+                    continue
                 stream.emit(StreamEvent(type="final", data={"answer": answer}))
                 return {"answer": answer, "status": "done", "tool_calls": tool_calls}
 
@@ -61,6 +82,7 @@ class TurnEngine:
         base = self.system_prompt or "你是小学生的学习助手，讲解要通俗、有耐心。"
         return (
             f"{base}\n"
+            "请始终用中文思考（推理过程也用中文），面向小学生讲解。\n"
             "你可以用工具辅助回答。你每次只能返回一种 JSON：\n"
             '  - 回答完成：{"final_answer": "你的回答"}\n'
             '  - 调用工具：{"tool": "工具名", "args": {...}}\n'
@@ -98,7 +120,9 @@ class TurnEngine:
                 "请只基于上面的教材上下文和工具结果直接给出最终回答（不要再调工具），"
                 "不要编造教材里没有的内容。"
             )
-            raw = await asyncio.to_thread(self.provider.generate, prompt, self._system(ctx), True)
+            raw, reasoning = await asyncio.to_thread(self.provider.generate_with_reasoning, prompt, self._system(ctx), True)
+            if reasoning:
+                stream.emit(StreamEvent(type="thinking", data={"text": reasoning}))
             data = self._parse(raw)
             answer = data.get("final_answer")
             if answer:

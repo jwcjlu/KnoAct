@@ -85,7 +85,7 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
             prompt = (
                 f"你正在为一本「{subject}」教材的第 {pages} 拆课。下面是这一课的原文（可能含目录残留、页码，请忽略）。\n"
                 f"请严格基于原文提取：\n"
-                f"1) 本课知识点（每行一个）\n"
+                f"1) 本课知识点（每行一个，含核心概念、公式、例题步骤）\n"
                 f"2) 正文内容（原文照抄，最多 300 字）\n"
                 f"用两段输出，分别以「知识点：」「课文：」开头。\n\n"
                 f"原文：\n{page_block}"

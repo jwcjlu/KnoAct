@@ -15,10 +15,13 @@ def _lesson_progress(db: Session, subject: str, prog: LearningProgress | None) -
     total = len(lessons)
     ids = [l.id for l in lessons]
     current = 1
+    current_lesson_id = lessons[0].id if lessons else None
     if prog and prog.current_lesson_id in ids:
+        current_lesson_id = prog.current_lesson_id
         current = ids.index(prog.current_lesson_id) + 1
     mastered = max(current - 1, 0)
-    return {"current": current, "total": total, "mastered": mastered}
+    return {"current": current, "total": total, "mastered": mastered,
+            "current_lesson_id": current_lesson_id}
 
 
 def _pending_review(db: Session) -> dict:
@@ -41,7 +44,7 @@ def _pending_review(db: Session) -> dict:
 def snapshot(user_id: int, subject: str = "语文", db: Session = Depends(get_db)):
     user = db.get(User, user_id)
     points = sum(p.delta for p in db.query(Point).filter_by(user_id=user_id).all())
-    prog = db.query(LearningProgress).filter_by(user_id=user_id).first()
+    prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
 
     # 听写词条数：已审核课的词条总数（与 /api/dictation/words 取词范围一致）
     approved_ids = [l.id for l in db.query(Lesson).filter_by(audit_status="approved").all()]

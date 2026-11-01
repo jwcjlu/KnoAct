@@ -270,6 +270,36 @@ def test_assignment_grade_records_knowledge_mastery(setup_db):
     s.close()
 
 
+def test_assignment_grade_with_items_returns_per_question_results(setup_db, monkeypatch):
+    """传 items 时服务端判分，返回逐题对错、参考答案、讲解与阈值；未达标不推进。"""
+    from app.models import Lesson, LearningProgress
+    from app.database import SessionLocal
+    s = SessionLocal()
+    l1 = Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3, audit_status="approved")
+    l2 = Lesson(document_id=1, subject="语文", title="第2课", start_page=4, end_page=6, audit_status="approved")
+    s.add_all([l1, l2]); s.flush()
+    l1_id = l1.id
+    s.add(LearningProgress(user_id=1, subject="语文", current_lesson_id=l1_id))
+    s.commit(); s.close()
+
+    monkeypatch.setattr("app.services.assignment.grade_assignment",
+                        lambda db, items: [{"is_correct": i == 0, "feedback": f"讲解{i}"} for i in range(len(items))])
+    items = [{"question": f"题{i}", "answer": f"答{i}", "student_answer": "x", "knowledge_point_id": None}
+             for i in range(3)]
+    body = _client().post("/api/learning/assignment/grade",
+                          json={"user_id": 1, "lesson_id": l1_id, "subject": "语文", "items": items}).json()
+    assert body["passed"] is False
+    assert body["correct"] == 1 and body["total"] == 3
+    assert body["threshold"] == 0.6
+    assert [r["is_correct"] for r in body["results"]] == [True, False, False]
+    assert body["results"][1]["answer"] == "答1" and body["results"][1]["feedback"] == "讲解1"
+
+    s = SessionLocal()
+    prog = s.query(LearningProgress).filter_by(user_id=1, subject="语文").first()
+    assert prog.current_lesson_id == l1_id
+    s.close()
+
+
 def test_assignment_returns_questions(setup_db):
     from app.models import Lesson, Text
     from app.database import SessionLocal

@@ -221,6 +221,8 @@ class AssignmentReq(BaseModel):
     user_id: int
     lesson_id: int
     subject: str = "语文"
+    previous_questions: list[str] = []  # 本课已出过的题，新一组不重复
+    wrong_questions: list[str] = []     # 上一组答错的题，新一组围绕同类内容再考
 
 
 @router.post("/api/learning/assignment")
@@ -236,7 +238,9 @@ def assignment(req: AssignmentReq, db: Session = Depends(get_db)):
     n = _cfg_int(db, "assignment_question_count", 4)
     diff = _cfg_str(db, f"difficulty_{req.subject}", "中等")
     qs = generate_assignment(db, t.content, subject=req.subject, difficulty=diff, n=n,
-                             knowledge_points=knowledge_points)
+                             knowledge_points=knowledge_points,
+                             previous_questions=req.previous_questions,
+                             wrong_questions=req.wrong_questions)
     return {"questions": qs}
 
 
@@ -244,23 +248,38 @@ class AssignmentGradeReq(BaseModel):
     user_id: int
     lesson_id: int
     subject: str = "语文"
-    answers: list[dict] = []  # [{knowledge_point_id: int|null, is_correct: bool}]
+    answers: list[dict] = []  # 兼容旧调用：[{knowledge_point_id: int|null, is_correct: bool}]
+    items: list[dict] = []    # 服务端判分：[{question, answer, student_answer, knowledge_point_id}]
 
 
 @router.post("/api/learning/assignment/grade")
 def assignment_grade(req: AssignmentGradeReq, db: Session = Depends(get_db)):
-    """判分：正确率 >= 阈值则推进进度；逐题落知识点掌握度（驱动遗忘曲线）。"""
+    """判分：正确率 >= 阈值则推进进度；逐题落知识点掌握度（驱动遗忘曲线）。
+
+    传 items 时由服务端（AI）逐题判对错并返回参考答案与讲解；否则沿用 answers 里的 is_correct。
+    """
     from ..services.mastery import record_attempt
+    from ..services.assignment import grade_assignment
     try:
         threshold = float(_cfg_str(db, "assignment_pass_threshold", "0.6"))
     except ValueError:
         threshold = 0.6
-    total = len(req.answers)
-    correct = sum(1 for a in req.answers if a.get("is_correct"))
+    results = []
+    answers = req.answers
+    if req.items:
+        graded = grade_assignment(db, req.items)
+        answers = []
+        for it, g in zip(req.items, graded):
+            answers.append({"knowledge_point_id": it.get("knowledge_point_id"), "is_correct": g["is_correct"]})
+            results.append({"question": it.get("question", ""), "answer": it.get("answer", ""),
+                             "student_answer": it.get("student_answer", ""),
+                             "is_correct": g["is_correct"], "feedback": g["feedback"]})
+    total = len(answers)
+    correct = sum(1 for a in answers if a.get("is_correct"))
     rate = correct / total if total else 0
     passed = rate >= threshold
     # 无论通过与否，逐题落知识点掌握度（掌握度反映真实答题历史）
-    for a in req.answers:
+    for a in answers:
         kpid = a.get("knowledge_point_id")
         if isinstance(kpid, int):
             record_attempt(db, req.user_id, "knowledge", kpid, bool(a.get("is_correct")))
@@ -280,7 +299,8 @@ def assignment_grade(req: AssignmentGradeReq, db: Session = Depends(get_db)):
                 nxt = ids[0]
             prog.current_lesson_id = nxt
         db.commit()
-    return {"passed": passed, "rate": rate}
+    return {"passed": passed, "rate": rate, "threshold": threshold,
+            "correct": correct, "total": total, "results": results}
 
 
 class GradeHandwritingReq(BaseModel):

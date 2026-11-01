@@ -1,4 +1,9 @@
-from app.services.quiz import evidence_key, grade_answers
+from app.services.quiz import evidence_key, grade_answers, quiz_system_prompt
+
+
+def test_quiz_system_prompt_english():
+    assert "English" in quiz_system_prompt("英语")
+    assert "中文" in quiz_system_prompt("语文")
 
 
 def test_evidence_key_strips_line_numbers_and_hyphens():

@@ -75,9 +75,12 @@ class RenderMermaidTool(BaseTool):
     ]
 
     def run(self, args, ctx: UnifiedContext) -> dict:
-        code = (args.get("code") or "").strip()
-        if not code:
+        from ..services.mermaid_sanitize import normalize_mermaid_code
+
+        raw = (args.get("code") or "").strip()
+        if not raw:
             return {"ok": False, "error": "code 不能为空"}
+        code = normalize_mermaid_code(raw, fallback_title=ctx.question, answer_hint=ctx.text or "")
         valid = bool(_MERMAID_RE.search(code))
         return {"ok": valid, "code": code} if valid else {"ok": False, "error": "不是有效的 mermaid 图"}
 

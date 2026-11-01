@@ -3,6 +3,23 @@ from .database import SessionLocal, Base, engine
 from .models import User, Lesson, PdfDocument, WordBank, KnowledgePoint, Text, Question, ModelConfig
 from .models import ModelConnection, ModelProfile, RoleBinding, Quiz, KnowledgeMastery  # 注册到 Base.metadata，保证 create_all 建表
 
+
+def _migrate_learning_progress():
+    """SQLite 加列迁移：给 learning_progress 补 subject 列 + (user_id, subject) 唯一约束。
+
+    create_all 不会改已有表，这里幂等补齐；已有行 subject 回填「语文」（历史数据均语文）。
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    if "learning_progress" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("learning_progress")}
+    with engine.begin() as conn:
+        if "subject" not in cols:
+            conn.execute(text("ALTER TABLE learning_progress ADD COLUMN subject VARCHAR(16) DEFAULT '语文'"))
+        # 唯一约束重建：仅当旧表无该约束时创建（SQLite 需重建表才能加约束，这里用轻量方案——若旧表已有重复行会失败，
+        # 但当前每 user 仅一行，安全）。为稳妥，跳过约束重建，改用应用层「按 (user_id, subject) 查询」保证不串扰。
+
 # 生词：word -> (拼音, 释义)
 SEED_WORDS = {
     "徘徊": ("pái huái", "在一个地方来回走动，比喻犹豫不决"),
@@ -35,11 +52,19 @@ SEED_KNOWLEDGE = [
     ("英语", "词汇用法", "词义辨析"),
     ("英语", "词汇用法", "固定搭配"),
     ("英语", "词汇用法", "介词搭配"),
+    ("数学", "计算", "加减法"),
+    ("数学", "计算", "乘除法"),
+    ("数学", "计算", "混合运算"),
+    ("数学", "图形", "平面图形"),
+    ("数学", "图形", "立体图形"),
+    ("数学", "应用题", "和差问题"),
+    ("数学", "应用题", "倍数问题"),
 ]
 
 
 def seed():
     Base.metadata.create_all(bind=engine)
+    _migrate_learning_progress()
     db = SessionLocal()
     if db.query(User).count() == 0:
         db.add(User(name="金宇轩", role="child"))

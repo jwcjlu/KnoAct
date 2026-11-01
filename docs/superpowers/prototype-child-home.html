@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>孩子端首页优化原型 - 知学伴</title>
+<style>
+  :root{
+    --blue:#3158e8; --blue2:#4566e8; --blue-soft:#edf1ff;
+    --green:#2e8b5a; --green-soft:#e8f7ef;
+    --orange:#dc872d; --orange2:#c97629; --orange-soft:#fff2df;
+    --purple:#7457d7; --purple-soft:#f0edff;
+    --bg:#f7f8f5; --card:#fff; --ink:#202723; --ink3:#4b544e;
+    --line:#e3e7e0; --line2:#e2e6e0; --muted:#8e9691;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+
+  .proto-banner{background:var(--blue);color:#fff;padding:14px 32px;font-size:13px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+  .proto-banner b{font-size:15px}
+  .proto-banner .chip{background:rgba(255,255,255,.2);border-radius:6px;padding:2px 8px;font-size:11px}
+
+  .sidebar{position:fixed;inset-y:0;left:0;width:220px;background:var(--card);border-right:1px solid var(--line);padding:24px 16px;display:flex;flex-direction:column;z-index:20}
+  .logo{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;margin-bottom:28px}
+  .logo-badge{width:36px;height:36px;border-radius:10px;background:#3d66f5;color:#fff;display:grid;place-items:center;font-size:18px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;font-size:14px;color:var(--ink3);cursor:pointer;margin-bottom:4px}
+  .nav-item.active{background:var(--blue-soft);color:var(--blue);font-weight:600}
+  .nav-switch{margin-top:auto;border-radius:14px;background:var(--blue-soft);padding:14px;font-size:12px;color:var(--ink3);text-align:center}
+
+  .main{margin-left:244px;padding:28px 32px;max-width:920px}
+
+  /* ===== 古诗水墨背景 ===== */
+  .hero-poem{position:relative;overflow:hidden;border-radius:24px;padding:40px 44px;color:#fff;margin-bottom:24px;min-height:200px;display:flex;flex-direction:column;justify-content:center;box-shadow:0 14px 35px rgba(0,0,0,.15)}
+  .hero-poem.bamboo{background:linear-gradient(135deg,#2f4f3e 0%,#3d6b4f 35%,#4a7a5a 70%,#5b8a68 100%)}
+  .hero-poem .ink-branch{position:absolute;right:-20px;bottom:-30px;width:240px;height:300px;opacity:.35;pointer-events:none}
+  .hero-poem .poem-tag{font-size:13px;opacity:.85;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .hero-poem .poem-tag .flower{width:8px;height:8px;border-radius:50%;background:#fff;opacity:.9}
+  .hero-poem .poem-title{font-size:26px;font-weight:700;margin-bottom:8px;letter-spacing:2px}
+  .hero-poem .poem-text{font-size:16px;line-height:2;opacity:.95;letter-spacing:1px}
+  .hero-poem .poem-author{font-size:13px;opacity:.7;margin-top:10px}
+  .hero-poem .poem-rotate{position:absolute;top:20px;right:28px;font-size:12px;opacity:.6;display:flex;gap:6px;align-items:center}
+  .hero-poem .poem-rotate .r-dot{width:6px;height:6px;border-radius:50%;background:#fff;opacity:.5}
+  .hero-poem .poem-rotate .r-dot.on{opacity:1}
+
+  /* ===== 今日进度 ===== */
+  .progress-card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px 24px;margin-bottom:20px}
+  .progress-head{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+  .progress-num{font-size:32px;font-weight:800;color:var(--blue)}
+  .progress-num small{font-size:15px;color:var(--muted);font-weight:500}
+  .progress-txt{font-size:15px;color:var(--ink3)}
+  .progress-txt b{color:var(--blue)}
+  .progress-bar{height:10px;border-radius:999px;background:#eef0ed;overflow:hidden}
+  .progress-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--blue),#5b77eb)}
+
+  /* ===== 学科 tab ===== */
+  .subject-tabs{display:flex;gap:6px;background:#f2f4f1;border-radius:12px;padding:4px;width:max-content;margin-bottom:16px}
+  .subject-tab{display:flex;align-items:center;gap:8px;padding:9px 20px;font-size:14px;font-weight:600;color:#778079;border-radius:9px;cursor:pointer;border:1px solid transparent}
+  .subject-tab.active{background:#fff;color:var(--blue);box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .subject-tab .t-dot{width:8px;height:8px;border-radius:50%}
+  .subject-tab .t-badge{background:var(--orange-soft);color:var(--orange2);border-radius:999px;padding:0 7px;font-size:11px;font-weight:700}
+  .subject-tab .t-badge.zero{background:var(--green-soft);color:var(--green)}
+
+  /* ===== 任务区 ===== */
+  .task-panel{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+  .task-panel .tp-head{padding:14px 18px;border-bottom:1px solid var(--line2);font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .task-card{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line2)}
+  .task-card:last-child{border-bottom:none}
+  .task-card.todo{border-left:4px solid var(--blue)}
+  .task-card.done{opacity:.5;border-left:4px solid var(--green)}
+  .task-ic{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;font-size:19px;flex-shrink:0}
+  .task-ic.blue{background:var(--blue-soft);color:var(--blue2)}
+  .task-ic.orange{background:var(--orange-soft);color:var(--orange)}
+  .task-ic.green{background:var(--green-soft);color:var(--green)}
+  .task-ic.purple{background:var(--purple-soft);color:var(--purple)}
+  .task-body{flex:1;min-width:0}
+  .task-body h4{font-size:14px;font-weight:700}
+  .task-body .detail{font-size:12px;color:var(--muted);margin-top:2px}
+  .task-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-top:5px}
+  .task-points{color:var(--orange2);font-weight:600}
+  .task-btn{border-radius:10px;padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;border:none;flex-shrink:0}
+  .task-btn.todo{background:var(--blue);color:#fff}
+  .task-btn.done{background:#eef0ed;color:#78817b}
+
+  .empty-subject{padding:32px;text-align:center;font-size:13px;color:var(--muted)}
+
+  .compare-note{margin-top:24px;border:1px dashed #8ea2ef;border-radius:14px;padding:16px 20px;background:#f5f7ff;font-size:13px;color:var(--ink3);line-height:1.7}
+  .compare-note b{color:var(--blue)}
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  <b>知学伴 · 孩子端首页优化原型</b>
+  <span class="chip">学科 tab 切换 · v3</span>
+  <span style="margin-left:auto;opacity:.85">古诗勉励 → 今日总进度 → 学科 tab 切换任务</span>
+</div>
+
+<div class="sidebar">
+  <div class="logo"><div class="logo-badge">知</div>知学伴 · 孩子端</div>
+  <div class="nav-item active">🏠 学习首页</div>
+  <div class="nav-item">🧠 个性化学习</div>
+  <div class="nav-item">📖 学习中心</div>
+  <div class="nav-item">✏️ 错题本</div>
+  <div class="nav-item">📊 学习报告</div>
+  <div class="nav-item">🎁 积分商城</div>
+  <div class="nav-switch">当前：<b>孩子端</b><br><span style="opacity:.7">点击切换到家长端</span></div>
+</div>
+
+<div class="main">
+
+  <!-- 古诗水墨背景（全局固定） -->
+  <div class="hero-poem bamboo">
+    <div class="poem-rotate">
+      <span style="opacity:.5">竹</span><span class="r-dot on"></span><span class="r-dot"></span><span class="r-dot"></span><span class="r-dot"></span><span style="opacity:.5">兰梅菊 · 每日轮换</span>
+    </div>
+    <div class="poem-tag"><span class="flower"></span> 今日勉励 · 竹</div>
+    <div class="poem-title">竹石</div>
+    <div class="poem-text">咬定青山不放松，立根原在破岩中。<br>千磨万击还坚劲，任尔东西南北风。</div>
+    <div class="poem-author">—— 清 · 郑板桥</div>
+    <svg class="ink-branch" viewBox="0 0 200 260" fill="none">
+      <path d="M20 250 C60 180, 40 120, 90 60" stroke="#fff" stroke-width="3" opacity=".7"/>
+      <path d="M90 60 C100 40, 120 30, 140 25" stroke="#fff" stroke-width="2" opacity=".6"/>
+      <path d="M60 170 C90 160, 110 170, 130 160" stroke="#fff" stroke-width="2" opacity=".5"/>
+      <path d="M50 130 C80 120, 100 130, 120 122" stroke="#fff" stroke-width="2" opacity=".5"/>
+      <ellipse cx="140" cy="22" rx="18" ry="6" fill="#fff" opacity=".5" transform="rotate(-20 140 22)"/>
+      <ellipse cx="128" cy="40" rx="16" ry="5" fill="#fff" opacity=".4" transform="rotate(10 128 40)"/>
+    </svg>
+  </div>
+
+  <!-- 今日总进度（全局固定） -->
+  <div class="progress-card">
+    <div class="progress-head">
+      <div class="progress-num">2<small> / 5</small></div>
+      <div class="progress-txt">
+        <div><b>还差 3 项</b> 今日学习就完成啦</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">语文 2 · 英语 1 · 数学 0</div>
+      </div>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" style="width:40%"></div></div>
+  </div>
+
+  <!-- 学科 tab 切换 -->
+  <div class="subject-tabs">
+    <div class="subject-tab active"><span class="t-dot" style="background:var(--blue)"></span>语文<span class="t-badge">2</span></div>
+    <div class="subject-tab"><span class="t-dot" style="background:var(--orange2)"></span>英语<span class="t-badge">1</span></div>
+    <div class="subject-tab"><span class="t-dot" style="background:var(--green)"></span>数学<span class="t-badge zero">✓</span></div>
+  </div>
+
+  <!-- 当前学科任务区（默认语文） -->
+  <div class="task-panel">
+    <div class="tp-head">📌 语文 · 待完成 <b style="color:var(--orange2)">2</b> 项</div>
+
+    <div class="task-card todo">
+      <div class="task-ic blue">📝</div>
+      <div class="task-body">
+        <h4>第 1 课 · 生词听写</h4>
+        <div class="detail">今日新学 · 7 个重点生词</div>
+        <div class="task-meta">⏱ 约 8 分钟 · <span class="task-points">+20 积分</span></div>
+      </div>
+      <button class="task-btn todo">开始练习</button>
+    </div>
+
+    <div class="task-card todo">
+      <div class="task-ic purple">🧠</div>
+      <div class="task-body">
+        <h4>第 1 课 · 基础知识</h4>
+        <div class="detail">重点巩固 · 5 个知识点（简答回忆）</div>
+        <div class="task-meta">⏱ 约 10 分钟 · <span class="task-points">+20 积分</span></div>
+      </div>
+      <button class="task-btn todo">开始练习</button>
+    </div>
+
+    <div class="tp-head" style="border-top:1px solid var(--line2);border-bottom:none;padding-top:6px">✅ 已完成</div>
+
+    <div class="task-card done">
+      <div class="task-ic green">📖</div>
+      <div class="task-body">
+        <h4>第 1 课 · 阅读理解</h4>
+        <div class="detail">已完成 · 等待家长确认</div>
+        <div class="task-meta">⏱ 约 12 分钟 · <span class="task-points">+30 积分</span></div>
+      </div>
+      <button class="task-btn done">✓ 已完成</button>
+    </div>
+  </div>
+
+  <div class="compare-note">
+    <b>设计要点（v3 学科 tab）：</b><br>
+    ① 顶部古诗（竹兰梅菊四君子轮换）+ 水墨背景，每日勉励，全局固定<br>
+    ② 今日总进度：一眼看到「还差几项」，进度条直观，全局固定<br>
+    ③ 任务区用 <b>学科 tab</b> 切换（语文/英语/数学），tab 上带「待完成数」角标<br>
+    ④ 某科全完成时 tab 角标变「✓」<br>
+    ⑤ 当前学科组内：待完成高亮在前、已完成置灰在后<br>
+    ⑥ 与家长端「题目审核台」联动：审核通过 → 任务发布 → 对应学科 tab 出现待完成数
+  </div>
+
+</div>
+
+</body>
+</html>

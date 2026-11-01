@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Quiz, Text, KnowledgePoint
+from ..models import Quiz, Text, KnowledgePoint, Lesson
 from ..services.quiz import grade_answers, strip_key
 
 router = APIRouter(prefix="/api", tags=["read-and-ask"])
@@ -47,9 +47,18 @@ def quiz_generate(req: QuizGenerateReq, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="该课文暂无内容，无法出题")
     kps = [{"id": k.id, "category": k.category, "content": k.content}
            for k in db.query(KnowledgePoint).filter_by(lesson_id=req.lesson_id).all()]
+    lesson = db.get(Lesson, req.lesson_id)
+    subject = (lesson.subject if lesson else "语文") or "语文"
     ctx = UnifiedContext(user_id=req.user_id, lesson_id=req.lesson_id, question="")
     result = generate_quiz_questions.run(
-        {"text": text, "n": 3, "knowledge_points": json.dumps(kps, ensure_ascii=False)}, ctx)
+        {
+            "text": text,
+            "n": 3,
+            "knowledge_points": json.dumps(kps, ensure_ascii=False),
+            "subject": subject,
+        },
+        ctx,
+    )
     if not result.get("questions"):
         raise HTTPException(status_code=503, detail=result.get("error", "AI 未配置"))
     quiz = Quiz(lesson_id=req.lesson_id, user_id=req.user_id,
@@ -104,8 +113,10 @@ def ask_questions(req: AskQuestionsReq, db: Session = Depends(get_db)):
     ctx_text = req.context or _lesson_text(db, req.lesson_id)
     if not ctx_text:
         raise HTTPException(status_code=400, detail="该课文暂无内容")
+    lesson = db.get(Lesson, req.lesson_id)
+    subject = (lesson.subject if lesson else "语文") or "语文"
     ctx = UnifiedContext(user_id=0, lesson_id=req.lesson_id, question="")
-    result = generate_diagnostic_questions.run({"context": ctx_text}, ctx)
+    result = generate_diagnostic_questions.run({"context": ctx_text, "subject": subject}, ctx)
     if not result["questions"]:
         raise HTTPException(status_code=503, detail="AI 未配置")
     return {"intro": result["intro"], "questions": result["questions"]}

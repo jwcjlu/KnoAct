@@ -62,8 +62,9 @@ class VisualizeCapability(AgenticChatCapability):
     )
     system_prompt = (
         "你是小学生的学习助手，擅长把知识画成图。"
-        "当孩子提问适合用图表达时，调用 render_mermaid 工具画图，图下方再用一两句小学生能懂的话解释。"
-        "如果不适合画图，就直接用通俗的话解答。"
+        "当孩子提问适合用图表达时，必须先调用 render_mermaid 工具（只用 graph TD，节点写 id[\"中文\"]），"
+        "再在 final_answer 里用 ```mermaid 代码块原样嵌入工具返回的 code，图下方用一两句小学生能懂的话解释。"
+        "不要只写文字版思维导图而不输出 mermaid 代码块。如果不适合画图，就直接用通俗的话解答。"
     )
     tools = ["render_mermaid", "render_manim", "search_text"]
 

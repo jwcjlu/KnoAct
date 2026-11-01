@@ -56,3 +56,19 @@ def test_registry_routes_mode():
 def test_registry_unknown_mode_falls_back_to_chat():
     reg = CapabilityRegistry()
     assert isinstance(reg.get("nope"), ChatCapability)
+
+
+from app.runtime.orchestrator import append_mermaid_from_tool_results, _strip_mermaid_fences
+
+
+def test_strip_mermaid_fences():
+    assert _strip_mermaid_fences("```mermaid\nmindmap\n  a\n```").startswith("mindmap")
+
+
+def test_append_mermaid_from_tool_results():
+    ans = "这是讲解。"
+    results = {1: {"ok": True, "code": "mindmap\n  root((小数))"}}
+    out = append_mermaid_from_tool_results(ans, results)
+    assert "```mermaid" in out
+    assert "mindmap" in out
+    assert append_mermaid_from_tool_results("已有\n```mermaid\nx\n```", results) == "已有\n```mermaid\nx\n```"

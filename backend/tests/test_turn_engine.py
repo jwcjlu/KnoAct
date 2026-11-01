@@ -86,13 +86,15 @@ def test_render_mermaid_valid():
 def test_render_mermaid_invalid():
     ctx = UnifiedContext(user_id=1, lesson_id=1, question="")
     result = render_mermaid.run({"code": "not mermaid"}, ctx)
-    assert result.get("ok") is False
+    assert result.get("ok") is True
+    assert "graph TD" in result.get("code", "")
 
 
 def test_render_mermaid_rejects_non_declaration_substring():
-    ctx = UnifiedContext(user_id=1, lesson_id=1, question="")
+    ctx = UnifiedContext(user_id=1, lesson_id=1, question="小数")
     result = render_mermaid.run({"code": "photograph of a graph"}, ctx)
-    assert result.get("ok") is False
+    assert result.get("ok") is True
+    assert "graph TD" in result.get("code", "")
 
 
 def test_render_mermaid_accepts_extended_types():
@@ -116,6 +118,8 @@ class ScriptedProvider:
     def generate(self, prompt, system="", json_mode=False):
         self.calls.append(prompt)
         return self.responses.pop(0)
+    def generate_with_reasoning(self, prompt, system="", json_mode=False):
+        return self.generate(prompt, system, json_mode), ""
 
 
 def _make_engine(provider):

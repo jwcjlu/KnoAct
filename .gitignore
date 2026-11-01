@@ -16,6 +16,9 @@ venv/
 # Env
 .env
 
+# Claude Code worktrees (session metadata — never commit)
+.claude/worktrees/
+
 # Render service generated media (mp4 output)
 render_service/media/
 
@@ -24,3 +27,7 @@ backend/uploads/
 
 # pdf.js 下载临时清单（本地化后无引用）
 pdfjs_files_tmp.json
+
+# 调试临时产物（数学拆课/OCR/清洗等中间输出）
+backend/_*.txt
+backend/*.db.bak_*
