@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
+import '../home/home_controller.dart';
 
 const _destinations = [
   (icon: Icons.home_outlined, selected: Icons.home, label: '首页'),
@@ -23,12 +24,27 @@ class AppShell extends ConsumerStatefulWidget {
 }
 
 class _AppShellState extends ConsumerState<AppShell> {
+  int? _lastIndex;
+
   void _go(int index) =>
       widget.navigationShell.goBranch(index, initialLocation: index == widget.navigationShell.currentIndex);
+
+  void _onIndexChanged(int? from, int to) {
+    if (from == null) return;
+    if (to == 0) ref.read(homeControllerProvider.notifier).reload();
+    if (to == 2) ref.invalidate(pointsProvider);
+  }
 
   @override
   Widget build(BuildContext context) {
     final index = widget.navigationShell.currentIndex;
+    if (_lastIndex != index) {
+      final from = _lastIndex;
+      _lastIndex = index;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onIndexChanged(from, index);
+      });
+    }
     return LayoutBuilder(builder: (context, c) {
       if (c.maxWidth >= kWideBreakpoint) {
         return Scaffold(
