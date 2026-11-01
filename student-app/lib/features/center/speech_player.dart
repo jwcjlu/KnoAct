@@ -10,6 +10,9 @@ import 'center_logic.dart';
 abstract class SpeechPlayer {
   Future<void> speak(String text);
 
+  /// 停止当前播放，并丢弃尚未开始播放的请求；不抛异常
+  Future<void> stop();
+
   Future<void> dispose();
 }
 
@@ -38,8 +41,11 @@ class BackendSpeechPlayer implements SpeechPlayer {
   }
 
   Future<void> _stopAll() async {
-    if (_audioCreated) await _audio.stop();
-    if (_ttsCreated) await _tts.stop();
+    try {
+      if (_audioCreated) await _audio.stop();
+    } finally {
+      if (_ttsCreated) await _tts.stop();
+    }
   }
 
   @override
@@ -69,6 +75,17 @@ class BackendSpeechPlayer implements SpeechPlayer {
     await tts.setSpeechRate(kIsWeb ? 0.9 : 0.45);
     if (seq != _seq) return;
     await tts.speak(text);
+  }
+
+  @override
+  Future<void> stop() async {
+    if (_disposed) return;
+    _seq++;
+    try {
+      await _stopAll();
+    } catch (_) {
+      // 停止失败不影响后续播放
+    }
   }
 
   @override

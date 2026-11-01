@@ -30,8 +30,14 @@ class FakeCenterRepository implements CenterRepository {
 }
 
 class FakeHomeRepository implements HomeRepository {
+  final submitted = <int>[];
+  bool failSubmit = false;
+
   @override
-  Future<void> submitTask(int taskId) async {}
+  Future<void> submitTask(int taskId) async {
+    if (failSubmit) throw Exception('submit failed');
+    submitted.add(taskId);
+  }
 
   @override
   Future<HomeSnapshot> snapshot(int userId, String subject) => throw UnimplementedError();
@@ -45,33 +51,49 @@ class FakeHomeRepository implements HomeRepository {
 
 class FakeSpeechPlayer implements SpeechPlayer {
   final spoken = <String>[];
+  bool failSpeak = false;
 
   @override
-  Future<void> speak(String text) async => spoken.add(text);
+  Future<void> speak(String text) async {
+    if (failSpeak) throw Exception('speak failed');
+    spoken.add(text);
+  }
+
+  @override
+  Future<void> stop() async {}
 
   @override
   Future<void> dispose() async {}
 }
 
+Future<(ProviderContainer, FakeCenterRepository, FakeHomeRepository, FakeSpeechPlayer)> pumpCenter(WidgetTester tester) async {
+  SharedPreferences.setMockInitialValues({'knoact_child_id': 4, 'knoact_child_name': '金同学'});
+  final center = FakeCenterRepository();
+  final home = FakeHomeRepository();
+  final speech = FakeSpeechPlayer();
+  final container = ProviderContainer(
+    overrides: [
+      centerRepositoryProvider.overrideWithValue(center),
+      homeRepositoryProvider.overrideWithValue(home),
+      speechPlayerProvider.overrideWithValue(speech),
+    ],
+    retry: (_, _) => null,
+  );
+  addTearDown(container.dispose);
+  await container.read(sessionProvider.future);
+  await tester.pumpWidget(UncontrolledProviderScope(
+    container: container,
+    child: const MaterialApp(home: Scaffold(body: CenterPage())),
+  ));
+  return (container, center, home, speech);
+}
+
+FilledButton submitButton(WidgetTester tester, int index) =>
+    tester.widget<FilledButton>(find.byKey(ValueKey('submit-$index')));
+
 void main() {
   testWidgets('阅读答题提示收录错题本，听力播放对话', (tester) async {
-    SharedPreferences.setMockInitialValues({'knoact_child_id': 4, 'knoact_child_name': '金同学'});
-    final center = FakeCenterRepository();
-    final speech = FakeSpeechPlayer();
-    final container = ProviderContainer(
-      overrides: [
-        centerRepositoryProvider.overrideWithValue(center),
-        homeRepositoryProvider.overrideWithValue(FakeHomeRepository()),
-        speechPlayerProvider.overrideWithValue(speech),
-      ],
-      retry: (_, _) => null,
-    );
-    addTearDown(container.dispose);
-    await container.read(sessionProvider.future);
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: container,
-      child: const MaterialApp(home: Scaffold(body: CenterPage())),
-    ));
+    final (container, center, _, speech) = await pumpCenter(tester);
 
     container.read(centerControllerProvider.notifier).selectTab(CenterTab.reading);
     await tester.pumpAndSettle();
@@ -79,9 +101,9 @@ void main() {
     expect(find.text('1. 桂花什么时候开？'), findsOneWidget);
 
     await tester.enterText(find.byKey(const ValueKey('answer-0')), '春天');
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('submit-0')));
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('答错了，已收录进错题本'), findsOneWidget);
     expect(find.text('✗ 答案：秋天'), findsOneWidget);
     expect(center.wrong, ['reading:桂花什么时候开？:春天']);
@@ -89,7 +111,62 @@ void main() {
     await tester.tap(find.text(CenterTab.listening.label));
     await tester.pumpAndSettle();
     await tester.tap(find.text('播放对话'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(speech.spoken, ['Hello Tom']);
+  });
+
+  testWidgets('答案为空时不能提交，键盘完成键可提交', (tester) async {
+    final (container, center, _, _) = await pumpCenter(tester);
+    container.read(centerControllerProvider.notifier).selectTab(CenterTab.reading);
+    await tester.pumpAndSettle();
+
+    expect(submitButton(tester, 0).onPressed, isNull);
+    await tester.enterText(find.byKey(const ValueKey('answer-0')), '   ');
+    await tester.pumpAndSettle();
+    expect(submitButton(tester, 0).onPressed, isNull);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(center.wrong, isEmpty);
+    expect(find.byKey(const ValueKey('answer-0')), findsOneWidget);
+
+    await tester.enterText(find.byKey(const ValueKey('answer-0')), '春天');
+    await tester.pumpAndSettle();
+    expect(submitButton(tester, 0).onPressed, isNotNull);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(center.wrong, ['reading:桂花什么时候开？:春天']);
+    expect(find.text('✗ 答案：秋天'), findsOneWidget);
+  });
+
+  testWidgets('任务提交失败后显示重新提交并可重试', (tester) async {
+    final (container, _, home, _) = await pumpCenter(tester);
+    final ctl = container.read(centerControllerProvider.notifier);
+    ctl.openForTask(85, CenterTab.reading);
+    ctl.enter();
+    await tester.pumpAndSettle();
+    home.failSubmit = true;
+    await tester.enterText(find.byKey(const ValueKey('answer-0')), '秋天');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('submit-0')));
+    await tester.pumpAndSettle();
+    expect(find.text('提交任务失败，请稍后重试'), findsOneWidget);
+    expect(find.text('重新提交'), findsOneWidget);
+
+    home.failSubmit = false;
+    await tester.tap(find.text('重新提交'));
+    await tester.pumpAndSettle();
+    expect(home.submitted, [85]);
+    expect(find.text('重新提交'), findsNothing);
+    expect(find.text('已提交，等待家长确认'), findsOneWidget);
+  });
+
+  testWidgets('播放失败时提示', (tester) async {
+    final (container, _, _, speech) = await pumpCenter(tester);
+    container.read(centerControllerProvider.notifier).enter();
+    await tester.pumpAndSettle();
+    speech.failSpeak = true;
+    await tester.tap(find.text('播放对话'));
+    await tester.pumpAndSettle();
+    expect(find.text('播放失败，请稍后重试'), findsOneWidget);
   });
 }

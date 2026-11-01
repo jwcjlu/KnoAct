@@ -78,7 +78,9 @@ class _MaterialView extends ConsumerWidget {
                 const Text('听力对话', style: TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
                 FilledButton.icon(
-                  onPressed: () => ref.read(speechPlayerProvider).speak(material.text),
+                  onPressed: () => ref.read(speechPlayerProvider).speak(material.text).catchError((Object _) {
+                    if (context.mounted) showMessage(context, '播放失败，请稍后重试');
+                  }),
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('播放对话'),
                 ),
@@ -96,8 +98,21 @@ class _MaterialView extends ConsumerWidget {
         _QuestionCard(index: i, question: material.questions[i], result: state.results[i], input: state.inputs[i]),
         const SizedBox(height: 12),
       ],
+      if (_canRetrySubmit)
+        FilledButton.icon(
+          onPressed: ref.read(centerControllerProvider.notifier).retrySubmit,
+          icon: const Icon(Icons.refresh),
+          label: const Text('重新提交'),
+        ),
     ]);
   }
+
+  bool get _canRetrySubmit =>
+      state.submitFailed &&
+      !state.submitting &&
+      state.pending?.tab == state.tab &&
+      state.results.isNotEmpty &&
+      state.results.every((r) => r != null);
 }
 
 class _QuestionCard extends ConsumerStatefulWidget {
@@ -121,6 +136,11 @@ class _QuestionCardState extends ConsumerState<_QuestionCard> {
     super.dispose();
   }
 
+  void _submit() {
+    if (_ctl.text.trim().isEmpty) return;
+    ref.read(centerControllerProvider.notifier).answer(widget.index, _ctl.text);
+  }
+
   @override
   Widget build(BuildContext context) {
     final q = widget.question;
@@ -136,14 +156,19 @@ class _QuestionCardState extends ConsumerState<_QuestionCard> {
                 key: ValueKey('answer-${widget.index}'),
                 controller: _ctl,
                 decoration: const InputDecoration(hintText: '输入你的答案', isDense: true, border: OutlineInputBorder()),
+                textInputAction: TextInputAction.done,
                 onChanged: (v) => ref.read(centerControllerProvider.notifier).setInput(widget.index, v),
+                onSubmitted: (_) => _submit(),
               ),
             ),
             const SizedBox(width: 8),
-            FilledButton(
-              key: ValueKey('submit-${widget.index}'),
-              onPressed: () => ref.read(centerControllerProvider.notifier).answer(widget.index, _ctl.text),
-              child: const Text('提交'),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _ctl,
+              builder: (context, v, _) => FilledButton(
+                key: ValueKey('submit-${widget.index}'),
+                onPressed: v.text.trim().isEmpty ? null : _submit,
+                child: const Text('提交'),
+              ),
             ),
           ])
         else
