@@ -124,7 +124,7 @@ function todayPoem(){
   const dayIndex = Math.floor(d.getTime() / 86400000);  // 从 epoch 起的天数
   return POEMS[dayIndex % 4];
 }
-let excerpt = '', answer = '', question = '';
+let excerpt = '', question = '';
 let chatMessages = [];  // 沉浸页对话记录 [{role:'user'|'ai', text, citations, mode}]
 let chatBusy = false;   // 是否正在等待 AI 回复
 let thinkingText = '正在思考…';   // 流式期间显示的占位文案
@@ -152,11 +152,13 @@ let plDocs = [];        // [{id, filename, subject, lesson_count, audited_count}
 let plLessons = [];     // [{id, title, subject, start_page, end_page, texts, pages, ...}]
 let activeDocId = null;
 let activeLessonId = null;
-let lessonSearch = '';  // 课文下拉搜索关键字
 // 作业（做作业出题/判分 → 推进进度）
 let plQuiz = [];          // 作业题 [{question, answer}]
 let plQuizPicks = {};     // {idx: 用户答案}
-let plQuizResult = null;  // {correct, total, passed, rate}
+let plQuizResult = null;  // {correct, total, passed, rate, threshold, results:[{question, answer, student_answer, is_correct, feedback}]}
+let plAsked = [];         // 本课已出过的作业题，下一组不重复
+let plRound = 0;          // 本课第几组作业
+let plBusy = '';          // '' | 'generating' | 'grading'
 // 阅读模式：整本（全书连续懒加载） vs 分课时（单课页区间）
 let readMode = 'lesson';   // 'book' | 'lesson'
 let fullScreen = false;    // 全屏沉浸页开关
@@ -348,16 +350,10 @@ async function renderHome(){
   await loadTasks();
   const snap = homeSnapshot || {};
   const lp = snap.lesson_progress || {current:1, total:0, mastered:0};
-  const pendingReview = snap.pending_review || {};
   const dictCount = snap.dict_word_count ?? 0;
   const userName = snap.user_name || '同学';
   const totalLessons = lp.total || 0;
   const masteredPct = totalLessons > 0 ? Math.round((lp.mastered/totalLessons)*100) : 0;
-  const reviewOf = (subj, fallback) => {
-    const n = pendingReview[subj];
-    return (n && n > 0) ? `${n} 个知识点待复习` : fallback;
-  };
-
   const taskTypeMeta = {
     dictation:{icon:'pen',color:'blue',tag:'当前进度',tagColor:'blue',meta:'约 8 分钟'},
     knowledge:{icon:'brain',color:'green',tag:'重点巩固',tagColor:'green',meta:'约 10 分钟'},
@@ -384,7 +380,15 @@ async function renderHome(){
     subjectRemain[s] = list.filter(t => !isApproved(t)).length;
     subjectDone[s] = list.filter(isApproved).length;
   });
-  const subjBreakdown = SUBJECTS.map(s => `${s} ${subjectDone[s]}`).join(' · ');
+  const subjectColor = { '语文':'var(--blue)', '英语':'var(--orange2)', '数学':'var(--green)' };
+  const subjectProgress = SUBJECTS.map(s => {
+    const total = subjectDone[s] + subjectRemain[s];
+    const pct = total ? Math.round(subjectDone[s] / total * 100) : 0;
+    return `<div class="tc-subj">
+      <div class="n"><span class="t-dot" style="background:${subjectColor[s]}"></span>${s}<span class="c">${subjectDone[s]}/${total}</span></div>
+      <div class="tc-mini"><i style="width:${pct}%;background:${subjectColor[s]}"></i></div>
+    </div>`;
+  }).join('');
 
   const renderTaskCard = t => {
     const m = taskTypeMeta[t.task_type] || taskTypeMeta.custom;
@@ -425,12 +429,10 @@ async function renderHome(){
   const doneHtml = doneTasks.map(renderTaskCard).join('');
 
   const taskGridHtml = dailyTasks.length
-    ? `<div class="task-panel">
-        <div class="tp-head">📌 ${currentSubject} · 待完成 <b class="tp-count">${todoTasks.length}</b> 项</div>
-        ${todoHtml || `<div class="empty-subject">本学科任务都完成啦，去别的学科看看吧 🎉</div>`}
-        ${doneHtml ? `<div class="tp-head tp-done">✅ 已完成</div>${doneHtml}` : ''}
-      </div>`
-    : `<div class="task-empty" style="text-align:center;padding:28px 16px;color:#9aa39c;font-size:14px;background:#fafbf9;border:1px dashed #e2e6e1;border-radius:14px">${icon('book',20)}<div style="margin-top:8px">今天还没有任务，先去学习中心看看吧</div></div>`;
+    ? `<div class="task-group-label">待完成 <b>${todoTasks.length}</b></div>
+      ${todoHtml ? `<div class="task-grid">${todoHtml}</div>` : `<div class="task-empty">本学科任务都完成啦，去别的学科看看吧 🎉</div>`}
+      ${doneHtml ? `<div class="task-group-label done">已完成 <b>${doneTasks.length}</b></div><div class="task-grid">${doneHtml}</div>` : ''}`
+    : `<div class="task-empty">${icon('book',20)}<div style="margin-top:8px">今天还没有任务，先去学习中心看看吧</div></div>`;
 
   // TODO: 周统计未实现——后端无数据源（week_stats=null），暂渲染为空态灰条
   const weekBars = [['一',0],['二',0],['三',0],['四',0],['五',0],['六',0],['日',0]].map((d,i)=>
@@ -444,7 +446,6 @@ async function renderHome(){
   const greet = hour<6?'夜深了':hour<12?'早上好':hour<18?'下午好':'晚上好';
 
   // 学科 tab：带「待完成」角标（全完成显示 ✓）
-  const subjectTabDot = { '语文':'var(--blue)', '英语':'var(--orange2)', '数学':'var(--green)' };
   const subjectTabs = SUBJECTS.map(s => {
     const remain = subjectRemain[s] || 0;
     const badge = remain > 0
@@ -452,13 +453,13 @@ async function renderHome(){
       : `<span class="t-badge zero">✓</span>`;
     const active = currentSubject === s;
     return `<button class="subject-tab ${active?'active':''}" onclick="setSubject('${s}')">
-      <span class="t-dot" style="background:${subjectTabDot[s]}"></span>${s}${badge}
+      <span class="t-dot" style="background:${subjectColor[s]}"></span>${s}${badge}
     </button>`;
   }).join('');
 
   const poem = todayPoem();
   const poemText = poem.text.split('\n').map(line => `<div>${line}</div>`).join('');
-  const poemDots = POEMS.map((p,i)=>`<span class="r-dot ${p.name===poem.name?'on':''}"></span>`).join('');
+  const poemRotate = POEMS.map(p=>`<span class="${p.name===poem.name?'on':''}">${p.name}</span>`).join('<i>·</i>');
 
   return `
   <header class="page-head">
@@ -468,97 +469,63 @@ async function renderHome(){
     </div>
     <div class="head-right">
       <div class="points-pill"><span class="star">${icon('star',18)}</span>${points.toLocaleString()}<span style="font-size:12px;font-weight:400;color:#8a928d">积分</span></div>
-      <div class="avatar">晨</div>
+      <div class="avatar">${userName.slice(-1)}</div>
     </div>
   </header>
-
-  <div class="hero-poem ${poem.bg}">
-    <div class="poem-rotate"><span style="opacity:.5">竹</span>${poemDots}<span style="opacity:.5">兰梅菊 · 每日轮换</span></div>
-    <div class="poem-tag"><span class="flower"></span> 今日勉励 · ${poem.name}</div>
-    <div class="poem-title">${poem.title}</div>
-    <div class="poem-text">${poemText}</div>
-    <div class="poem-author">—— ${poem.author}</div>
-    <svg class="ink-branch" viewBox="0 0 200 260" fill="none" aria-hidden="true">
-      <path d="M20 250 C60 180, 40 120, 90 60" stroke="#fff" stroke-width="3" opacity=".7"/>
-      <path d="M90 60 C100 40, 120 30, 140 25" stroke="#fff" stroke-width="2" opacity=".6"/>
-      <path d="M60 170 C90 160, 110 170, 130 160" stroke="#fff" stroke-width="2" opacity=".5"/>
-      <path d="M50 130 C80 120, 100 130, 120 122" stroke="#fff" stroke-width="2" opacity=".5"/>
-      <ellipse cx="140" cy="22" rx="18" ry="6" fill="#fff" opacity=".5" transform="rotate(-20 140 22)"/>
-      <ellipse cx="128" cy="40" rx="16" ry="5" fill="#fff" opacity=".4" transform="rotate(10 128 40)"/>
-    </svg>
-  </div>
-
-  <div class="progress-card">
-    <div class="progress-head">
-      <div class="progress-num">${doneAll}<small> / ${totalAll}</small></div>
-      <div class="progress-txt">
-        <div>${remainAll > 0 ? `<b>还差 ${remainAll} 项</b> 今日学习就完成啦` : `<b>全部完成</b>，今天真棒！`}</div>
-        <div class="progress-sub">${subjBreakdown}</div>
-      </div>
-    </div>
-    <div class="progress-bar"><div class="progress-fill" style="width:${progressPct}%"></div></div>
-  </div>
-
-  <div class="subject-tabs">${subjectTabs}</div>
 
   <div class="hero-grid">
     <div class="hero">
       <div class="deco-ring"></div><div class="deco-glow"></div>
-      <div style="position:relative;z-index:10;max-width:520px">
-        <span class="tag">${icon('sparkles',14)}今日个性化学习计划</span>
-        <h2>第 ${lp.current} 课重点学习与旧课复习</h2>
-        <p>根据今日${currentSubject}进度和遗忘曲线，AI 安排了新课巩固与到期复习。</p>
-        <button class="start-btn" onclick="document.getElementById('tasks-anchor').scrollIntoView({behavior:'smooth'})">开始今日学习 ${icon('arrow',17)}</button>
+      <div class="hero-body">
+        <div class="hero-main">
+          <span class="tag">${icon('sparkles',14)}今日个性化学习计划</span>
+          <h2>第 ${lp.current} 课重点学习与旧课复习</h2>
+          <p>根据今日${currentSubject}进度和遗忘曲线，AI 安排了新课巩固与到期复习。</p>
+          <button class="start-btn" onclick="document.getElementById('tasks-anchor').scrollIntoView({behavior:'smooth'})">开始今日学习 ${icon('arrow',17)}</button>
+        </div>
+        <div class="hero-poem ${poem.bg}">
+          <div class="poem-tag"><span class="flower"></span>今日勉励<span class="poem-rotate">${poemRotate}</span></div>
+          <div class="poem-title">${poem.title}</div>
+          <div class="poem-text">${poemText}</div>
+          <div class="poem-author">—— ${poem.author}</div>
+        </div>
       </div>
     </div>
-    <div class="weekly-card">
-      <div class="head"><h2>本周学习</h2><span>暂无记录</span></div>
-      <div class="bars">${weekBars}</div>
-      <div class="streak"><span style="color:#f59d20">${icon('flame',17)}</span>完成今日任务，开始积累学习记录</div>
-    </div>
-  </div>
-
-  <div class="progress-strip">
-    <div class="p-l">
-      <div class="p-ic">${icon('book',20)}</div>
-      <div style="min-width:0">
-        <div class="p-title">学习进度 · ${totalLessons > 0 ? `已学到第 ${lp.current} 课` : '暂无课时'}</div>
-        <div class="p-sub">${totalLessons > 0 ? '完成新课阅读与答题，推进到下一课' : '请在家长端导入教材后开始学习'}</div>
+    <aside class="today-card">
+      <div class="tc-head"><h2>今日进度</h2><span class="tc-pct">${progressPct}%</span></div>
+      <div class="tc-num"><b>${doneAll}</b><small>/ ${totalAll} 项</small></div>
+      <div class="tc-msg">${remainAll > 0 ? `还差 <b>${remainAll}</b> 项，今日学习就完成啦` : (totalAll ? '<b>全部完成</b>，今天真棒！' : '今天还没有任务')}</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${progressPct}%"></div></div>
+      <div class="tc-subjects">${subjectProgress}</div>
+      <div class="tc-lesson">
+        <div class="tc-lesson-row">
+          <div style="min-width:0">
+            <div class="t">${icon('book',15)}课程进度</div>
+            <div class="s">${totalLessons > 0 ? `已学到第 ${lp.current} 课 · ${lp.mastered} / ${lp.total} 课` : '请在家长端导入教材后开始学习'}</div>
+          </div>
+          <button class="next-lesson-btn" onclick="setPage('个性化学习')">下一课 ${icon('arrow',15)}</button>
+        </div>
+        <div class="tc-mini"><i style="width:${masteredPct}%"></i></div>
       </div>
-    </div>
-    <div class="p-bar"><div class="p-fill" style="width:${masteredPct}%"></div></div>
-    <span class="p-txt">${totalLessons > 0 ? `${lp.mastered} / ${lp.total} 课` : '—'}</span>
-    <button class="next-lesson-btn" onclick="setPage('个性化学习')">进入下一课 ${icon('arrow',16)}</button>
+    </aside>
   </div>
 
   <section class="tasks-section" id="tasks-anchor">
     <div class="section-title">
-      <div><h2>今日学习任务</h2><div class="sub">完成任务可获得积分奖励</div></div>
-      <button style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:600;color:#3158e8">查看全部 ${icon('arrow',15)}</button>
-    </div>
-    <div class="task-info">
-      <div class="lead"><div class="ic">${icon('sparkles',17)}</div><div><div class="t1">AI 已根据学习进度生成</div><div class="t2">今天${currentSubject}更新至第 ${lp.current} 课</div></div></div>
-      <div class="divider"></div>
-      <div class="composition">
-        <span class="lbl">任务组成</span>
-        <div class="comp-bar"><div class="seg1"></div><div class="seg2"></div></div>
-        <span class="comp-legend"><b>新课巩固</b> · <b class="g">到期复习</b></span>
+      <div>
+        <h2>今日学习任务</h2>
+        <div class="sub">${icon('sparkles',13)} AI 已根据学习进度生成 · 今天${currentSubject}更新至第 ${lp.current} 课 · 完成任务可获得积分</div>
       </div>
-      <div class="due-pill">${icon('clock',14)}根据遗忘曲线安排复习</div>
+      <div class="subject-tabs">${subjectTabs}</div>
     </div>
-    <div class="task-grid">${taskGridHtml}</div>
+    ${taskGridHtml}
   </section>
 
-  <div class="review-grid">
-    <div class="review-card">
-      <div class="head">
-        <div><h2>智能复习</h2><div class="sub">根据遗忘曲线，为你安排最佳复习时间</div></div>
-        <div class="head-ic">${icon('brain',20)}</div>
-      </div>
-      <div class="review-items">
-        <button class="review-item" onclick="setPage('学习中心')"><div class="review-ic yw serif">语</div><div style="flex:1"><div class="name">语文基础知识</div><div class="cnt">${reviewOf('语文','暂无待复习，继续保持')}</div></div>${icon('arrow',16)}</button>
-        <button class="review-item" onclick="setPage('学习中心')"><div class="review-ic en serif">En</div><div style="flex:1"><div class="name">英语基础知识</div><div class="cnt">${reviewOf('英语','暂无待复习，继续保持')}</div></div>${icon('arrow',16)}</button>
-      </div>
+  <div class="home-bottom">
+    <div class="weekly-card">
+      <div class="head"><h2>本周学习</h2><span>暂无记录</span></div>
+      <div class="bars">${weekBars}</div>
+      <div class="streak"><span style="color:#f59d20">${icon('flame',17)}</span>完成今日任务，开始积累学习记录</div>
     </div>
     <div class="redeem-card">
       <div class="head">
@@ -581,7 +548,7 @@ function finishTask(id, reward){
   toast(`完成任务，获得 ${reward} 积分`);
 }
 async function doTask(id, type){
-  if(type==='dictation'){ await startDictation(); return; }
+  if(type==='dictation'){ await startDictation(id); return; }
   if(type==='math'){ startMath(id); return; }
   if(type==='knowledge'){ startKnowledge(id); return; }
   if(type==='reading'){ await loadCenter(); centerTab='阅读理解'; setPage('学习中心'); }
@@ -607,10 +574,16 @@ async function redeemHome(cost, device, minutes){
 
 // ===== 听写练习（手写拍照批改）=====
 // 流程状态机：listen（听写）→ upload（拍照）→ grading（批改中）→ result（结果/申诉）→ rewrite（错词重写）→ done（完成）
-async function startDictation(){
-  dictWords = await api(`/api/dictation/words?user_id=${uid}&subject=${encodeURIComponent(currentSubject)}`);
-  if(!dictWords || !dictWords.length){ toast('当前词库暂无生词'); return; }
+async function startDictation(taskId){
+  const task = taskId ? dailyTasks.find(x => x.id === taskId) : null;
+  if(task){
+    try { dictWords = JSON.parse(task.content || '[]'); } catch(e){ dictWords = []; }
+  } else {
+    dictWords = await api(`/api/dictation/words?user_id=${uid}&subject=${encodeURIComponent(currentSubject)}`);
+  }
+  if(!Array.isArray(dictWords) || !dictWords.length){ toast('当前词库暂无生词'); return; }
   dictState = {
+    taskId: task ? task.id : null,
     idx:0, phase:'listen',   // listen | upload | grading | result | rewrite | done
     wrong:[], correct:0, hints:{},   // hints: {idx: 'pinyin'|'meaning'}
     image:null, results:null, rewriteIdx:0, rewriting:false,
@@ -795,7 +768,9 @@ async function finishDictation(){
     const day = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
     const tasks = await api(`/api/tasks?user_id=${uid}&date=${day}&role=child`);
     const list = Array.isArray(tasks) ? tasks : (tasks && tasks.tasks) || [];
-    const task = list.find(x => x && x.task_type === 'dictation' && x.submit_status !== 'approved');
+    const task = s.taskId
+      ? list.find(x => x && x.id === s.taskId)
+      : list.find(x => x && x.task_type === 'dictation' && x.subject === currentSubject && x.submit_status !== 'approved');
     if(task && task.id){
       await api('/api/tasks/'+task.id+'/submit', {method:'POST'});
       if(confirm('请拍照上传你的听写字迹，家长核对后发放积分。现在上传？')){
@@ -929,12 +904,12 @@ function renderDictation(){
       <span class="ptxt">${curTotal - curPos} 个剩余</span>
     </div>
     <div class="dict-card">
-      <div class="dict-word-ic">${icon('headphones',40)}</div>
+      <div class="dict-word-ic">${icon('headphones',44)}</div>
       ${hintHtml}
       <button class="dict-play" onclick="speakDict()">${icon('play',17)} 播放${wordLabel}</button>
-      <div style="margin-top:20px;display:flex;justify-content:center;gap:12px">
-        <button class="dict-enter" style="background:var(--gray);color:#fff" onclick="dictHint()">提示</button>
-        <button class="dict-next" onclick="dictNext()">${curPos===curTotal?'听完了，去拍照':'下一个词'} ${icon('arrow',16)}</button>
+      <div style="margin-top:20px;display:flex;justify-content:center;align-items:center;gap:12px">
+        <button class="btn-ghost" style="padding:10px 20px;border-radius:12px" onclick="dictHint()">${icon('sparkles',15)} 提示</button>
+        <button class="dict-next" style="margin-top:0" onclick="dictNext()">${curPos===curTotal?'听完了，去拍照':'下一个词'} ${icon('arrow',16)}</button>
       </div>
     </div>
   </div>`;
@@ -957,7 +932,21 @@ function startMath(taskId){
   mathState = {taskId, title: t.title, questions, answers, result};
   setPage('数学练习');
 }
-function mathInput(i, v){ if(mathState) mathState.answers[i] = v; }
+function mathInput(i, v){
+  const s = mathState;
+  if(!s) return;
+  s.answers[i] = v;
+  const filled = s.answers.filter(a => a.trim()).length;
+  const txt = document.getElementById('math-filled');
+  const bar = document.getElementById('math-pfill');
+  if(txt) txt.textContent = `已作答 ${filled} / ${s.questions.length}`;
+  if(bar) bar.style.width = `${filled / s.questions.length * 100}%`;
+}
+function mathEnter(e, i){
+  if(e.key !== 'Enter') return;
+  const next = document.querySelector(`[data-math-input="${i+1}"]`);
+  if(next) next.focus(); else submitMath();
+}
 function editMath(){ if(mathState){ mathState.result = null; render(); } }
 async function submitMath(){
   const s = mathState;
@@ -974,13 +963,23 @@ function renderMath(){
   const s = mathState;
   if(!s) return '<div class="placeholder-page"><h2>数学练习</h2><p>请从首页点击任务进入。</p></div>';
   const r = s.result;
+  const total = s.questions.length;
+  const filled = s.answers.filter(a => a.trim()).length;
   const qs = s.questions.map((q,i)=>{
     const res = r?.results?.[i];
-    return `<div class="center-question">
-      <div class="cq-q">${i+1}. ${q.question}</div>
-      ${res
-        ? `<div class="cq-ans ${res.is_correct?'right':'wrong'}">${icon('check',15)} 你的答案：${s.answers[i]}${res.is_correct?'':`　正确答案：${res.correct_answer}`}</div>`
-        : `<div class="cq-form"><input class="cq-input" placeholder="输入答案（只写数字）" value="${s.answers[i]}" oninput="mathInput(${i}, this.value)"/></div>`}
+    const state = res ? (res.is_correct ? 'right' : 'wrong') : '';
+    const body = res
+      ? `<div class="know-ans">
+          <div class="know-ans-tag">${res.is_correct ? `${icon('check',14)} 答对了` : '答错了'}</div>
+          <div class="know-ans-text">你的答案：${escapeAttr(s.answers[i])}${res.is_correct ? '' : `　正确答案：${escapeAttr(String(res.correct_answer ?? ''))}`}</div>
+        </div>`
+      : `<div class="know-form">
+          <input class="cq-input" data-math-input="${i}" placeholder="输入答案（只写数字）" value="${escapeAttr(s.answers[i])}"
+            oninput="mathInput(${i}, this.value)" onkeydown="mathEnter(event, ${i})"/>
+        </div>`;
+    return `<div class="know-item ${state}">
+      <div class="know-q"><span class="know-no">${i+1}</span><div class="know-qtext">${q.question}</div></div>
+      ${body}
     </div>`;
   }).join('');
   const foot = r
@@ -990,12 +989,26 @@ function renderMath(){
           <button class="dict-next" style="background:#fff;color:var(--blue);border:1px solid var(--line3)" onclick="editMath()">修改答案</button>
           <button class="dict-next" onclick="setPage('学习首页')">返回首页</button>
         </div></div>`
-    : `<div style="text-align:center"><button class="dict-next" onclick="submitMath()">提交答案</button></div>`;
-  return `<header class="page-head">
-    <div><h1>${s.title}</h1></div>
-    <button class="btn-ghost" onclick="setPage('学习首页')">退出练习</button>
-  </header>
-  <div class="dict-wrap"><div class="center-questions" style="margin-top:20px">${qs}</div>${foot}</div>`;
+    : `<div class="know-submit"><button class="dict-next" onclick="submitMath()">提交答案</button></div>`;
+  const progress = r
+    ? `<span class="ptxt">已批改 ${total} / ${total}</span>
+      <div class="pbar"><div class="pfill" style="width:100%"></div></div>
+      <span class="ptxt">答对 ${r.correct}</span>`
+    : `<span class="ptxt" id="math-filled">已作答 ${filled} / ${total}</span>
+      <div class="pbar"><div class="pfill" id="math-pfill" style="width:${filled / total * 100}%"></div></div>
+      <span class="ptxt">填完统一提交</span>`;
+  return `<div class="dict-wrap">
+    <header class="know-head">
+      <div>
+        <div class="know-kicker">${icon('pen',14)} 数学练习 · 共 ${total} 题</div>
+        <h1>${s.title}</h1>
+      </div>
+      <button class="btn-ghost" onclick="setPage('学习首页')">退出练习</button>
+    </header>
+    <div class="dict-progress">${progress}</div>
+    <div class="know-list">${qs}</div>
+    ${foot}
+  </div>`;
 }
 
 // ===== 基础知识复习（知识点来自任务 content，孩子逐条自评）=====
@@ -1045,26 +1058,27 @@ function knowReAnswer(i){
 function renderKnowledge(){
   const s = knowState;
   if(!s) return '<div class="placeholder-page"><h2>基础知识复习</h2><p>请从首页点击任务进入。</p></div>';
+  const form = (i, placeholder, action, label) => `<div class="know-form">
+      <input class="cq-input" placeholder="${placeholder}" value="${escapeAttr(s.inputs[i])}"
+        oninput="knowInput(${i}, this.value)" onkeydown="if(event.key==='Enter')${action}(${i})"/>
+      <button class="cq-btn" onclick="${action}(${i})">${label}</button>
+    </div>`;
   const items = s.points.map((p,i)=>{
     const r = s.results[i];
-    if(r){
-      return `<div class="center-question">
-        <div class="cq-q">${i+1}. ${p.question || p.content}</div>
-        <div class="cq-ans ${r.is_correct?'right':'wrong'}">${icon('check',15)} ${r.is_correct?'答对了':'答错了'} · 标准答案：${escapeAttr(r.answer || '(无标准答案)')}</div>
-        ${!r.is_correct ? `<div class="cq-form">
-          <input class="cq-input" placeholder="再看一遍答案，重新作答巩固" value="${escapeAttr(s.inputs[i])}" oninput="knowInput(${i}, this.value)"/>
-          <button class="cq-btn" onclick="knowReAnswer(${i})">重新作答</button>
-        </div>` : ''}
-      </div>`;
-    }
-    return `<div class="center-question">
-      <div class="cq-q">${i+1}. ${p.question || p.content}</div>
-      <div class="cq-form">
-        <input class="cq-input" placeholder="凭记忆作答…" value="${escapeAttr(s.inputs[i])}" oninput="knowInput(${i}, this.value)"/>
-        <button class="cq-btn" onclick="knowSubmit(${i})">提交</button>
-      </div>
+    const state = r ? (r.is_correct ? 'right' : 'wrong') : '';
+    const body = r
+      ? `<div class="know-ans">
+          <div class="know-ans-tag">${r.is_correct ? `${icon('check',14)} 答对了` : '答错了'}</div>
+          <div class="know-ans-text">标准答案：${escapeAttr(r.answer || '(无标准答案)')}</div>
+        </div>
+        ${!r.is_correct ? form(i, '再看一遍答案，重新作答巩固', 'knowReAnswer', '重新作答') : ''}`
+      : form(i, '凭记忆作答…', 'knowSubmit', '提交');
+    return `<div class="know-item ${state}">
+      <div class="know-q"><span class="know-no">${i+1}</span><div class="know-qtext">${p.question || p.content}</div></div>
+      ${body}
     </div>`;
   }).join('');
+  const total = s.points.length;
   const answered = s.results.filter(r => r !== null).length;
   const correct = s.results.filter(r => r && r.is_correct).length;
   const allDone = s.results.every(r => r !== null);
@@ -1074,12 +1088,23 @@ function renderKnowledge(){
         <div style="display:flex;justify-content:center;gap:12px">
           <button class="dict-next" onclick="setPage('学习首页')">返回首页</button>
         </div></div>`
-    : `<div style="text-align:center;color:#9aa39c;font-size:13px">已作答 ${answered} / ${s.points.length} 题</div>`;
-  return `<header class="page-head">
-    <div><h1>${s.title}</h1></div>
-    <button class="btn-ghost" onclick="setPage('学习首页')">退出复习</button>
-  </header>
-  <div class="dict-wrap"><div class="center-questions" style="margin-top:20px">${items}</div>${foot}</div>`;
+    : '';
+  return `<div class="dict-wrap">
+    <header class="know-head">
+      <div>
+        <div class="know-kicker">${icon('book',14)} 知识点复习 · 共 ${total} 题</div>
+        <h1>${s.title}</h1>
+      </div>
+      <button class="btn-ghost" onclick="setPage('学习首页')">退出复习</button>
+    </header>
+    <div class="dict-progress">
+      <span class="ptxt">已作答 ${answered} / ${total}</span>
+      <div class="pbar"><div class="pfill" style="width:${total ? answered / total * 100 : 0}%"></div></div>
+      <span class="ptxt">答对 ${correct}</span>
+    </div>
+    <div class="know-list">${items}</div>
+    ${foot}
+  </div>`;
 }
 
 async function loadCenter(){
@@ -1269,46 +1294,161 @@ async function markMastered(id){
 }
 
 // ===== 个性化学习（接真实教材数据）=====
+// 选中教材后直接进入沉浸阅读，默认分课时、落到第一课
 async function selectDoc(id){
+  const doc = plDocs.find(d=>d.id===id);
+  if(!doc || !doc.storage_path){ toast('这本教材还没有可阅读的 PDF'); return; }
+  const lessons = await api(`/api/pdf/documents/${id}/lessons`);
+  if(!lessons || !lessons.length){ toast('这本教材还没有拆分出课文'); return; }
   activeDocId = id;
-  activeLessonId = null;
-  lessonSearch = '';   // 切换教材时清空课文搜索
-  plLessons = await api(`/api/pdf/documents/${id}/lessons`);
-  render();
+  plLessons = lessons;
+  applyLesson(plLessons[0].id);
+  chooseReadMode('lesson');
 }
-function selectLesson(id){
+function applyLesson(id){
   activeLessonId = id;
-  const l = plLessons.find(x=>x.id===id);
   currentLessonId = id;
   citations = [];
-  // 选中课程后，默认把第一段文本填入「选中的教材内容」
+  plQuiz = []; plQuizPicks = {}; plQuizResult = null; plAsked = []; plRound = 0;   // 作业跟随课文，切课即重置
+  const l = plLessons.find(x=>x.id===id);
+  // 选中课程后，默认把第一段文本作为对话引用
   if(l && l.texts && l.texts.length){
     excerpt = splitSentences(l.texts[0])[0] || l.texts[0];
   }
+}
+function selectLesson(id){
+  applyLesson(id);
   render();
   loadAnnotations();
 }
+function passLinePct(){
+  const th = plQuizResult && plQuizResult.threshold != null
+    ? plQuizResult.threshold
+    : parseFloat((configMap && configMap.assignment_pass_threshold) || '0.6');
+  return Math.round((isNaN(th) ? 0.6 : th) * 100);
+}
+// 出一组作业题；上一组未达标时带上错题，让新题围绕同类内容再考
 async function startAssignment(){
   if(!activeLessonId){ toast('请先选择课程'); return; }
-  const res = await api(`/api/learning/assignment`, {method:'POST', body:{user_id:uid, lesson_id:activeLessonId, subject:currentSubject}});
-  plQuiz = res.questions || [];
-  if(!plQuiz.length){ toast('本课暂无作业题，请稍后再试'); return; }
+  if(plBusy) return;
+  if(chatBusy){ toast('AI 正在回答，请稍候再做作业'); return; }
+  const wrong = plQuizResult && !plQuizResult.passed
+    ? (plQuizResult.results || []).filter(r=>!r.is_correct).map(r=>r.question)
+    : [];
+  plBusy = 'generating'; renderAssignment();
+  let qs = [];
+  try{
+    const res = await api(`/api/learning/assignment`, {method:'POST', body:{
+      user_id:uid, lesson_id:activeLessonId, subject:currentSubject,
+      previous_questions: plAsked, wrong_questions: wrong}});
+    qs = (res && res.questions) || [];
+  }catch(e){ qs = []; }
+  plBusy = '';
+  if(!qs.length){ toast('出题失败，请稍后再试'); renderAssignment(); return; }
+  plQuiz = qs;
+  plAsked = plAsked.concat(qs.map(q=>q.question));
   plQuizPicks = {};
   plQuizResult = null;
-  render();
+  plRound++;
+  renderAssignment();
 }
 async function submitAssignment(){
-  let correct = 0;
-  const answers = plQuiz.map((q,i)=>{
-    const isCorrect = (plQuizPicks[i]||'').trim() === (q.answer||'').trim();
-    if(isCorrect) correct++;
-    return {knowledge_point_id: q.knowledge_point_id ?? null, is_correct: isCorrect};
-  });
-  const total = plQuiz.length;
-  const d = await api(`/api/learning/assignment/grade`, {method:'POST', body:{user_id:uid, lesson_id:activeLessonId, subject:currentSubject, answers}});
-  plQuizResult = {correct, total, passed: d.passed, rate: d.rate};
-  render();
-  toast(d.passed ? '作业通过，课程进度已更新' : '未达标，请重看内容再试');
+  if(plBusy) return;
+  const blank = plQuiz.filter((_,i)=>!(plQuizPicks[i]||'').trim()).length;
+  if(blank){ toast(`还有 ${blank} 题没写答案`); return; }
+  const items = plQuiz.map((q,i)=>({question:q.question, answer:q.answer,
+    student_answer:(plQuizPicks[i]||'').trim(), knowledge_point_id: q.knowledge_point_id ?? null}));
+  plBusy = 'grading'; renderAssignment();
+  let d = null;
+  try{
+    d = await api(`/api/learning/assignment/grade`, {method:'POST', body:{user_id:uid, lesson_id:activeLessonId, subject:currentSubject, items}});
+  }catch(e){ d = null; }
+  plBusy = '';
+  if(!d || typeof d !== 'object' || !Array.isArray(d.results)){ toast('批改失败，请再提交一次'); renderAssignment(); return; }
+  plQuizResult = {correct:d.correct, total:d.total, passed:d.passed, rate:d.rate, threshold:d.threshold, results:d.results};
+  renderAssignment();
+  toast(d.passed ? '本课学习完成，课程进度已更新' : `还没达到 ${passLinePct()}%，看看正确答案再做一组`);
+}
+function cancelAssignment(){
+  if(plBusy) return;
+  plQuiz = []; plQuizPicks = {}; plQuizResult = null; plRound = 0;
+  renderAssignment();
+}
+// 顶栏「本课作业」：确保右栏展开并定位到作业卡片
+function openAssignment(){
+  if(!chatOpen){ chatOpen = true; render(); }
+  const box = document.getElementById('im-assign');
+  if(box) box.scrollIntoView({block:'nearest'});
+}
+// 原地刷新右栏作业区 + 对话可用状态，避免整体 render() 重挂载 PDF 阅读器、丢失阅读位置
+function renderAssignment(){
+  const box = document.getElementById('im-assign');
+  if(!box){ render(); return; }
+  box.innerHTML = assignmentHtml();
+  const side = document.getElementById('im-side');
+  if(side) side.classList.toggle('assigning', inAssignment());
+  const comp = document.getElementById('im-composer');
+  if(comp) comp.innerHTML = composerHtml();
+  const askBtn = document.getElementById('im-ask-btn');
+  if(askBtn) askBtn.style.display = chatDisabled() ? 'none' : '';
+}
+function assignmentReviewHtml(results){
+  return results.map((r,i)=>`
+    <div class="ia-r ${r.is_correct?'ok':'bad'}">
+      <div class="ia-q-t"><span class="ia-mark">${r.is_correct?'✓':'✗'}</span>${i+1}. ${escapeAttr(r.question)}</div>
+      <div class="ia-r-line">你的回答：${escapeAttr(r.student_answer||'（未作答）')}</div>
+      ${r.is_correct ? '' : `<div class="ia-r-line ans">正确答案：${escapeAttr(r.answer)}</div>`}
+      ${r.feedback ? `<div class="ia-r-line fb">${escapeAttr(r.feedback)}</div>` : ''}
+    </div>`).join('');
+}
+function assignmentHtml(){
+  const lesson = activeLessonId ? plLessons.find(x=>x.id===activeLessonId) : null;
+  if(!lesson) return '';
+  const pct = passLinePct();
+  const round = plRound > 0 ? `<span class="ia-round">第 ${plRound} 组</span>` : '';
+  const head = `<div class="ia-head">${icon('pen',14)}<span class="ia-t">本课作业</span>${round}<span class="ia-sub" title="${escapeAttr(lesson.title)}">${escapeAttr(lesson.title)}</span></div>`;
+  const genLabel = plBusy === 'generating' ? '正在出题…' : '';
+  if(plQuizResult){
+    const r = plQuizResult;
+    const ratePct = r.rate != null ? Math.round(r.rate*100) : 0;
+    const banner = r.passed
+      ? `<div class="ia-result ok"><div class="ia-result-t">✓ 本课学习完成</div><div>答对 ${r.correct} / ${r.total} 题（${ratePct}%），达到 ${pct}% 及格线，课程进度已更新。</div></div>`
+      : `<div class="ia-result bad"><div class="ia-result-t">✕ 本组还没达到 ${pct}%</div><div>答对 ${r.correct} / ${r.total} 题（${ratePct}%）。先看看下面的正确答案，再做一组新题，正确率达到 ${pct}% 才算学完本课。</div></div>`;
+    const actions = r.passed
+      ? `<button class="qa-btn" onclick="startAssignment()" ${plBusy?'disabled':''}>${genLabel || '再练一组'}</button>`
+      : `<div class="ia-actions">
+          <button class="qa-btn ia-primary" onclick="startAssignment()" ${plBusy?'disabled':''}>${genLabel || '继续做下一组'}</button>
+          <button class="qa-btn" onclick="cancelAssignment()" ${plBusy?'disabled':''}>先不做了</button>
+        </div>`;
+    return `<div class="ia-card">
+      ${head}
+      ${banner}
+      ${assignmentReviewHtml(r.results || [])}
+      ${actions}
+    </div>`;
+  }
+  if(plQuiz.length){
+    const grading = plBusy === 'grading';
+    const items = plQuiz.map((q,i)=>`
+      <div class="ia-q">
+        <div class="ia-q-t">${i+1}. ${escapeAttr(q.question)}</div>
+        <input class="ia-input" placeholder="写下你的回答…" value="${escapeAttr(plQuizPicks[i]||'')}" oninput="plQuizPicks[${i}]=this.value" ${grading?'disabled':''}>
+      </div>`).join('');
+    return `<div class="ia-card">
+      ${head}
+      <div class="ia-hint">正确率达到 ${pct}% 才算学完本课；做作业期间 AI 对话已暂停。</div>
+      ${items}
+      <div class="ia-actions">
+        <button class="qa-btn ia-primary" onclick="submitAssignment()" ${plBusy?'disabled':''}>${grading ? '正在批改…' : '提交作业'}</button>
+        <button class="qa-btn" onclick="cancelAssignment()" ${plBusy?'disabled':''}>先不做了</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="ia-card">
+    ${head}
+    <div class="ia-hint">读完课文后做几道理解题，正确率达到 ${pct}% 才算学完本课。</div>
+    <button class="qa-btn ia-primary" onclick="startAssignment()" ${plBusy?'disabled':''}>${genLabel || '去做作业'}</button>
+  </div>`;
 }
 function chooseReadMode(mode){
   readMode = mode;
@@ -1356,34 +1496,14 @@ function splitSentences(text){
   // 按句末标点 + 换行切句
   return text.split(/(?<=[。！？!?])|\n+/).map(s=>s.trim()).filter(Boolean);
 }
-function renderLessonOptions(){
-  // 只更新课文下拉（搜索框 + 选项），避免整体 render() 重挂载 PDF 阅读器
-  const sel = document.querySelector('.lesson-select');
-  if(!sel) return;
-  const kw = (lessonSearch || '').trim().toLowerCase();
-  const matched = kw ? plLessons.filter(l => (l.title||'').toLowerCase().includes(kw)) : plLessons;
-  sel.innerHTML = `
-    <div class="lesson-search">
-      ${icon('search',16)}
-      <input id="lesson-search-input" placeholder="搜索课文…" value="${escapeAttr(lessonSearch)}"
-             oninput="lessonSearch=this.value;renderLessonOptions()" />
-      ${lessonSearch?`<button class="ls-clear" onclick="lessonSearch='';renderLessonOptions()" title="清空">×</button>`:''}
-    </div>
-    <div class="lesson-options" id="lesson-options">
-      ${matched.map(l=>`
-        <button class="lesson-option ${activeLessonId===l.id?'active':''}" onclick="selectLesson(${l.id})">
-          <span class="lo-title">${escapeAttr(l.title)}</span>
-          <span class="lo-pages">第 ${l.start_page}–${l.end_page} 页</span>
-        </button>`).join('') || `<div class="lo-empty">没有匹配的课文</div>`}
-    </div>`;
-  // 恢复输入框焦点到末尾，避免每次按键失焦
-  const inp = sel.querySelector('#lesson-search-input');
-  if(inp){ inp.focus(); const v = inp.value; inp.setSelectionRange(v.length, v.length); }
+// 作业进行中（已出题、还没有一组达标）暂停 AI 对话，避免边问 AI 边答题
+function inAssignment(){
+  return plQuiz.length > 0 && !(plQuizResult && plQuizResult.passed);
 }
-// AI 对话开关：configMap 里 personalized_disable_chat !== 'false'（即未显式设为 false = 默认禁用）时关闭对话
+// AI 对话开关：做作业期间关闭；家长端显式设 personalized_disable_chat='true' 时也关闭，默认开放
 function chatDisabled(){
-  if(!configMap || typeof configMap['personalized_disable_chat'] === 'undefined') return true;
-  return configMap['personalized_disable_chat'] !== 'false';
+  if(inAssignment()) return true;
+  return !!configMap && configMap['personalized_disable_chat'] === 'true';
 }
 async function renderPersonalized(){
   if(plDocs.length===0){
@@ -1396,90 +1516,9 @@ async function renderPersonalized(){
       ${activeDocId===d.id?'<span style="width:20px;height:20px;border-radius:50%;background:#3158e8;color:#fff;display:grid;place-items:center">'+icon('check',12)+'</span>':''}
     </button>`).join('');
 
-  // 课程列表：搜索下拉
-  let lessonList = '';
-  if(activeDocId && plLessons.length){
-    const kw = (lessonSearch || '').trim().toLowerCase();
-    const matched = kw ? plLessons.filter(l => (l.title||'').toLowerCase().includes(kw)) : plLessons;
-    const opts = matched.map(l=>`
-      <button class="lesson-option ${activeLessonId===l.id?'active':''}" onclick="selectLesson(${l.id})">
-        <span class="lo-title">${escapeAttr(l.title)}</span>
-        <span class="lo-pages">第 ${l.start_page}–${l.end_page} 页</span>
-      </button>`).join('');
-    lessonList = `
-      <div class="lesson-select">
-        <div class="lesson-search">
-          ${icon('search',16)}
-          <input id="lesson-search-input" placeholder="搜索课文…" value="${escapeAttr(lessonSearch)}"
-                 oninput="lessonSearch=this.value;renderLessonOptions()" />
-          ${lessonSearch?`<button class="ls-clear" onclick="lessonSearch='';renderLessonOptions()" title="清空">×</button>`:''}
-        </div>
-        <div class="lesson-options" id="lesson-options">
-          ${opts || `<div class="lo-empty">没有匹配的课文</div>`}
-        </div>
-      </div>`;
-  }
-
   // 当前课程
   const lesson = activeLessonId ? plLessons.find(x=>x.id===activeLessonId) : null;
   const activeDoc = activeDocId ? plDocs.find(d=>d.id===activeDocId) : null;
-
-  // 阅读模式切换（选好教材后出现）：整本连续阅读 vs 分课时阅读
-  let modeBar = '';
-  if(activeDocId && activeDoc && activeDoc.storage_path){
-    const bm = readMode==='book';
-    modeBar = `
-      <div class="read-mode-bar">
-        <button class="rm-btn ${bm?'active':''}" onclick="chooseReadMode('book')">${icon('book',15)}整本阅读</button>
-        <button class="rm-btn ${bm?'':'active'}" onclick="chooseReadMode('lesson')">${icon('grid',15)}分课时阅读</button>
-      </div>`;
-  }
-
-  // 正文区：pdf.js 阅读器（可拖选文字），兜底回 PNG 图
-  let readerBody = `<div style="text-align:center;padding:48px 0;color:#8e9691">${icon('book',32)}<p style="margin-top:8px;font-size:13px">选择左侧教材与课程，在正文中拖选文字追问</p></div>`;
-  if(lesson && activeDoc && activeDoc.storage_path){
-    readerBody = `<div id="pdf-reader" data-doc-id="${activeDocId}" data-lesson-id="${lesson.id}" data-start="${lesson.start_page}" data-end="${lesson.end_page}" data-storage="${escapeAttr(activeDoc.storage_path)}"></div>`;
-  }
-
-  // 我的标注（划线/笔记/生词），内联在正文旁 —— 由 renderAnnotationList 原地更新
-  let annotationList = '';
-  if(lesson){
-    annotationList = `<section class="pl-sentences" id="annotation-list" style="margin-top:12px"></section>`;
-  }
-
-  // 作业区块（做作业出题/判分 → 推进进度）
-  let assignmentBlock = '';
-  if(lesson){
-    if(plQuizResult){
-      const pass = plQuizResult.passed;
-      assignmentBlock = `<section class="pl-ask">
-        <h3>${icon('pen',16)} 本课作业</h3>
-        <div style="padding:14px;border-radius:10px;background:${pass?'#e8f5ec':'#fdeeee'};font-size:13px;line-height:1.6">
-          <div style="font-weight:700;color:${pass?'#1f8a4c':'#c0392b'}">${pass?'✓ 作业通过':'✕ 未达标'}</div>
-          <div style="color:#555;margin-top:4px">答对 ${plQuizResult.correct} / ${plQuizResult.total} 题${plQuizResult.rate!=null?`（正确率 ${Math.round(plQuizResult.rate*100)}%）`:''}</div>
-          ${pass?'<div style="color:#1f8a4c;margin-top:4px">课程进度已更新，可去学习首页查看下一课。</div>':'<div style="color:#c0392b;margin-top:4px">请重看教材内容后再试一次。</div>'}
-        </div>
-        <button class="qa-btn" style="margin-top:10px" onclick="startAssignment()">重新做作业</button>
-      </section>`;
-    } else if(plQuiz.length){
-      const items = plQuiz.map((q,i)=>`
-        <div style="margin-bottom:12px">
-          <div style="font-size:13px;font-weight:600;color:#333;margin-bottom:6px">${i+1}. ${escapeAttr(q.question)}</div>
-          <input style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e2e6e3;border-radius:8px;font-size:13px" placeholder="写下你的回答…" oninput="plQuizPicks[${i}]=this.value">
-        </div>`).join('');
-      assignmentBlock = `<section class="pl-ask">
-        <h3>${icon('pen',16)} 本课作业</h3>
-        ${items}
-        <button class="qa-btn" style="width:100%;background:#3158e8;color:#fff" onclick="submitAssignment()">提交作业</button>
-      </section>`;
-    } else {
-      assignmentBlock = `<section class="pl-ask">
-        <h3>${icon('pen',16)} 本课作业</h3>
-        <div style="font-size:13px;color:#8e9691">读完课文后，做几道理解题检验掌握情况，答对即可推进到下一课。</div>
-        <button class="qa-btn" style="margin-top:10px;background:#3158e8;color:#fff" onclick="startAssignment()">去做作业</button>
-      </section>`;
-    }
-  }
 
   // ===== 全屏沉浸页（三栏：目录 / 阅读器 / 对话）=====
   if(fullScreen && activeDoc && activeDoc.storage_path){
@@ -1529,8 +1568,9 @@ async function renderPersonalized(){
         <button class="im-tool" onclick="chooseReadMode('${isBook?'lesson':'book'}')" title="${isBook?'切到分课时':'切到整本'}">${icon('grid',18)}</button>
         <span class="im-divider"></span>
         <button class="im-tool" onclick="speakLesson()" title="朗读">${icon('volume',18)}</button>
+        <button class="im-tool" onclick="openAssignment()" title="本课作业">${icon('pen',18)}</button>
         <button class="im-tool" onclick="startQuiz()" title="测验">${icon('list',18)}</button>
-        ${chatDisabled() ? '' : `<button class="im-tool" onclick="startAskQuestions()" title="主动提问">${icon('sparkles',18)}</button>`}
+        <button class="im-tool" id="im-ask-btn" onclick="startAskQuestions()" title="主动提问" style="${chatDisabled()?'display:none':''}">${icon('sparkles',18)}</button>
         <button class="im-tool" onclick="exitImmersive()" title="退出全屏">${icon('expand',18)}</button>
         <button class="im-tool" onclick="toast('更多功能开发中')" title="菜单">${icon('menu',18)}</button>
         <span class="im-divider"></span>
@@ -1545,18 +1585,34 @@ async function renderPersonalized(){
         <div class="im-reader">
           <div class="reader-pad">
             <div ${readerAttrs}></div>
+            ${!isBook && lesson ? `<div class="im-after">
+              <section class="pl-sentences" id="annotation-list"></section>
+            </div>` : ''}
           </div>
         </div>
         ${chatOpen ? `<div class="im-sep" id="im-sep-chat" data-side="chat"></div>` : ''}
-        ${chatOpen ? `<aside class="im-side" style="width:${chatWidth}px">
+        ${chatOpen ? `<aside class="im-side ${inAssignment()?'assigning':''}" id="im-side" style="width:${chatWidth}px">
           <div class="im-chat-head">
             <span class="t">对话伴学</span>
             <span class="sub">回答会指明原文出处</span>
           </div>
+          <div class="im-assign" id="im-assign">${assignmentHtml()}</div>
           ${excerpt ? `<div class="im-ctx" title="${escapeAttr(excerpt)}"><span class="q">引用：${escapeAttr(excerpt)}</span><span class="x" onclick="excerpt='';render()">×</span></div>` : ''}
           <div class="im-chat-body" id="im-chat-body">${chatList}</div>
-          <div class="im-composer">
-            ${chatDisabled() ? `<div class="im-empty" style="padding:18px 16px"><div class="hint">测试阶段暂不开放 AI 对话</div></div>` : `
+          <div class="im-composer" id="im-composer">${composerHtml()}</div>
+        </aside>` : ''}
+      </div>
+    </div>`;
+  }
+  return renderPicker(books);
+}
+// 沉浸页右栏输入区：做作业期间 / 家长关闭时显示暂停提示，否则为完整对话输入
+function composerHtml(){
+  if(chatDisabled()){
+    const hint = inAssignment() ? '本课作业还没完成，AI 对话已暂停；完成作业或点「先不做了」后即可继续提问' : '家长已关闭 AI 对话';
+    return `<div class="im-empty" style="padding:18px 16px"><div class="hint">${hint}</div></div>`;
+  }
+  return `
             <div class="im-chips" id="im-chips">
               <button class="im-chip ${chatModel?'on':''}" onclick="toggleChatMenu('model', event)">
                 ${icon('brain',14)}<span>${chatModel ? shortModelName(chatModel) : '默认模型'}</span><span class="caret">▾</span>
@@ -1574,70 +1630,29 @@ async function renderPersonalized(){
             <div class="row">
               <textarea id="im-input" placeholder="针对这段教材提问…" oninput="question=this.value" onkeydown="imInputKey(event)"></textarea>
               <button class="send-btn" id="im-send" onclick="chatAsk()" title="发送">${icon('arrow',18)}</button>
-            </div>`}
-          </div>
-        </aside>` : ''}
-      </div>
-    </div>`;
-  }
-
+            </div>`;
+}
+function renderPicker(books){
   return `
   <header class="page-head">
     <div>
       <div class="crumb">${icon('sparkles',16)}AI 个性化学习</div>
       <h1 class="big">和教材一起深度学习</h1>
-      <p class="desc">选择教材与课程，在正文里拖选任意一段，划线、记笔记、查生词，或直接追问。</p>
+      <p class="desc">选择一本教材直接进入阅读，在正文里拖选任意一段，划线、记笔记、查生词，或直接追问。</p>
     </div>
     <label style="display:inline-flex;align-items:center;gap:8px;border-radius:12px;background:#3158e8;color:#fff;padding:12px 20px;font-size:14px;font-weight:700;box-shadow:0 8px 20px rgba(49,88,232,.18);cursor:pointer">${icon('book',18)}上传 PDF 教材<input type="file" accept="application/pdf" style="display:none" onchange="uploadPdfPersonal(this)"></label>
   </header>
 
   <section class="materials">
     <div class="head">
-      <div><h2>我的教材</h2><div class="sub">选择一本教材，展开课程列表</div></div>
+      <div><h2>我的教材</h2><div class="sub">点击教材即可开始阅读</div></div>
       <label class="add-book" style="cursor:pointer"><span style="font-size:18px;line-height:1">＋</span>添加教材<input type="file" accept="application/pdf" style="display:none" onchange="uploadPdfPersonal(this)"></label>
     </div>
     <div class="book-list">${books || `<div style="padding:24px 0;color:#8e9691;font-size:13px">暂无教材，请在家长端「教材」页上传 PDF</div>`}</div>
-    ${lessonList}
-    ${modeBar}
-  </section>
-
-  <div class="pl-grid">
-    <section class="pl-reader">
-      <div class="bar">
-        <div class="t"><div class="ic">${icon('book',18)}</div><div style="min-width:0"><div class="name">${lesson?lesson.title:'请选择课程'}</div><div class="sub">${lesson?'PDF 原页面 · '+(lesson.start_page)+'–'+lesson.end_page+' 页':'配套电子教材 · 当前学习内容'}</div></div></div>
-      </div>
-      <div class="reader-body">${readerBody}</div>
-    </section>
-    <div class="pl-side">
-      <section class="pl-ask">
-        <h3>选中的教材内容</h3>
-        <textarea class="ta" placeholder="在正文里拖选一段文字，自动填入…" oninput="excerpt=this.value">${excerpt}</textarea>
-        <div class="quick-actions">
-          ${chatDisabled() ? `<span style="font-size:12px;color:#a0a7a2">测试阶段暂不开放 AI 对话</span>`
-            : `<button class="qa-btn" onclick="ask('这段话是什么意思？')">这段话是什么意思？</button>
-          <button class="qa-btn" onclick="ask('帮我总结知识点')">帮我总结知识点</button>
-          <button class="qa-btn" onclick="ask('给我出一道练习题')">给我出一道练习题</button>`}
-        </div>
-      </section>
-      ${annotationList}
-      ${assignmentBlock}
-      ${chatDisabled() ? '' : `<section class="pl-question">
-        <h3>针对这段教材提问</h3>
-        <div class="qa-input"><input placeholder="针对这段教材提问…" oninput="question=this.value"><button class="send-btn" onclick="ask()">发送问题</button></div>
-      </section>`}
-      ${answer?`<section class="pl-answer"><h3>${icon('sparkles',16)}AI 讲解</h3><div class="ans">${renderAnswer(answer)}</div></section>`:''}
-    </div>
-  </div>`;
+  </section>`;
 }
 function escapeAttr(s){
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;');
-}
-function selectSentence(s, lessonId){
-  excerpt = s;
-  currentLessonId = lessonId;
-  render();
-  // 直接触发一次解释
-  ask('这段话是什么意思？');
 }
 async function uploadPdfPersonal(input){
   toast('请在家长端「教材」页上传 PDF');
@@ -1960,11 +1975,11 @@ function showPopover(x, y, page){
       <button class="rp-btn" title="笔记" onmousedown="event.preventDefault();event.stopPropagation();openAnnotNote()">${icon('note',16)}</button>
       <button class="rp-btn" title="生词释义" onmousedown="event.preventDefault();event.stopPropagation();annotate('glossary')">${icon('book',16)}</button>
     </div>
-    <div class="rp-row">
+    ${chatDisabled() ? '' : `<div class="rp-row">
       <button class="rp-btn ask" onmousedown="event.preventDefault();event.stopPropagation();askPopover()">${icon('chat',14)}追问</button>
       <button class="rp-chip" onmousedown="event.preventDefault();event.stopPropagation();askPopoverExplain()">解释</button>
       <button class="rp-chip" onmousedown="event.preventDefault();event.stopPropagation();askPopoverTranslate()">翻译</button>
-    </div>
+    </div>`}
     <div class="rp-note-row">
       <div class="rp-quote">“${quote}”</div>
       <textarea id="rp-note-input" placeholder="给这段文字写一句笔记…"></textarea>
@@ -1996,18 +2011,16 @@ function saveAnnotNote(){
 }
 function hidePopover(){ if(_popoverEl){ _popoverEl.remove(); _popoverEl = null; } }
 
-function askPopover(){
+// 划词追问统一进沉浸页右栏对话
+function popoverAsk(q){
   hidePopover();
-  ask('这段话是什么意思？');
+  if(chatBlocked()) return;
+  if(!chatOpen){ chatOpen = true; render(); }
+  chatAsk(q);
 }
-function askPopoverExplain(){
-  hidePopover();
-  ask('给我解释一下这段话');
-}
-function askPopoverTranslate(){
-  hidePopover();
-  ask('把这段话翻译成英文');
-}
+function askPopover(){ popoverAsk('这段话是什么意思？'); }
+function askPopoverExplain(){ popoverAsk('给我解释一下这段话'); }
+function askPopoverTranslate(){ popoverAsk('把这段话翻译成英文'); }
 
 function annotate(kind){
   hidePopover();
@@ -2299,16 +2312,6 @@ function jumpToSentence(n){
   toast(`第${n}句：${target.slice(0,20)}…`);
 }
 
-async function ask(preset){
-  const q = preset || question;
-  if(!q || !q.trim()) return;
-  const ctx = excerpt && excerpt.trim() ? excerpt.trim() : currentText;
-  const d = await api('/api/ask', {method:'POST', body:{lesson_id:currentLessonId, question:q.trim(), context:ctx}});
-  answer = d.answer || '（暂无回答）';
-  citations = d.citations || [];
-  render();
-}
-
 // ===== 沉浸页对话（多轮记录）=====
 function imInputKey(e){
   if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); chatAsk(); }
@@ -2317,6 +2320,7 @@ let quizState = {quiz_id:null, questions:[], answers:{}, submitted:false, result
 let askState  = {questions:[], replies:{}};
 
 async function startQuiz(){
+  if(chatBlocked()) return;
   chatOpen = true;
   chatBusy = true; thinkingText = '正在出题…'; renderImmersiveChat();
   let reason = '';
@@ -2353,6 +2357,7 @@ async function submitQuiz(){
   renderImmersiveChat();
 }
 async function startAskQuestions(){
+  if(chatBlocked()) return;
   chatOpen = true;
   const ctx = excerpt && excerpt.trim() ? excerpt.trim() : currentText;
   chatBusy = true; renderImmersiveChat();
@@ -2376,7 +2381,13 @@ async function submitAskReplies(){
   askState = {questions:[], replies:{}};
   chatBusy = false; renderImmersiveChat();
 }
+function chatBlocked(){
+  if(!chatDisabled()) return false;
+  toast(inAssignment() ? '本课作业还没完成，AI 对话已暂停' : '家长已关闭 AI 对话');
+  return true;
+}
 async function chatAsk(preset){
+  if(chatBlocked()) return;
   const q = (preset || question || '').trim();
   if(!q || chatBusy) return;
   const ctx = excerpt && excerpt.trim() ? excerpt.trim() : currentText;
@@ -3401,7 +3412,7 @@ async function renderLearningConfigTab(){
     </div>`;
   const chk = (key, label, hint) => `
     <div class="lc-row">
-      <label class="lc-label"><input type="checkbox" data-key="${key}" ${configMap[key]!=='false'?'checked':''} /> ${label}</label>
+      <label class="lc-label"><input type="checkbox" data-key="${key}" ${configMap[key]==='true'?'checked':''} /> ${label}</label>
       ${hint ? `<div class="lc-hint">${hint}</div>` : ''}
     </div>`;
 
@@ -3418,7 +3429,7 @@ async function renderLearningConfigTab(){
           ${sel('difficulty_语文','中等','语文出题难度',['简单','中等','困难'])}
           ${sel('difficulty_英语','中等','英语出题难度',['简单','中等','困难'])}
           ${sel('difficulty_数学','中等','数学出题难度',['简单','中等','困难'])}
-          ${chk('personalized_disable_chat','测试阶段禁用 AI 对话','勾选 = 禁用（默认），取消勾选 = 开放')}
+          ${chk('personalized_disable_chat','禁用个性化学习 AI 对话','勾选 = 禁用，不勾选 = 开放（默认）；孩子做作业期间始终暂停对话')}
           <div style="margin-top:16px">
             <button class="btn-primary" onclick="saveLearningConfig()">保存配置</button>
           </div>
