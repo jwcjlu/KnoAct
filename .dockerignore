@@ -7,6 +7,7 @@
 docs/
 prototype/
 frontend/
+parent-web/
 backend/tests/
 backend/uploads/
 backend/*.db

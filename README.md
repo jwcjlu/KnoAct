@@ -70,7 +70,7 @@ git clone https://github.com/jwcjlu/KnoAct.git
 cd KnoAct
 cp .env.example .env            # 按需修改端口、数据库等
 
-docker compose up -d --build    # 启动后端 + 前端
+docker compose up -d --build    # 启动后端 + 学生端 + 家长端
 ```
 
 浏览器访问学生端 `http://<服务器IP>:8080`、家长端 `http://<服务器IP>:8081`（端口分别由 `.env` 中的 `KNOACT_HTTP_PORT`、`KNOACT_PARENT_PORT` 决定）。

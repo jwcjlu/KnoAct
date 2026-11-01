@@ -19,6 +19,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8766", "--directory", "frontend"],
       "port": 8766
+    },
+    {
+      "name": "zhixueban-parent-web",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8767", "--directory", "parent-web"],
+      "port": 8767
     }
   ]
 }

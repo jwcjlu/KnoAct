@@ -11,17 +11,22 @@
 
 KnoAct（知学伴）是一个面向小学生的 AI 学习伙伴：上传 PDF 教材 →
 自动拆课 → AI 提取生词/知识点/课文 → 孩子端做听写、听力、阅读、边读边问测验，
-家长端管理教材/目标/任务/规则。后端是 **FastAPI + SQLAlchemy**，前端是
-**单文件原生 JS**（无框架，`render*()` 函数拼 HTML 字符串）。数据库用 SQLite
+家长端管理教材/目标/任务/规则。后端是 **FastAPI + SQLAlchemy**，前端分两个
+**单文件原生 JS** 应用（无框架，`render*()` 函数拼 HTML 字符串）：`frontend/`
+是旧版学生端 Web（已冻结，将由 Flutter 学生 App 取代），`parent-web/` 是独立的
+家长端，均直接调用后端 `/api`。数据库用 SQLite
 （生产可切 MySQL），所有 AI/语音能力都走可配置的 provider 抽象层，未配置时
 回落本地 `fake` 兜底，保证任何环境下都能跑起来。
 
 ## Architecture（现状）
 
 ```
-      frontend/index.html + app.js   (原生 JS，静态托管)
-        │  fetch → http://127.0.0.1:8010
-        ▼
+  frontend/  旧版学生端 Web (冻结，待 Flutter 取代)    parent-web/  家长端 (独立)
+  index.html + app.js (原生 JS，静态托管 :8766)      index.html + app.js (原生 JS，:8767)
+        │                                                  │
+        └──────────── fetch → http://127.0.0.1:8010/api ───┘
+                               │
+                               ▼
 ┌──────────────────────────────────────────────┐
 │            FastAPI (main.py)                 │
 │  CORS 全开 · /uploads 静态挂载 · 每日任务调度   │
@@ -31,7 +36,7 @@ KnoAct（知学伴）是一个面向小学生的 AI 学习伙伴：上传 PDF �
 │   routers/   │                                               │
 │  auth config pdf progress notes points learning goals        │
 │  mistakes knowledge questions tts annotations home tasks     │
-│  quiz mastery                                                │
+│  quiz mastery users                                          │
 └──────────────┼───────────────────────────────────────────────┘
                │  Depends(get_db) · Session
 ┌──────────────▼───────────────────────────────────────────────┐
@@ -147,8 +152,9 @@ binding (ModelProfile + ModelConnection)  →  legacy (ModelConfig 老键)  → 
 3. **GBK 管道**：`curl … | python -c "json.load(sys.stdin)"` 会把中文按 GBK 重解码
    报 JSONDecodeError。验证 API 用 `urllib`/`requests` 单进程做请求+解析。
 
-前端静态页：`python -m http.server 8766 --directory frontend`（`API` 常量写死
-`http://127.0.0.1:8010`）。运行配置见 `.claude/launch.json`（prototype/backend/frontend 三个）。
+前端静态页：学生端 `python -m http.server 8766 --directory frontend`，家长端
+`python -m http.server 8767 --directory parent-web`（`API` 默认
+`http://127.0.0.1:8010`）。运行配置见 `.claude/launch.json`（prototype/backend/frontend/parent-web 四个）。
 
 ## Key Files
 
@@ -160,6 +166,7 @@ binding (ModelProfile + ModelConnection)  →  legacy (ModelConfig 老键)  → 
 | `backend/app/config.py`                   | `DATABASE_URL`（相对路径，随 cwd）   |
 | `backend/app/routers/notes.py`            | `/api/ask` 路由（经 orchestrator 转 capability） |
 | `backend/app/routers/`                    | 每领域一个 router                    |
+| `backend/app/routers/users.py`            | `GET /api/users?role=child`（家长端孩子列表） |
 | `backend/app/services/ai.py`              | `AIProvider` 抽象 + `get_provider` / `ocr_image` |
 | `backend/app/services/model_config.py`    | `resolve()` 三级降级 + 密钥掩码      |
 | `backend/app/services/provider_registry.py` | provider 白名单（代码常量）         |
@@ -171,7 +178,8 @@ binding (ModelProfile + ModelConnection)  →  legacy (ModelConfig 老键)  → 
 | `backend/app/runtime/`                    | `turn_engine.py`（TurnEngine 多步工具循环）+ `orchestrator.py`（route_to_capability + _persist 落库 Turn/ToolCall） |
 | `backend/app/capabilities/`               | `registry.py`（CapabilityRegistry）+ `chat.py`（Chat/Visualize/Solve 三 capability） |
 | `backend/tests/`                          | pytest，`conftest.py` + 每领域 test   |
-| `frontend/index.html` / `frontend/app.js` | 单文件原生 JS 前端（含对话栏 UI）    |
+| `frontend/index.html` / `frontend/app.js` | 旧版学生端 Web（已冻结，待 Flutter 学生 App 取代；含对话栏 UI） |
+| `parent-web/index.html` / `parent-web/app.js` | 家长端（独立单文件原生 JS，调用后端 `/api`） |
 | `prototype/`                              | 早期原型（静态）                     |
 
 ---

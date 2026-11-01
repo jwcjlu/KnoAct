@@ -154,10 +154,15 @@ async function switchChild(id){
   uid = Number(id) || null;
   try{ localStorage.setItem(CHILD_KEY, String(uid)); }catch(e){}
   goalRows = []; reportRows = []; masteryReport = null; parentTasks = [];
-  childSwitching = true; render();
+  // 非孩子 Tab 只刷新下拉框，避免整页重绘冲掉未保存的输入
+  childSwitching = true; CHILD_TABS.includes(parentTab) ? render() : renderChildSelect();
   try{ await reloadChildData(); }
   catch(e){ toast('加载孩子数据失败，请稍后重试'); }
-  finally { childSwitching = false; render(); }
+  finally { childSwitching = false; CHILD_TABS.includes(parentTab) ? render() : renderChildSelect(); }
+}
+function renderChildSelect(){
+  const host = document.getElementById('child-select-host');
+  if(host) host.innerHTML = childSelectHtml();
 }
 function childSelectHtml(){
   if(!children.length) return `<span class="child-empty">暂无孩子</span>`;
@@ -475,7 +480,7 @@ function renderParent(){
   return `<div class="parent-banner">
     <div class="l"><div class="ic">${icon('star',20)}</div><div><div class="t">家长端 · 管理学习目标与规则</div><div class="s">在这里录入教材、设定目标、查看薄弱报告</div></div></div>
     <div class="parent-tabs-narrow" style="gap:8px;background:#f2f4f1;border-radius:12px;padding:4px">${tabs}</div>
-    ${childSelectHtml()}
+    <div id="child-select-host">${childSelectHtml()}</div>
   </div>${body}`;
 }
 
