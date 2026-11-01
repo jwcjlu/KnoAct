@@ -78,11 +78,25 @@ class CenterState {
       );
 }
 
+typedef _SubmitResult = ({int taskId, bool ok, bool current});
+
 class CenterController extends Notifier<CenterState> {
   int _loadToken = 0;
 
+  int? get _uid => ref.read(currentChildIdProvider);
+
   @override
-  CenterState build() => const CenterState();
+  CenterState build() {
+    // 换孩子（含退出登录）时重建：状态清空，上一个孩子的在途结果作废
+    ref.watch(currentChildIdProvider);
+    _loadToken++;
+    final speech = ref.read(speechPlayerProvider);
+    ref.onDispose(() => unawaited(speech.stop()));
+    return const CenterState();
+  }
+
+  /// 请求返回时孩子已切换或材料已重新加载
+  bool _stale(int token, int uid) => !ref.mounted || token != _loadToken || _uid != uid;
 
   /// 首页点阅读/听力任务时调用，随后跳转到学习中心
   void openForTask(int taskId, CenterTab tab) {
@@ -115,17 +129,18 @@ class CenterController extends Notifier<CenterState> {
 
   Future<void> reload() => _load(state.tab);
 
-  Future<void> retrySubmit() => _maybeSubmitTask();
+  Future<void> retrySubmit() => _submitAndReport();
 
   Future<void> _load(CenterTab tab) async {
+    final uid = _uid;
+    if (uid == null) return;
     final token = ++_loadToken;
     state = state.copyWith(tab: tab, material: const AsyncLoading(), inputs: const [], results: const [], submitFailed: false);
-    final uid = ref.read(currentChildIdProvider);
     final repo = ref.read(centerRepositoryProvider);
     final result = await AsyncValue.guard(
       () => tab == CenterTab.listening ? repo.listening(uid) : repo.reading(uid),
     );
-    if (!ref.mounted || token != _loadToken) return;
+    if (_stale(token, uid)) return;
     final count = result.value?.questions.length ?? 0;
     state = state.copyWith(
       material: result,
@@ -146,8 +161,9 @@ class CenterController extends Notifier<CenterState> {
   }
 
   Future<void> answer(int index, String input) async {
+    final uid = _uid;
     final m = state.material.value;
-    if (m == null || index >= m.questions.length || state.results[index] != null) return;
+    if (uid == null || m == null || index >= m.questions.length || state.results[index] != null) return;
     final q = m.questions[index];
     final ok = isCorrectAnswer(input, q.answer);
     final results = [...state.results]..[index] = ok;
@@ -155,17 +171,16 @@ class CenterController extends Notifier<CenterState> {
     state = state.copyWith(results: results, inputs: inputs);
     if (ok) state = state.withMessage('回答正确！');
     // 与错题收录同时发起提交：收录期间离开/切 Tab 不能清掉已完成任务的提交
-    final recorded = ok ? null : _recordWrong(q, input);
-    await _maybeSubmitTask(after: recorded);
-    await recorded;
+    await _submitAndReport(wrong: ok ? null : _recordWrong(q, input, uid));
   }
 
-  Future<void> _recordWrong(CenterQuestion q, String input) async {
+  /// 返回提示文案；结果已过期（切 Tab / 换孩子）时返回 null
+  Future<String?> _recordWrong(CenterQuestion q, String input, int uid) async {
     final token = _loadToken;
     String msg;
     try {
       await ref.read(centerRepositoryProvider).submitWrong(
-            userId: ref.read(currentChildIdProvider),
+            userId: uid,
             question: q.question,
             yourAnswer: input,
             correctAnswer: q.answer,
@@ -175,11 +190,29 @@ class CenterController extends Notifier<CenterState> {
     } catch (_) {
       msg = '答错了（收录错题本失败，请稍后重试）';
     }
-    if (ref.mounted && token == _loadToken) state = state.withMessage(msg);
+    return _stale(token, uid) ? null : msg;
   }
 
-  /// [after] 完成后才写提交结果提示，保证它不被错题收录提示覆盖
-  Future<void> _maybeSubmitTask({Future<void>? after}) async {
+  /// 满足条件时提交待提交任务，再显示一条提示：最后一题答错时与 [wrong] 的收录结果合并
+  Future<void> _submitAndReport({Future<String?>? wrong}) async {
+    final uid = _uid;
+    if (uid == null) return;
+    final submit = await _submitPending(uid);
+    final wrongMsg = wrong == null ? null : await wrong;
+    if (!ref.mounted || _uid != uid) return;
+    final submitMsg = switch (submit) {
+      null => null,
+      (ok: true, current: _, taskId: _) => wrong == null ? '已提交，等待家长确认' : '任务已提交，等待家长确认',
+      (ok: false, current: true, taskId: _) => '提交任务失败，请稍后重试',
+      (ok: false, current: false, taskId: _) => '提交任务失败，请回首页重新开始该任务',
+    };
+    final text = [?wrongMsg, ?submitMsg].join('；');
+    if (text.isNotEmpty) state = state.withMessage(text);
+    if (submit != null && state.pending != null && state.pending!.taskId != submit.taskId) await _submitAndReport();
+  }
+
+  /// 请求返回后立即更新提交状态并刷新首页；提示由调用方统一显示。未提交或已换孩子时返回 null
+  Future<_SubmitResult?> _submitPending(int uid) async {
     final m = state.material.value;
     final pending = state.pending;
     final answered = state.results.where((r) => r != null).length;
@@ -190,7 +223,7 @@ class CenterController extends Notifier<CenterState> {
       answeredCount: answered,
       submitting: state.submitting,
     )) {
-      return;
+      return null;
     }
     final taskId = pending!.taskId;
     state = state.copyWith(submitting: true, submitFailed: false);
@@ -201,14 +234,13 @@ class CenterController extends Notifier<CenterState> {
     } catch (_) {
       // 失败时保留待提交任务，交给「重新提交」
     }
-    if (after != null) await after;
-    if (!ref.mounted) return;
+    if (!ref.mounted || _uid != uid) return null;
     final current = state.pending?.taskId == taskId;
     state = state.copyWith(
       submitting: false,
       pending: ok && current ? () => null : null,
       submitFailed: !ok && current,
-    ).withMessage(ok ? '已提交，等待家长确认' : '提交任务失败，请稍后重试');
+    );
     if (ok) {
       try {
         unawaited(ref.read(homeControllerProvider.notifier).reload());
@@ -216,7 +248,7 @@ class CenterController extends Notifier<CenterState> {
         // 首页刷新失败不影响提交结果
       }
     }
-    if (state.pending != null && state.pending!.taskId != taskId) await _maybeSubmitTask();
+    return (taskId: taskId, ok: ok, current: current);
   }
 }
 

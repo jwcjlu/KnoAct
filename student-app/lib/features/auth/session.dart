@@ -23,5 +23,5 @@ class SessionNotifier extends AsyncNotifier<Child?> {
 
 final sessionProvider = AsyncNotifierProvider<SessionNotifier, Child?>(SessionNotifier.new);
 
-/// 已登录孩子的 id；仅在登录后的页面使用。
-final currentChildIdProvider = Provider<int>((ref) => ref.watch(sessionProvider).value!.id);
+/// 已登录孩子的 id；未登录（含退出登录的过渡期间）为 null
+final currentChildIdProvider = Provider<int?>((ref) => ref.watch(sessionProvider).value?.id);

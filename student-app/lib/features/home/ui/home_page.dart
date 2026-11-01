@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/widgets.dart';
+import '../../auth/session.dart';
 import '../../center/center_controller.dart';
 import '../../center/center_logic.dart';
 import '../data/home_models.dart';
@@ -53,12 +54,16 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     ref.listen(homeControllerProvider, (prev, next) {
-      if (next.hasError && next.hasValue && !next.isLoading) showMessage(context, '刷新失败，请稍后重试');
+      final v = next.value;
+      final ownData = v != null && v.childId == ref.read(currentChildIdProvider);
+      if (next.hasError && ownData && !next.isLoading) showMessage(context, '刷新失败，请稍后重试');
     });
+    final uid = ref.watch(currentChildIdProvider);
     final async = ref.watch(homeControllerProvider);
-    final data = async.value;
+    // 换孩子时 provider 可能还带着上一个孩子的数据，不能显示
+    final data = async.value?.childId == uid ? async.value : null;
     if (data == null) {
-      if (async.hasError) {
+      if (async.hasError && !async.isLoading) {
         return ErrorCard(
           message: '首页加载失败，请检查网络或后端服务',
           onRetry: () => ref.read(homeControllerProvider.notifier).reload(),

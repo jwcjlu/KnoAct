@@ -18,9 +18,12 @@ class ControllableHomeRepository implements HomeRepository {
   final gates = <String, Completer<void>>{};
   Completer<bool>? redeemGate;
   int redeemCalls = 0;
+  int snapshotCalls = 0;
+  int balanceCalls = 0;
 
   @override
   Future<HomeSnapshot> snapshot(int userId, String subject) async {
+    snapshotCalls++;
     final gate = gates[subject];
     if (gate != null) await gate.future;
     if (failSubjects.contains(subject)) throw ApiException('boom');
@@ -36,7 +39,10 @@ class ControllableHomeRepository implements HomeRepository {
       ];
 
   @override
-  Future<int> balance(int userId) async => 350;
+  Future<int> balance(int userId) async {
+    balanceCalls++;
+    return 350;
+  }
 
   @override
   Future<bool> redeem(int userId, String device, int minutes) async {
@@ -129,6 +135,37 @@ void main() {
     final state = container.read(homeControllerProvider);
     expect(state.value?.subject, '语文');
     expect(state.value?.snapshot.lessonProgress.current, 3);
+  });
+
+  test('未登录时首页与积分保持加载，不请求也不报错', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = ControllableHomeRepository();
+    final c = ProviderContainer(overrides: [homeRepositoryProvider.overrideWithValue(repo)], retry: (_, _) => null);
+    addTearDown(c.dispose);
+    await c.read(sessionProvider.future);
+    c.listen(homeControllerProvider, (_, _) {});
+    c.listen(pointsProvider, (_, _) {});
+    await c.read(homeControllerProvider.notifier).reload();
+    await pumpEventQueue();
+    final home = c.read(homeControllerProvider);
+    final points = c.read(pointsProvider);
+    expect(home.isLoading, isTrue);
+    expect(home.hasError, isFalse);
+    expect(points.isLoading, isTrue);
+    expect(points.hasError, isFalse);
+    expect(repo.snapshotCalls, 0);
+    expect(repo.balanceCalls, 0);
+  });
+
+  test('退出登录后首页与积分不报错', () async {
+    final repo = ControllableHomeRepository();
+    final c = await makeContainer(repo);
+    c.listen(pointsProvider, (_, _) {});
+    await c.read(pointsProvider.future);
+    await c.read(sessionProvider.notifier).logout();
+    await pumpEventQueue();
+    expect(c.read(homeControllerProvider).hasError, isFalse);
+    expect(c.read(pointsProvider).hasError, isFalse);
   });
 
   testWidgets('兑换进行中重复点击只发一次请求', (tester) async {
