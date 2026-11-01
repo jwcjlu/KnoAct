@@ -16,21 +16,49 @@ abstract class SpeechPlayer {
   Future<void> dispose();
 }
 
+/// 音频字节播放的最小接口，测试中可替换
+abstract class AudioOutput {
+  Future<void> setSource(Uint8List bytes, String mimeType);
+
+  Future<void> resume();
+
+  Future<void> stop();
+
+  Future<void> dispose();
+}
+
+class _AudioPlayerOutput implements AudioOutput {
+  final _player = AudioPlayer();
+
+  @override
+  Future<void> setSource(Uint8List bytes, String mimeType) => _player.setSource(BytesSource(bytes, mimeType: mimeType));
+
+  @override
+  Future<void> resume() => _player.resume();
+
+  @override
+  Future<void> stop() => _player.stop();
+
+  @override
+  Future<void> dispose() => _player.dispose();
+}
+
 /// 优先播放后端 TTS 音频；后端为 fake、出错或网络失败时用设备朗读（对应旧版 speechSynthesis）
 class BackendSpeechPlayer implements SpeechPlayer {
-  BackendSpeechPlayer(this._api);
+  BackendSpeechPlayer(this._api, {AudioOutput Function()? audioFactory}) : _audioFactory = audioFactory ?? _AudioPlayerOutput.new;
 
   final ApiClient _api;
+  final AudioOutput Function() _audioFactory;
 
   // 延迟创建：仅读取 provider 时不触发平台通道
-  late final AudioPlayer _audio = AudioPlayer();
+  late final AudioOutput _audio = _audioFactory();
   late final FlutterTts _tts = FlutterTts();
   bool _audioCreated = false;
   bool _ttsCreated = false;
   int _seq = 0;
   bool _disposed = false;
 
-  AudioPlayer get _audioPlayer {
+  AudioOutput get _audioPlayer {
     _audioCreated = true;
     return _audio;
   }
@@ -62,7 +90,11 @@ class BackendSpeechPlayer implements SpeechPlayer {
       final r = await _api.getBytes('/api/tts/synthesize', query: {'text': text});
       if (seq != _seq) return;
       if (r.contentType.startsWith('audio/')) {
-        await _audioPlayer.play(BytesSource(Uint8List.fromList(r.bytes), mimeType: r.contentType.split(';').first.trim()));
+        final audio = _audioPlayer;
+        // 准备音源可能较慢；期间 stop()/dispose() 过则不再开始播放
+        await audio.setSource(Uint8List.fromList(r.bytes), r.contentType.split(';').first.trim());
+        if (seq != _seq || _disposed) return;
+        await audio.resume();
         return;
       }
     } catch (_) {

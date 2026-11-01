@@ -29,11 +29,6 @@ void main() {
     expect(m['数学'], (done: 1, total: 1));
   });
 
-  test('学科待完成数', () {
-    expect(remainingCount(tasks, '语文'), 1);
-    expect(remainingCount(tasks, '数学'), 0);
-  });
-
   test('按学科分组：无学科的任务出现在每个学科', () {
     final g = groupForSubject(tasks, '语文');
     expect(g.todo.map((t) => t.id), [2, 5]);

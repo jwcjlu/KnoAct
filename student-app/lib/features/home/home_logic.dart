@@ -20,9 +20,6 @@ Map<String, ({int done, int total})> subjectProgress(List<StudyTask> tasks) => {
         ),
     };
 
-int remainingCount(List<StudyTask> tasks, String subject) =>
-    tasks.where((t) => t.subject == subject && !isDone(t)).length;
-
 /// 与旧版一致：无学科的任务出现在每个学科下
 ({List<StudyTask> todo, List<StudyTask> done}) groupForSubject(List<StudyTask> tasks, String subject) {
   final list = tasks.where((t) => t.subject.isEmpty || t.subject == subject).toList();

@@ -145,9 +145,15 @@ class SubjectTabs extends StatelessWidget {
           key: ValueKey('subject-$s'),
           selected: s == current,
           onSelected: (_) => onSelect(s),
-          label: Text(remainingCount(tasks, s) > 0 ? '$s ${remainingCount(tasks, s)}' : '$s ✓'),
+          label: Text(_label(s)),
         ),
     ]);
+  }
+
+  /// 与任务列表同口径计数（无学科的任务计入每个学科）
+  String _label(String subject) {
+    final g = groupForSubject(tasks, subject);
+    return g.todo.isNotEmpty ? '$subject ${g.todo.length}' : (g.done.isNotEmpty ? '$subject ✓' : subject);
   }
 }
 

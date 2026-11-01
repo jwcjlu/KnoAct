@@ -7,6 +7,7 @@ import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/home/data/home_models.dart';
 import 'package:student_app/features/home/data/home_repository.dart';
 import 'package:student_app/features/home/ui/home_page.dart';
+import 'package:student_app/features/home/ui/home_sections.dart';
 
 class FakeHomeRepository implements HomeRepository {
   FakeHomeRepository({this.fail = false});
@@ -115,6 +116,24 @@ void main() {
     expect(repo.redeemCalls, 1);
     expect(find.text('已兑换平板 30 分钟，等待家长确认'), findsOneWidget);
     expect(find.text('当前 50 积分'), findsOneWidget);
+  });
+
+  testWidgets('学科标签与任务列表计数一致：无学科任务计入每个学科，无任务不显示 ✓', (tester) async {
+    StudyTask t(int id, String subject, String status) =>
+        StudyTask(id: id, subject: subject, taskType: 'custom', title: 't$id', detail: '', points: 20, submitStatus: status);
+    Future<void> pumpTabs(List<StudyTask> tasks) => tester.pumpWidget(MaterialApp(
+          home: Scaffold(body: SubjectTabs(tasks: tasks, current: '语文', onSelect: (_) {})),
+        ));
+
+    await pumpTabs([t(1, '语文', 'approved'), t(2, '英语', 'not_started'), t(3, '', 'not_started')]);
+    expect(find.text('语文 1'), findsOneWidget);
+    expect(find.text('英语 2'), findsOneWidget);
+    expect(find.text('数学 1'), findsOneWidget);
+
+    await pumpTabs([t(1, '语文', 'approved')]);
+    expect(find.text('语文 ✓'), findsOneWidget);
+    expect(find.text('英语'), findsOneWidget);
+    expect(find.text('数学'), findsOneWidget);
   });
 
   testWidgets('加载失败显示重试', (tester) async {
