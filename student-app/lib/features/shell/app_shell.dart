@@ -32,28 +32,30 @@ class _AppShellState extends ConsumerState<AppShell> {
     return LayoutBuilder(builder: (context, c) {
       if (c.maxWidth >= kWideBreakpoint) {
         return Scaffold(
-          body: Row(children: [
-            NavigationRail(
-              selectedIndex: index,
-              onDestinationSelected: _go,
-              labelType: NavigationRailLabelType.all,
-              leading: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('知学伴', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.blue)),
+          body: SafeArea(
+            child: Row(children: [
+              NavigationRail(
+                selectedIndex: index,
+                onDestinationSelected: _go,
+                labelType: NavigationRailLabelType.all,
+                leading: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Text('知学伴', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.blue)),
+                ),
+                destinations: [
+                  for (final d in _destinations)
+                    NavigationRailDestination(icon: Icon(d.icon), selectedIcon: Icon(d.selected), label: Text(d.label)),
+                ],
               ),
-              destinations: [
-                for (final d in _destinations)
-                  NavigationRailDestination(icon: Icon(d.icon), selectedIcon: Icon(d.selected), label: Text(d.label)),
-              ],
-            ),
-            const VerticalDivider(width: 1),
-            Expanded(
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1200), child: widget.navigationShell),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1200), child: widget.navigationShell),
+                ),
               ),
-            ),
-          ]),
+            ]),
+          ),
         );
       }
       return Scaffold(

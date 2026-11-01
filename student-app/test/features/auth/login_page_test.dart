@@ -59,4 +59,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('登录失败，请检查网络或后端服务'), findsOneWidget);
   });
+
+  testWidgets('小屏弹出键盘且显示错误时不溢出', (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    addTearDown(tester.view.reset);
+    await pumpLogin(tester, FakeAuthRepository(ApiException('boom')));
+    await tester.enterText(find.byType(TextField), '金同学');
+    await tester.pump();
+    final button = find.widgetWithText(FilledButton, '开始学习');
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('登录失败，请检查网络或后端服务'), findsOneWidget);
+  });
 }

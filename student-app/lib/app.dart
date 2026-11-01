@@ -11,7 +11,8 @@ class StudentApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // 会话（本地存储）读取完成前不建路由，避免先跳登录页再跳首页
-    if (ref.watch(sessionProvider).isLoading) {
+    final session = ref.watch(sessionProvider);
+    if (!session.hasValue && !session.hasError) {
       return MaterialApp(
         theme: buildTheme(),
         home: const Scaffold(body: Center(child: CircularProgressIndicator())),
