@@ -3,3 +3,7 @@ build/
 android/
 .idea/
 *.iml
+.flutter-plugins
+.flutter-plugins-dependencies
+test/
+README.md

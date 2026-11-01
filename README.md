@@ -166,7 +166,7 @@ python -m http.server 8767 --directory parent-web
 
 ### Flutter 学生端
 
-需要 Flutter 3.47+（Dart 3.13）。
+需要 Flutter 3.47.8+（Dart 3.13.7+）。
 
 ```bash
 cd student-app
