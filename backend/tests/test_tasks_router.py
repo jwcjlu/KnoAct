@@ -18,7 +18,7 @@ def _seed():
                   PdfDocument, User):
         db.query(model).delete()
     db.commit()
-    u = User(name="金宇轩", role="child")
+    u = User(name="金同学", role="child")
     db.add(u)
     db.flush()
     doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="")

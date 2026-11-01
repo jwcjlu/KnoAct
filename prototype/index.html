@@ -528,9 +528,9 @@
       <p>每天坚持 30 分钟，学习效果会更好哦。</p>
     </div>
     <div class="user-row">
-      <div class="avatar" id="userAvatar">轩</div>
+      <div class="avatar" id="userAvatar">同</div>
       <div style="flex:1">
-        <div class="user-name" id="userName">金宇轩</div>
+        <div class="user-name" id="userName">金同学</div>
         <div class="user-grade" id="userGrade">五年级</div>
       </div>
       <button onclick="toggleRole()" id="roleSwitch" style="font-size:11px;font-weight:700;color:var(--blue2);white-space:nowrap">家长端</button>
@@ -755,7 +755,7 @@ function renderHome(){
   <header class="page-head">
     <div>
       <div class="date">4 月 18 日，星期五</div>
-      <h1>下午好，金宇轩</h1>
+      <h1>下午好，金同学</h1>
     </div>
     <div class="head-right">
       <div class="points-pill"><span class="star">${icon('star',18)}</span>${points.toLocaleString()}<span style="font-size:12px;font-weight:400;color:#8a928d">积分</span></div>
@@ -1204,8 +1204,8 @@ function markMastered(id){ mastered.push(id); render(); toast('已标记掌握�
 function toggleRole(){
   isParent = !isParent;
   if(isParent){ parentTab='教材'; }
-  document.getElementById('userAvatar').textContent = isParent?'金':'轩';
-  document.getElementById('userName').textContent = isParent?'金爸爸':'金宇轩';
+  document.getElementById('userAvatar').textContent = isParent?'金':'同';
+  document.getElementById('userName').textContent = isParent?'金爸爸':'金同学';
   document.getElementById('userGrade').textContent = isParent?'家长':'五年级';
   document.getElementById('roleSwitch').textContent = isParent?'孩子端':'家长端';
   renderNav(); render();

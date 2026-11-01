@@ -1,5 +1,6 @@
 // ===== 知学伴 前端逻辑（对接真实后端 API）=====
-const API = 'http://127.0.0.1:8010';
+// 后端地址：config.js 可设置 window.KNOACT_API_BASE 覆盖（docker 部署设为 '' 走 nginx 同源反代）
+const API = window.KNOACT_API_BASE ?? 'http://127.0.0.1:8010';
 
 // ===== 图标 =====
 const ICONS = {
@@ -2628,8 +2629,8 @@ function bindImmersiveResize(){
 function toggleRole(){
   isParent = !isParent;
   if(isParent){ parentTab='教材'; loadParentData(); }
-  document.getElementById('userAvatar').textContent = isParent?'金':'轩';
-  document.getElementById('userName').textContent = isParent?'金爸爸':'金宇轩';
+  document.getElementById('userAvatar').textContent = isParent?'金':'同';
+  document.getElementById('userName').textContent = isParent?'金爸爸':'金同学';
   document.getElementById('userGrade').textContent = isParent?'家长':'五年级';
   document.getElementById('roleSwitch').textContent = isParent?'孩子端':'家长端';
   renderNav(); render();
@@ -3701,7 +3702,7 @@ async function testVoice(){
 // ===== 初始化 =====
 async function init(){
   // 登录默认孩子
-  const u = await api('/api/auth/login', {method:'POST', body:{name:'金宇轩'}});
+  const u = await api('/api/auth/login', {method:'POST', body:{name:'金同学'}});
   uid = u.id;
   document.getElementById('userName').textContent = u.name;
   await loadPoints();

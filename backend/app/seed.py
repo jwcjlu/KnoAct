@@ -20,6 +20,22 @@ def _migrate_learning_progress():
         # 唯一约束重建：仅当旧表无该约束时创建（SQLite 需重建表才能加约束，这里用轻量方案——若旧表已有重复行会失败，
         # 但当前每 user 仅一行，安全）。为稳妥，跳过约束重建，改用应用层「按 (user_id, subject) 查询」保证不串扰。
 
+DEFAULT_CHILD_NAME = "金同学"
+_LEGACY_CHILD_NAME = "金宇轩"
+
+
+def _rename_default_child(db):
+    """默认孩子改名迁移：已有「金宇轩」且尚无「金同学」时原地改名，保留 id 与全部学习数据。
+
+    前端按名字登录（/api/auth/login 找不到会新建用户），不迁移会让老数据挂在旧账号上。
+    """
+    if db.query(User).filter_by(name=DEFAULT_CHILD_NAME).first():
+        return
+    legacy = db.query(User).filter_by(name=_LEGACY_CHILD_NAME, role="child").first()
+    if legacy:
+        legacy.name = DEFAULT_CHILD_NAME
+
+
 # 生词：word -> (拼音, 释义)
 SEED_WORDS = {
     "徘徊": ("pái huái", "在一个地方来回走动，比喻犹豫不决"),
@@ -66,8 +82,9 @@ def seed():
     Base.metadata.create_all(bind=engine)
     _migrate_learning_progress()
     db = SessionLocal()
+    _rename_default_child(db)
     if db.query(User).count() == 0:
-        db.add(User(name="金宇轩", role="child"))
+        db.add(User(name=DEFAULT_CHILD_NAME, role="child"))
         db.add(User(name="金爸爸", role="parent"))
     if db.query(Lesson).count() == 0:
         doc = db.query(PdfDocument).first()

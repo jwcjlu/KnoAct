@@ -76,7 +76,7 @@ mastery: Mapped[float] = mapped_column(Float, default=0.0)
 
 - **`attempts` 存 JSON 数组**（不是单列分数）：`compute_mastery` 需要最近 5 次答题的时序做 recency 加权，存历史才能重算。与阶段 1 `options`、阶段 2 `Quiz.questions` 同风格。
 - **`mastery` 是缓存列**，每次答题后重算落库；`mastered` 是 `mastery >= 0.9` 的物化标记。
-- **`WordMastery.user_id` 补列 + 迁移**：老数据回填默认孩子（id=4 金宇轩）。这是阶段 1 就标记的架构缺口，本阶段一并修。
+- **`WordMastery.user_id` 补列 + 迁移**：老数据回填默认孩子（id=4 金同学）。这是阶段 1 就标记的架构缺口，本阶段一并修。
 
 ## 评分算法
 
@@ -159,7 +159,7 @@ POST /api/mastery/record
 `WordMastery` 加三列（`user_id` / `attempts` / `mastery`）：
 
 - 新列带默认值，SQLite 直接 `ALTER TABLE ADD COLUMN` 即可（或 `create_all` + 数据回填脚本）
-- 老行 `user_id` 回填为默认孩子 id（金宇轩 = 4）
+- 老行 `user_id` 回填为默认孩子 id（金同学 = 4）
 - `attempts` 老行初始 `[]`（历史不可回溯，从零开始累积）
 
 ## 测试

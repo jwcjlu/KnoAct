@@ -8,7 +8,7 @@ from ..models import RenderTask
 
 router = APIRouter(tags=["render"])
 
-RENDER_SERVICE_URL = "http://127.0.0.1:8011"
+from ..config import RENDER_SERVICE_URL
 
 
 @router.get("/api/render/{task_id}")

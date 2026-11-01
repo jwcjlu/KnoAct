@@ -1,0 +1,18 @@
+# 仓库根目录构建上下文（render_service 与 sandbox-runner 镜像使用）
+.git/
+.claude/
+.pytest_cache/
+**/__pycache__/
+**/*.pyc
+docs/
+prototype/
+frontend/
+backend/tests/
+backend/uploads/
+backend/*.db
+backend/*.db.*
+backend/_*.txt
+render_service/media/
+render_service/tests/
+*.db
+.env

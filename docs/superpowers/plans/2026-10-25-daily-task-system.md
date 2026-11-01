@@ -303,7 +303,7 @@ def _seed():
     db.query(Task).delete()
     db.query(User).delete()
     db.commit()
-    u = User(name="金宇轩", role="child")
+    u = User(name="金同学", role="child")
     db.add(u); db.commit()
     return u.id
 

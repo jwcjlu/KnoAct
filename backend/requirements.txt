@@ -6,6 +6,7 @@ pymysql==1.1.1
 pymupdf==1.24.14
 openai==1.59.7
 httpx==0.28.1
+requests==2.32.3
 python-multipart==0.0.20
 pytest==8.3.4
 apscheduler==3.10.4

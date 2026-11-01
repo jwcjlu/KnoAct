@@ -4,7 +4,7 @@ import uuid
 from ..core.context import UnifiedContext
 from ..core.tool_protocol import BaseTool, ToolParameter
 
-RENDER_SERVICE_URL = "http://127.0.0.1:8011"
+from ..config import RENDER_SERVICE_URL
 
 
 class RenderManimTool(BaseTool):

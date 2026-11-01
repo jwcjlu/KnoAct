@@ -1,0 +1,114 @@
+# ============================================
+# KnoAct（知学伴）docker-compose 部署
+# ============================================
+# 基础服务（默认启动）：
+#   backend   FastAPI 后端，SQLite 库与上传文件挂卷持久化
+#   frontend  nginx 托管静态页，并把 /api、/uploads 反代到 backend（同源，无跨域）
+# 动画渲染（可选，profile=render，镜像较大）：
+#   render          render_service，manim 动画 + TTS 旁白合轨
+#   sandbox-runner  执行 LLM 生成的 manim 代码的隔离容器（无外网、非 root、只读根 FS）
+#
+# 用法：
+#   cp .env.example .env                        # 按需修改端口等
+#   docker compose up -d --build                # 只起基础服务
+#   docker compose --profile render up -d --build   # 连同动画渲染一起起
+# 访问：http://<服务器IP>:${KNOACT_HTTP_PORT:-8080}
+# ============================================
+
+name: knoact
+
+x-db-url: &db-url ${DATABASE_URL:-sqlite:////data/zhixueban.db}
+
+services:
+  backend:
+    build: ./backend
+    image: knoact-backend:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: *db-url
+      KNOACT_RENDER_SERVICE_URL: http://render:8011
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - knoact-data:/data
+      - knoact-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    image: knoact-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "${KNOACT_HTTP_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  render:
+    profiles: ["render"]
+    build:
+      context: .
+      dockerfile: render_service/Dockerfile
+    image: knoact-render:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: *db-url
+      KNOACT_RENDER_SANDBOX: docker
+      KNOACT_RENDER_RUNNER_URL: http://sandbox-runner:8901
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - knoact-data:/data
+      - render-media:/app/render_service/media
+    networks:
+      - default
+      - render-net
+    depends_on:
+      backend:
+        condition: service_healthy
+      sandbox-runner:
+        condition: service_healthy
+
+  sandbox-runner:
+    profiles: ["render"]
+    build:
+      context: .
+      dockerfile: render_service/runner/Dockerfile
+    image: knoact-render-runner:latest
+    restart: unless-stopped
+    environment:
+      RUNNER_PORT: "8901"
+    volumes:
+      - render-media:/outputs
+    networks:
+      - render-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/runner
+    pids_limit: 256
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8901/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  default:
+  # internal：runner 只能与 render 通信，无法访问外网
+  render-net:
+    internal: true
+
+volumes:
+  knoact-data:
+  knoact-uploads:
+  render-media:

@@ -19,7 +19,8 @@
 services:
   sandbox-runner:
     build:
-      context: .
+      # 相对路径以本文件所在目录（render_service/）为基准，构建上下文需为仓库根目录
+      context: ..
       dockerfile: render_service/runner/Dockerfile
     container_name: knoact-render-runner
     restart: unless-stopped
@@ -27,7 +28,7 @@ services:
     # 只读挂载：manim 产物写回主服务的 media 目录（/outputs 是容器内可写根，
     # 映射到宿主机 render_service/media，主渲染服务从这里读回 mp4）。
     volumes:
-      - ./render_service/media:/outputs:rw
+      - ./media:/outputs:rw
 
     environment:
       - RUNNER_PORT=8901
