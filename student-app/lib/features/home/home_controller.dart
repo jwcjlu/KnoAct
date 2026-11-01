@@ -52,7 +52,7 @@ class HomeController extends AsyncNotifier<HomeData> {
   }
 
   Future<void> setSubject(String subject) async {
-    if (subject == state.value?.subject) return;
+    if (subject == _subject && subject == state.value?.subject) return;
     final previous = state.value?.subject ?? _subject;
     _subject = subject;
     await _refresh(subject);

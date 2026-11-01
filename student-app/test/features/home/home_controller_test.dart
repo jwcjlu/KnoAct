@@ -117,6 +117,20 @@ void main() {
     expect(state.value?.snapshot.lessonProgress.current, 5);
   });
 
+  test('切换数学请求中点回语文：最终显示语文', () async {
+    final repo = ControllableHomeRepository();
+    final container = await makeContainer(repo);
+    final notifier = container.read(homeControllerProvider.notifier);
+    final mathGate = repo.gates['数学'] = Completer<void>();
+    final slowMath = notifier.setSubject('数学');
+    await notifier.setSubject('语文');
+    mathGate.complete();
+    await slowMath;
+    final state = container.read(homeControllerProvider);
+    expect(state.value?.subject, '语文');
+    expect(state.value?.snapshot.lessonProgress.current, 3);
+  });
+
   testWidgets('兑换进行中重复点击只发一次请求', (tester) async {
     final repo = ControllableHomeRepository();
     await pumpHome(tester, repo);
