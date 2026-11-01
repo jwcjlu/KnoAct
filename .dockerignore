@@ -8,6 +8,7 @@ docs/
 prototype/
 frontend/
 parent-web/
+student-app/
 backend/tests/
 backend/uploads/
 backend/*.db

@@ -5,7 +5,8 @@
 #   backend     FastAPI 后端，SQLite 库与上传文件挂卷持久化
 #   frontend    旧版学生端 Web（冻结，Flutter 学生端完成后移除）
 #   parent-web  家长端
-#   两个前端均由 nginx 托管静态页，并把 /api、/uploads 反代到 backend（同源，无跨域）
+#   student-app Flutter 学生端（Web），功能对齐后替代 frontend
+#   三个前端均由 nginx 托管静态页，并把 /api、/uploads 反代到 backend（同源，无跨域）
 # 动画渲染（可选，profile=render，镜像较大）：
 #   render          render_service，manim 动画 + TTS 旁白合轨
 #   sandbox-runner  执行 LLM 生成的 manim 代码的隔离容器（无外网、非 root、只读根 FS）
@@ -14,7 +15,7 @@
 #   cp .env.example .env                        # 按需修改端口等
 #   docker compose up -d --build                # 只起基础服务
 #   docker compose --profile render up -d --build   # 连同动画渲染一起起
-# 访问：学生端 http://<服务器IP>:${KNOACT_HTTP_PORT:-8080}，家长端 http://<服务器IP>:${KNOACT_PARENT_PORT:-8081}
+# 访问：学生端（Flutter）http://<服务器IP>:${KNOACT_STUDENT_PORT:-8082}，旧版学生端 :${KNOACT_HTTP_PORT:-8080}，家长端 :${KNOACT_PARENT_PORT:-8081}
 # ============================================
 
 name: knoact
@@ -56,6 +57,16 @@ services:
     restart: unless-stopped
     ports:
       - "${KNOACT_PARENT_PORT:-8081}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  student-app:
+    build: ./student-app
+    image: knoact-student-app:latest
+    restart: unless-stopped
+    ports:
+      - "${KNOACT_STUDENT_PORT:-8082}:80"
     depends_on:
       backend:
         condition: service_healthy

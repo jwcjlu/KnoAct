@@ -27,7 +27,8 @@
 ```
 浏览器
   │
-  ├─▶ frontend（旧版学生端 Web）────┐
+  ├─▶ student-app（Flutter 学生端）─┐
+  ├─▶ frontend（旧版学生端 Web）────┤
   │                                 ├─/api、/uploads─▶  backend（FastAPI）
   └─▶ parent-web（家长端）──────────┘                   │
                                                         │  SQLAlchemy：SQLite（默认）/ MySQL
@@ -50,6 +51,7 @@
 backend/          FastAPI 后端（app/ 业务代码，tests/ 测试）
 frontend/         旧版学生端 Web（冻结，Flutter 学生端完成后移除）
 parent-web/       家长端（原生 JS 静态页，独立部署）
+student-app/      Flutter 学生端（Web + Android，逐步替代 frontend/）
 render_service/   动画渲染服务与 sandbox runner
 docs/             设计与实现计划
 prototype/        早期交互原型
@@ -70,10 +72,10 @@ git clone https://github.com/jwcjlu/KnoAct.git
 cd KnoAct
 cp .env.example .env            # 按需修改端口、数据库等
 
-docker compose up -d --build    # 启动后端 + 学生端 + 家长端
+docker compose up -d --build    # 启动后端 + 学生端（Flutter 与旧版）+ 家长端
 ```
 
-浏览器访问学生端 `http://<服务器IP>:8080`、家长端 `http://<服务器IP>:8081`（端口分别由 `.env` 中的 `KNOACT_HTTP_PORT`、`KNOACT_PARENT_PORT` 决定）。
+浏览器访问 Flutter 学生端 `http://<服务器IP>:8082`、旧版学生端 `http://<服务器IP>:8080`、家长端 `http://<服务器IP>:8081`（端口分别由 `.env` 中的 `KNOACT_STUDENT_PORT`、`KNOACT_HTTP_PORT`、`KNOACT_PARENT_PORT` 决定）。Flutter 学生端镜像构建时会下载约 1.5 GB 的 Flutter SDK（走 `storage.flutter-io.cn` 镜像），首次构建较慢。
 
 首次启动会自动建表并写入演示数据（孩子「金同学」、家长「金爸爸」）。AI 默认是 `fake` 兜底模式，打开家长端 →「设置」配置真实的模型与密钥后，出题、判分、对话等 AI 能力才会生效。
 
@@ -96,6 +98,7 @@ docker compose --profile render up -d --build
 | --- | --- | --- |
 | `frontend` | 旧版学生端 Web，nginx 托管并反代 `/api`、`/uploads` | 对外 `8080` |
 | `parent-web` | 家长端，nginx 托管并反代 `/api`、`/uploads` | 对外 `8081` |
+| `student-app` | Flutter 学生端（Web），nginx 托管并反代 `/api`、`/uploads` | 对外 `8082` |
 | `backend` | FastAPI 后端 | 仅内部 `8010` |
 | `render` | 动画渲染服务（profile `render`） | 仅内部 `8011` |
 | `sandbox-runner` | manim 隔离执行（profile `render`） | 仅内部 `8901` |
@@ -161,6 +164,20 @@ python -m http.server 8767 --directory parent-web
 
 访问 `http://127.0.0.1:8767`。家长端默认连接 `http://127.0.0.1:8010`；后端部署在别处时，在 `parent-web/config.js` 中设置 `window.KNOACT_API_BASE`。
 
+### Flutter 学生端
+
+需要 Flutter 3.47+（Dart 3.13）。
+
+```bash
+cd student-app
+flutter pub get
+flutter run -d chrome                                            # Web，连本地后端 127.0.0.1:8010
+flutter run -d emulator-5554 --dart-define=API_BASE=http://10.0.2.2:8010   # 安卓模拟器
+flutter test && flutter analyze
+```
+
+国内网络先设置环境变量 `PUB_HOSTED_URL=https://pub.flutter-io.cn`、`FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn`。不传 `API_BASE` 时连 `http://127.0.0.1:8010`；`--dart-define=API_BASE=`（空值）时 Web 走页面同源（docker 部署即如此，由 nginx 反代 `/api`、`/uploads`）。
+
 ### 动画渲染服务
 
 见 [render_service/README.md](render_service/README.md)，本地需要 manim、ffmpeg 与 LaTeX。
@@ -175,6 +192,7 @@ python -m http.server 8767 --directory parent-web
 | `KNOACT_RENDER_RUNNER_URL` | `http://localhost:8901`（容器内为 `http://sandbox-runner:8901`） | sandbox runner 地址 |
 | `KNOACT_HTTP_PORT` | `8080` | docker 部署的学生端（旧版 Web）对外端口 |
 | `KNOACT_PARENT_PORT` | `8081` | docker 部署的家长端对外端口 |
+| `KNOACT_STUDENT_PORT` | `8082` | docker 部署的 Flutter 学生端对外端口 |
 | `TZ` | `Asia/Shanghai` | 时区，影响每日任务生成时间 |
 
 AI、TTS 的 provider 与密钥以及学习配置不走环境变量，在家长端页面配置后保存在数据库中。
