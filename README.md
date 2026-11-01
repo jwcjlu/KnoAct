@@ -27,8 +27,9 @@
 ```
 浏览器
   │
-  ▼
-frontend（原生 JS 单页 + pdf.js）  ──/api、/uploads──▶  backend（FastAPI）
+  ├─▶ frontend（旧版学生端 Web）────┐
+  │                                 ├─/api、/uploads─▶  backend（FastAPI）
+  └─▶ parent-web（家长端）──────────┘                   │
                                                         │  SQLAlchemy：SQLite（默认）/ MySQL
                                                         │  AI / TTS provider 抽象（未配置时 fake 兜底）
                                                         ▼
@@ -144,7 +145,7 @@ python -m uvicorn app.main:app --port 8010 --reload
 
 健康检查：`http://127.0.0.1:8010/health`
 
-### 前端
+### 学生端（旧版 Web）
 
 ```bash
 python -m http.server 8766 --directory frontend
