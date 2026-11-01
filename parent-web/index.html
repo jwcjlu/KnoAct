@@ -830,7 +830,10 @@
   .child-select select:disabled{opacity:.6}
   .child-empty{font-size:13px;color:#8e9691}
   .parent-tabs-narrow{display:none}
-  @media(max-width:1024px){ .parent-tabs-narrow{display:flex;flex-wrap:wrap} }
+  @media(max-width:1024px){
+    .parent-banner{flex-wrap:wrap;gap:12px}
+    .parent-tabs-narrow{display:flex;flex-wrap:wrap;order:3;flex-basis:100%}
+  }
 </style>
 </head>
 <body>

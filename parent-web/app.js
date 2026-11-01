@@ -63,7 +63,9 @@ let reportRows = [];
 let masteryReport = null;
 async function loadMasteryReport(){
   if(!uid){ masteryReport = null; return null; }
-  masteryReport = await api(`/api/mastery/report?user_id=${uid}`);
+  const u = uid;
+  const report = await api(`/api/mastery/report?user_id=${u}`);
+  if(u === uid) masteryReport = report;
   return masteryReport;
 }
 let configMap = {};
@@ -134,7 +136,8 @@ function render(){
 // ---- 当前孩子 ----
 async function loadChildren(){
   const list = await api('/api/users?role=child');
-  children = Array.isArray(list) ? list : [];
+  if(!Array.isArray(list)) throw new Error('孩子列表接口返回异常');
+  children = list;
   let saved = null;
   try{ saved = Number(localStorage.getItem(CHILD_KEY)); }catch(e){}
   const hit = children.find(c => c.id === saved);
@@ -187,11 +190,15 @@ async function loadKnowledge(){
 }
 async function loadGoals(){
   if(!uid){ goalRows = []; return; }
-  goalRows = await api(`/api/goals?user_id=${uid}`);
+  const u = uid;
+  const rows = await api(`/api/goals?user_id=${u}`);
+  if(u === uid) goalRows = rows;
 }
 async function loadReport(){
   if(!uid){ reportRows = []; return; }
-  reportRows = await api(`/api/mistakes/report?user_id=${uid}`);
+  const u = uid;
+  const rows = await api(`/api/mistakes/report?user_id=${u}`);
+  if(u === uid) reportRows = rows;
 }
 async function loadConfig(){
   configMap = await api('/api/config');
@@ -371,8 +378,9 @@ async function loadParentTasks(){
     const t = new Date();
     parentTaskDate = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
   }
-  parentTasks = await api(`/api/tasks?user_id=${uid}&date=${parentTaskDate}&role=parent`);
-  if(!Array.isArray(parentTasks)) parentTasks = [];
+  const u = uid;
+  const tasks = await api(`/api/tasks?user_id=${u}&date=${parentTaskDate}&role=parent`);
+  if(u === uid) parentTasks = Array.isArray(tasks) ? tasks : [];
 }
 const TASK_TYPE_LABEL = {
   dictation:'听写', knowledge:'基础练习', review:'复习',
@@ -1238,11 +1246,12 @@ async function testVoice(){
 
 // ===== 初始化 =====
 async function init(){
-  try{ await loadChildren(); }
-  catch(e){ children = []; uid = null; toast('无法连接后端服务，请检查后端是否启动'); }
-  try{ await loadConfig(); }catch(e){}
   renderNav();
+  try{ await loadChildren(); }
+  catch(e){ children = []; uid = null; toast('无法获取孩子列表，请检查后端服务'); }
+  try{ await loadConfig(); }catch(e){}
   try{ await loadParentData(); }catch(e){}
+  if(!Array.isArray(pdfDocs)) pdfDocs = [];
   render();
 }
 
