@@ -14,6 +14,8 @@
 
 **家长端**
 
+家长端为独立应用，顶部可切换当前孩子。
+
 - **教材**：上传 PDF，自动拆课（语文按课、数学按单元）并提取内容
 - **知识点 / 题目审核台**：审核 AI 生成的知识点与题目
 - **目标 / 任务 / 报告**：学习目标、每日任务、掌握度报告
@@ -45,7 +47,8 @@ frontend（原生 JS 单页 + pdf.js）  ──/api、/uploads──▶  backend
 
 ```
 backend/          FastAPI 后端（app/ 业务代码，tests/ 测试）
-frontend/         前端静态页（index.html、app.js、config.js、vendor/pdfjs）
+frontend/         旧版学生端 Web（冻结，Flutter 学生端完成后移除）
+parent-web/       家长端（原生 JS 静态页，独立部署）
 render_service/   动画渲染服务与 sandbox runner
 docs/             设计与实现计划
 prototype/        早期交互原型
@@ -69,9 +72,9 @@ cp .env.example .env            # 按需修改端口、数据库等
 docker compose up -d --build    # 启动后端 + 前端
 ```
 
-浏览器访问 `http://<服务器IP>:8080`（端口由 `.env` 中的 `KNOACT_HTTP_PORT` 决定）。
+浏览器访问学生端 `http://<服务器IP>:8080`、家长端 `http://<服务器IP>:8081`（端口分别由 `.env` 中的 `KNOACT_HTTP_PORT`、`KNOACT_PARENT_PORT` 决定）。
 
-首次启动会自动建表并写入演示数据（孩子「金同学」、家长「金爸爸」）。AI 默认是 `fake` 兜底模式，切到家长端 →「设置」配置真实的模型与密钥后，出题、判分、对话等 AI 能力才会生效。
+首次启动会自动建表并写入演示数据（孩子「金同学」、家长「金爸爸」）。AI 默认是 `fake` 兜底模式，打开家长端 →「设置」配置真实的模型与密钥后，出题、判分、对话等 AI 能力才会生效。
 
 ### 启用动画渲染（可选）
 
@@ -90,7 +93,8 @@ docker compose --profile render up -d --build
 
 | 服务 | 说明 | 端口 |
 | --- | --- | --- |
-| `frontend` | nginx 托管静态页，并把 `/api`、`/uploads` 反代到后端 | 对外 `8080` |
+| `frontend` | 旧版学生端 Web，nginx 托管并反代 `/api`、`/uploads` | 对外 `8080` |
+| `parent-web` | 家长端，nginx 托管并反代 `/api`、`/uploads` | 对外 `8081` |
 | `backend` | FastAPI 后端 | 仅内部 `8010` |
 | `render` | 动画渲染服务（profile `render`） | 仅内部 `8011` |
 | `sandbox-runner` | manim 隔离执行（profile `render`） | 仅内部 `8901` |
@@ -148,6 +152,14 @@ python -m http.server 8766 --directory frontend
 
 访问 `http://127.0.0.1:8766`。前端默认连接 `http://127.0.0.1:8010`；后端部署在别处时，在 `frontend/config.js` 中设置 `window.KNOACT_API_BASE`。修改 `app.js` 后把 `index.html` 里 `app.js?v=` 的版本号加 1，避免浏览器缓存旧脚本。
 
+### 家长端
+
+```bash
+python -m http.server 8767 --directory parent-web
+```
+
+访问 `http://127.0.0.1:8767`。家长端默认连接 `http://127.0.0.1:8010`；后端部署在别处时，在 `parent-web/config.js` 中设置 `window.KNOACT_API_BASE`。
+
 ### 动画渲染服务
 
 见 [render_service/README.md](render_service/README.md)，本地需要 manim、ffmpeg 与 LaTeX。
@@ -160,7 +172,8 @@ python -m http.server 8766 --directory frontend
 | `KNOACT_RENDER_SERVICE_URL` | 本地 `http://127.0.0.1:8011`；容器 `http://render:8011` | 渲染服务地址 |
 | `KNOACT_RENDER_SANDBOX` | `subprocess`（容器内为 `docker`） | manim 执行方式：`subprocess` / `docker` / `off` |
 | `KNOACT_RENDER_RUNNER_URL` | `http://localhost:8901`（容器内为 `http://sandbox-runner:8901`） | sandbox runner 地址 |
-| `KNOACT_HTTP_PORT` | `8080` | docker 部署的对外端口 |
+| `KNOACT_HTTP_PORT` | `8080` | docker 部署的学生端（旧版 Web）对外端口 |
+| `KNOACT_PARENT_PORT` | `8081` | docker 部署的家长端对外端口 |
 | `TZ` | `Asia/Shanghai` | 时区，影响每日任务生成时间 |
 
 AI、TTS 的 provider 与密钥以及学习配置不走环境变量，在家长端页面配置后保存在数据库中。
@@ -175,5 +188,5 @@ python -m pytest render_service/tests   # 在仓库根目录执行
 ## 常见问题
 
 - **页面能打开但没有数据**：本地后端不在 `backend/` 目录下启动时，SQLite 相对路径会指向别处的空库。回到 `backend/` 启动，或给 `DATABASE_URL` 写绝对路径。
-- **出题、判分、对话没有真实 AI 效果**：AI provider 仍是 `fake`，到家长端「设置」配置模型与密钥。
+- **出题、判分、对话没有真实 AI 效果**：AI provider 仍是 `fake`，打开家长端 →「设置」配置模型与密钥。
 - **PDF 正文加载失败**：pdf.js 以 ES module 加载 `.mjs` 文件，自建的静态服务器需对 `.mjs` 返回 `application/javascript`（`frontend/nginx.conf` 已处理）。
