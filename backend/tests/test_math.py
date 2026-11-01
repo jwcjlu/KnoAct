@@ -1,6 +1,7 @@
 """数学出题 + 数值归一判分 + 进度按学科隔离。"""
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from conftest import make_lesson
 
 
 def test_grade_math_answer_normalization():
@@ -31,7 +32,7 @@ def test_math_material_endpoint(setup_db):
     from app.database import SessionLocal
     from app.routers.math import router as math_router
     s = SessionLocal()
-    s.add(Lesson(document_id=1, subject="数学", title="第 1 单元 · 加法", start_page=1, end_page=3, extract_status="done"))
+    make_lesson(s, subject="数学", title="第 1 单元 · 加法", extract_status="done")
     s.commit()
     lesson = s.query(Lesson).filter_by(subject="数学").first()
     s.add(Text(lesson_id=lesson.id, content="认识加法：3+5=8"))
@@ -97,8 +98,8 @@ def test_progress_advance_subject_isolation(setup_db):
     s = SessionLocal()
     s.add(User(name="晨晨", role="child")); s.commit()
     uid = s.query(User).filter_by(name="晨晨").first().id
-    s.add(Lesson(document_id=1, subject="语文", title="语文第1课", start_page=1, end_page=3))
-    s.add(Lesson(document_id=1, subject="数学", title="数学第1课", start_page=1, end_page=3))
+    make_lesson(s, subject="语文", title="语文第1课")
+    make_lesson(s, subject="数学", title="数学第1课")
     s.commit()
     math_lesson_id = s.query(Lesson).filter_by(subject="数学").first().id
     s.close()

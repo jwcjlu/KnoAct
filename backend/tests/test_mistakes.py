@@ -74,10 +74,14 @@ def test_record_quiz_mistake_dedup(setup_db):
 
 def test_record_quiz_mistake_distinct_kp_separate(setup_db):
     from app.services.quiz import record_quiz_mistake
+    from app.models import KnowledgePoint
     uid, wbid = _seed()
     db = SessionLocal()
-    record_quiz_mistake(db, uid, "Q", "A", "B", kp_id=1)
-    record_quiz_mistake(db, uid, "Q", "A", "B", kp_id=2)
+    kp1 = KnowledgePoint(subject="语文", category="修辞", content="比喻")
+    kp2 = KnowledgePoint(subject="语文", category="修辞", content="拟人")
+    db.add_all([kp1, kp2]); db.commit()
+    record_quiz_mistake(db, uid, "Q", "A", "B", kp_id=kp1.id)
+    record_quiz_mistake(db, uid, "Q", "A", "B", kp_id=kp2.id)
     rows = db.query(Mistake).filter_by(user_id=uid, question="Q").all()
     assert len(rows) == 2  # 不同 kp_id 不合并
     db.close()

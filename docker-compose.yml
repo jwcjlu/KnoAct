@@ -2,7 +2,8 @@
 # KnoAct（知学伴）docker-compose 部署
 # ============================================
 # 基础服务（默认启动）：
-#   backend     FastAPI 后端，SQLite 库与上传文件挂卷持久化
+#   mysql       MySQL 8.4，数据挂卷持久化，仅容器网络内可访问（不映射宿主端口）
+#   backend     FastAPI 后端，连 mysql；上传文件挂卷持久化
 #   frontend    旧版学生端 Web（冻结，Flutter 学生端完成后移除）
 #   parent-web  家长端
 #   student-app Flutter 学生端（Web），功能对齐后替代 frontend
@@ -12,7 +13,7 @@
 #   sandbox-runner  执行 LLM 生成的 manim 代码的隔离容器（无外网、非 root、只读根 FS）
 #
 # 用法：
-#   cp .env.example .env                        # 按需修改端口等
+#   cp .env.example .env                        # 必须改 MySQL 密码，按需修改端口等
 #   docker compose up -d --build                # 只起基础服务
 #   docker compose --profile render up -d --build   # 连同动画渲染一起起
 # 访问：学生端（Flutter）http://<服务器IP>:${KNOACT_STUDENT_PORT:-8082}，旧版学生端 :${KNOACT_HTTP_PORT:-8080}，家长端 :${KNOACT_PARENT_PORT:-8081}
@@ -20,9 +21,31 @@
 
 name: knoact
 
-x-db-url: &db-url ${DATABASE_URL:-sqlite:////data/zhixueban.db}
+# 密码含 @ : / ? # % 等字符时需 URL 编码，否则连接串解析出错
+x-db-url: &db-url mysql+pymysql://${MYSQL_USER:-knoact}:${MYSQL_PASSWORD:?请在 .env 设置 MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-zhixueban}?charset=utf8mb4
 
 services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-zhixueban}
+      MYSQL_USER: ${MYSQL_USER:-knoact}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 设置 MYSQL_PASSWORD}
+      TZ: ${TZ:-Asia/Shanghai}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - knoact-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   backend:
     build: ./backend
     image: knoact-backend:latest
@@ -32,8 +55,10 @@ services:
       KNOACT_RENDER_SERVICE_URL: http://render:8011
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      - knoact-data:/data
       - knoact-uploads:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=3)"]
       interval: 10s
@@ -84,7 +109,6 @@ services:
       KNOACT_RENDER_RUNNER_URL: http://sandbox-runner:8901
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      - knoact-data:/data
       - render-media:/app/render_service/media
     networks:
       - default
@@ -132,6 +156,6 @@ networks:
     internal: true
 
 volumes:
-  knoact-data:
+  knoact-mysql:
   knoact-uploads:
   render-media:

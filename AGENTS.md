@@ -15,8 +15,8 @@ KnoAct（知学伴）是一个面向小学生的 AI 学习伙伴：上传 PDF �
 `student-app/` 是 **Flutter 学生端**（Web + Android，Riverpod + go_router），逐步
 替代旧版；另有两个**单文件原生 JS** 应用（无框架，`render*()` 函数拼 HTML 字符串）：
 `frontend/` 是旧版学生端 Web（已冻结，将由 Flutter 学生 App 取代），`parent-web/`
-是独立的家长端。三者均直接调用后端 `/api`。数据库用 SQLite
-（生产可切 MySQL），所有 AI/语音能力都走可配置的 provider 抽象层，未配置时
+是独立的家长端。三者均直接调用后端 `/api`。数据库本地开发用 SQLite，
+docker-compose 部署用内置的 MySQL 8.4（长文本列在 MySQL 上为 MEDIUMTEXT），所有 AI/语音能力都走可配置的 provider 抽象层，未配置时
 回落本地 `fake` 兜底，保证任何环境下都能跑起来。
 
 ## Architecture（现状）

@@ -1,4 +1,12 @@
 from app.database import SessionLocal
+from conftest import make_user, make_lesson
+
+
+def _seed_user_lesson():
+    db = SessionLocal()
+    uid, lid = make_user(db).id, make_lesson(db).id
+    db.commit(); db.close()
+    return uid, lid
 
 
 def test_ask_req_accepts_sentences(setup_db):
@@ -9,8 +17,9 @@ def test_ask_req_accepts_sentences(setup_db):
 
 def test_turn_table_exists(setup_db):
     from app.models import Turn, ToolCall
+    uid, lid = _seed_user_lesson()
     db = SessionLocal()
-    turn = Turn(user_id=1, lesson_id=1, capability="chat", mode="chat",
+    turn = Turn(user_id=uid, lesson_id=lid, capability="chat", mode="chat",
                 question="你好", context="", status="done", final_answer="你好呀")
     db.add(turn); db.commit(); db.flush()
     assert turn.id is not None
@@ -46,11 +55,13 @@ def test_ask_api_persists_turn(setup_db):
     db = SessionLocal()
     db.add(ModelConfig(key="ai_provider", value="fake"))
     db.commit(); db.close()
-    r = client.post("/api/ask", json={"lesson_id": 1, "question": "唯一标记问题", "context": ""})
+    uid, lid = _seed_user_lesson()
+    r = client.post("/api/ask", json={"lesson_id": lid, "question": "唯一标记问题", "context": ""})
     assert r.status_code == 200
     db = SessionLocal()
     turn = db.query(Turn).filter_by(question="唯一标记问题").order_by(Turn.id.desc()).first()
     assert turn is not None
+    assert turn.user_id == uid and turn.lesson_id == lid
     assert turn.mode == "chat"
     assert turn.final_answer != ""          # _persist 写入了答案
     assert turn.status in ("done", "error")  # _persist 写入了状态
@@ -95,11 +106,26 @@ def test_ask_stream_persists_turn(setup_db):
     db = SessionLocal()
     db.add(ModelConfig(key="ai_provider", value="fake"))
     db.commit(); db.close()
-    r = client.post("/api/ask/stream", json={"lesson_id": 1, "question": "流式问题", "context": ""})
+    uid, lid = _seed_user_lesson()
+    r = client.post("/api/ask/stream", json={"lesson_id": lid, "question": "流式问题", "context": ""})
     assert r.status_code == 200
     db = SessionLocal()
     turn = db.query(Turn).filter_by(question="流式问题").first()
     assert turn is not None
+    assert turn.user_id == uid and turn.lesson_id == lid
+    db.close()
+
+
+def test_persist_turn_without_lesson_stores_null(setup_db):
+    from app.models import Turn
+    from app.core.context import UnifiedContext
+    from app.runtime.orchestrator import persist_turn
+    uid, _ = _seed_user_lesson()
+    ctx = UnifiedContext(user_id=uid, lesson_id=0, question="无课程提问")
+    persist_turn(ctx, "chat", "答案", [], [], {})
+    db = SessionLocal()
+    turn = db.query(Turn).filter_by(question="无课程提问").first()
+    assert turn is not None and turn.lesson_id is None
     db.close()
 
 

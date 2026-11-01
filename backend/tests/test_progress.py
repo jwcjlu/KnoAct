@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.routers.progress import router as progress_router
+from conftest import make_user, make_lesson
 
 
 def _client():
@@ -15,7 +16,7 @@ def test_advance_requires_60_percent(setup_db):
     s = SessionLocal()
     s.add(User(name="晨晨", role="child")); s.commit()
     uid = s.query(User).filter_by(name="晨晨").first().id
-    s.add(Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3, audit_status="approved"))
+    make_lesson(s, audit_status="approved")
     s.commit(); s.close()
     # 正确率 33% → 不推进
     resp = _client().post("/api/progress/advance", json={"user_id": uid, "correct": 1, "total": 3})
@@ -26,6 +27,11 @@ def test_advance_requires_60_percent(setup_db):
 
 
 def test_parent_adjust_progress(setup_db):
-    resp = _client().post("/api/progress/adjust", json={"user_id": 1, "lesson_id": 5})
+    from app.database import SessionLocal
+    s = SessionLocal()
+    uid = make_user(s).id
+    target = make_lesson(s).id
+    s.commit(); s.close()
+    resp = _client().post("/api/progress/adjust", json={"user_id": uid, "lesson_id": target})
     assert resp.status_code == 200
-    assert resp.json()["current_lesson_id"] == 5
+    assert resp.json()["current_lesson_id"] == target

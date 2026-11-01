@@ -2,7 +2,8 @@ import os
 from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from ..database import get_db, SessionLocal
-from ..models import PdfDocument, PdfPage, Lesson, WordBank, KnowledgePoint, Text, Note, WordMastery, Question
+from ..models import PdfDocument, PdfPage, Lesson, WordBank, KnowledgePoint, Text, Question, Textbook
+from ..services.cleanup import purge_lesson_content, purge_lessons
 from ..services.pdf_split import render_pages, detect_lessons_from_pdf
 from ..services.lesson_extract import extract_lesson_content
 from ..services.question_gen import generate_reading_questions
@@ -126,10 +127,7 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
                     continue
                 content = extract_lesson_content(storage_path, t["subject"], t["start_page"], t["end_page"], db)
                 # 清除本课旧数据后写入新结果
-                db.query(WordBank).filter_by(lesson_id=t["id"]).delete(synchronize_session=False)
-                db.query(KnowledgePoint).filter_by(lesson_id=t["id"]).delete(synchronize_session=False)
-                db.query(Text).filter_by(lesson_id=t["id"]).delete(synchronize_session=False)
-                db.query(Question).filter_by(lesson_id=t["id"]).delete(synchronize_session=False)
+                purge_lesson_content(db, [t["id"]])
                 for w in content["words"]:
                     db.add(WordBank(lesson_id=t["id"], subject=t["subject"], word=w["word"], extra=w["extra"]))
                 for p in content["points"]:
@@ -140,6 +138,9 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
                         db.add(Question(lesson_id=t["id"], qtype="reading", question=q["question"], answer=q["answer"]))
                 lesson.extract_status = "done"
                 db.commit()
+            except Exception:
+                db.rollback()
+                raise
             finally:
                 db.close()
         prog["done"] = len(tasks)
@@ -177,24 +178,9 @@ def resplit_document(document_id: int, db: Session = Depends(get_db)):
     if not os.path.exists(doc.storage_path):
         return {"error": "源文件不存在"}
 
-    old_lessons = db.query(Lesson).filter_by(document_id=document_id).all()
-    old_ids = [l.id for l in old_lessons]
-    # 先取旧课程下 word_bank id（掌握记录按 word_bank 关联，需在删除前拿到）
-    word_bank_ids = [w.id for w in db.query(WordBank).filter(WordBank.lesson_id.in_(old_ids)).all()] if old_ids else []
-
-    # 级联删除课程下的生词/知识点/课文/笔记/掌握记录
-    if old_ids:
-        db.query(WordBank).filter(WordBank.lesson_id.in_(old_ids)).delete(synchronize_session=False)
-        db.query(KnowledgePoint).filter(KnowledgePoint.lesson_id.in_(old_ids)).delete(synchronize_session=False)
-        db.query(Text).filter(Text.lesson_id.in_(old_ids)).delete(synchronize_session=False)
-        db.query(Note).filter(Note.lesson_id.in_(old_ids)).delete(synchronize_session=False)
-        db.query(Question).filter(Question.lesson_id.in_(old_ids)).delete(synchronize_session=False)
-    if word_bank_ids:
-        db.query(WordMastery).filter(WordMastery.word_bank_id.in_(word_bank_ids)).delete(synchronize_session=False)
-
-    # 直接删除课程行（无外键级联，手动清理）
-    for l in old_lessons:
-        db.delete(l)
+    old_ids = [r[0] for r in db.query(Lesson.id).filter_by(document_id=document_id).all()]
+    # 无外键级联：手动清理课程及引用它的行
+    purge_lessons(db, old_ids)
     db.flush()
 
     lessons = detect_lessons_from_pdf(doc.storage_path, doc.subject, db)
@@ -215,22 +201,12 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
     if not doc:
         return {"error": "not found"}
 
-    lessons = db.query(Lesson).filter_by(document_id=document_id).all()
-    lesson_ids = [l.id for l in lessons]
-    word_bank_ids = [w.id for w in db.query(WordBank).filter(WordBank.lesson_id.in_(lesson_ids)).all()] if lesson_ids else []
+    lesson_ids = [r[0] for r in db.query(Lesson.id).filter_by(document_id=document_id).all()]
 
     # 清理关联表
-    if lesson_ids:
-        db.query(WordBank).filter(WordBank.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
-        db.query(KnowledgePoint).filter(KnowledgePoint.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
-        db.query(Text).filter(Text.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
-        db.query(Note).filter(Note.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
-        db.query(Question).filter(Question.lesson_id.in_(lesson_ids)).delete(synchronize_session=False)
-    if word_bank_ids:
-        db.query(WordMastery).filter(WordMastery.word_bank_id.in_(word_bank_ids)).delete(synchronize_session=False)
-    for l in lessons:
-        db.delete(l)
+    purge_lessons(db, lesson_ids)
     db.query(PdfPage).filter_by(document_id=document_id).delete(synchronize_session=False)
+    db.query(Textbook).filter_by(document_id=document_id).delete(synchronize_session=False)
 
     # 记录磁盘文件路径，用于删除
     storage = doc.storage_path

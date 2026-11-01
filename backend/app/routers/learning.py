@@ -74,7 +74,8 @@ def dictation_grade(req: GradeReq, db: Session = Depends(get_db)):
         w = db.query(WordBank).filter_by(word=req.word).first()
     if w:
         from ..services.mastery import record_attempt as record_mastery
-        record_mastery(db, req.user_id, "word", w.id, correct)
+        # user_id 是可空外键：未传（0）时存 NULL
+        record_mastery(db, req.user_id or None, "word", w.id, correct)
     return {"correct": correct}
 
 class WrongWord(BaseModel):
@@ -279,9 +280,12 @@ def assignment_grade(req: AssignmentGradeReq, db: Session = Depends(get_db)):
     rate = correct / total if total else 0
     passed = rate >= threshold
     # 无论通过与否，逐题落知识点掌握度（掌握度反映真实答题历史）
+    # 知识点 id 来自 AI 出题，只认库里存在的
+    kp_ids = {a.get("knowledge_point_id") for a in answers if isinstance(a.get("knowledge_point_id"), int)}
+    valid_kp = {r[0] for r in db.query(KnowledgePoint.id).filter(KnowledgePoint.id.in_(kp_ids)).all()} if kp_ids else set()
     for a in answers:
         kpid = a.get("knowledge_point_id")
-        if isinstance(kpid, int):
+        if kpid in valid_kp:
             record_attempt(db, req.user_id, "knowledge", kpid, bool(a.get("is_correct")))
     if passed:
         lessons = db.query(Lesson).filter_by(subject=req.subject).order_by(Lesson.id).all()

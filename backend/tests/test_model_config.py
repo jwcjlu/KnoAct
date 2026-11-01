@@ -141,9 +141,11 @@ def test_task_reference_with_broken_profile_falls_back_to_llm():
     db.add(RoleBinding(role="task", profile_id=prof.id, mode="reference"))
     db.commit()
 
-    # 删掉连接，模拟「引用的连接被删掉了」
+    # 删掉连接，模拟「引用的连接被删掉了」：与 PUT /catalog 一致，先把引用它的档位置 NULL
+    db.query(ModelProfile).filter_by(connection_id=conn.id).update({"connection_id": None})
     db.delete(conn)
     db.commit()
+    assert db.get(RoleBinding, "task").profile_id == prof.id  # 档位与绑定仍在，只是连接没了
 
     r = resolve(db, "task")
     assert r.provider == "deepseek"

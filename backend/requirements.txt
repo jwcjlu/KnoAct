@@ -3,6 +3,8 @@ uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36
 pydantic==2.10.4
 pymysql==1.1.1
+# MySQL 8 默认 caching_sha2_password 认证，PyMySQL 需要它
+cryptography==45.0.6
 pymupdf==1.24.14
 openai==1.59.7
 httpx==0.28.1

@@ -3,10 +3,18 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Annotation
+from ..models import Annotation, User
 from ..services.ai import get_provider
 
 router = APIRouter(prefix="/api/annotations", tags=["annotations"])
+
+
+def _owner_id(db: Session, user_id: int | None) -> int | None:
+    """标注归属：优先请求里的有效用户，否则同 /api/ask 取第一个孩子（user_id 是外键，不能写 0）。"""
+    if user_id and db.get(User, user_id):
+        return user_id
+    child = db.query(User).filter_by(role="child").first()
+    return child.id if child else None
 
 
 @router.get("")
@@ -27,11 +35,15 @@ class AnnotationReq(BaseModel):
     color: str = "yellow"
     page_number: int = 1
     rects: str = ""                  # JSON 文本 [[x0,y0,x1,y1],...] 归一化坐标
+    user_id: int | None = None
 
 
 @router.post("")
 def add_annotation(req: AnnotationReq, db: Session = Depends(get_db)):
-    a = Annotation(lesson_id=req.lesson_id, kind=req.kind, quote=req.quote,
+    owner = _owner_id(db, req.user_id)
+    if owner is None:
+        return {"error": "没有孩子账号，无法保存标注"}
+    a = Annotation(lesson_id=req.lesson_id, user_id=owner, kind=req.kind, quote=req.quote,
                    note=req.note, color=req.color, page_number=req.page_number,
                    rects=req.rects)
     db.add(a); db.commit(); db.refresh(a)
@@ -53,11 +65,15 @@ class GlossaryReq(BaseModel):
     quote: str
     page_number: int = 1
     rects: str = ""
+    user_id: int | None = None
 
 
 @router.post("/glossary")
 def glossary(req: GlossaryReq, db: Session = Depends(get_db)):
     """选中词/词组 → AI 现查释义，落库为 kind='glossary' 标注。"""
+    owner = _owner_id(db, req.user_id)
+    if owner is None:
+        return {"error": "没有孩子账号，无法保存标注"}
     provider = get_provider(db)
     try:
         meaning = provider.generate(
@@ -67,7 +83,7 @@ def glossary(req: GlossaryReq, db: Session = Depends(get_db)):
     except Exception:
         # TODO: AI 释义失败时返回占位假释义，需改为真实兜底（词典查词）或提示用户
         meaning = f"「{req.quote}」的释义（示例）"
-    a = Annotation(lesson_id=req.lesson_id, kind="glossary", quote=req.quote,
+    a = Annotation(lesson_id=req.lesson_id, user_id=owner, kind="glossary", quote=req.quote,
                    note=meaning, color="green", page_number=req.page_number,
                    rects=req.rects)
     db.add(a); db.commit(); db.refresh(a)

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.routers.notes import router as notes_router
+from conftest import make_lesson
 
 
 def _client():
@@ -9,21 +10,26 @@ def _client():
     return TestClient(app)
 
 
-def test_add_note(setup_db):
-    from app.models import Lesson
+def _seed_lesson():
     from app.database import SessionLocal
     s = SessionLocal()
-    s.add(Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3))
+    lid = make_lesson(s).id
     s.commit(); s.close()
-    resp = _client().post("/api/notes", json={"lesson_id": 1, "author_role": "child", "content": "白鹭很常见反而被忽略", "anchor_text": "被人忘却了它的美"})
+    return lid
+
+
+def test_add_note(setup_db):
+    lid = _seed_lesson()
+    resp = _client().post("/api/notes", json={"lesson_id": lid, "author_role": "child", "content": "白鹭很常见反而被忽略", "anchor_text": "被人忘却了它的美"})
     assert resp.status_code == 200
     assert resp.json()["content"] == "白鹭很常见反而被忽略"
 
 
 def test_list_notes_by_lesson(setup_db):
+    lid = _seed_lesson()
     c = _client()
-    c.post("/api/notes", json={"lesson_id": 1, "author_role": "child", "content": "笔记A"})
-    resp = c.get("/api/notes?lesson_id=1")
+    c.post("/api/notes", json={"lesson_id": lid, "author_role": "child", "content": "笔记A"})
+    resp = c.get(f"/api/notes?lesson_id={lid}")
     assert resp.status_code == 200
     assert len(resp.json()) >= 1
 

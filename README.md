@@ -70,10 +70,12 @@ docker-compose.yml、.env.example   容器化部署
 ```bash
 git clone https://github.com/jwcjlu/KnoAct.git
 cd KnoAct
-cp .env.example .env            # 按需修改端口、数据库等
+cp .env.example .env            # 必须修改 MYSQL_PASSWORD、MYSQL_ROOT_PASSWORD；按需修改端口
 
-docker compose up -d --build    # 启动后端 + 学生端（Flutter 与旧版）+ 家长端
+docker compose up -d --build    # 启动 MySQL + 后端 + 学生端（Flutter 与旧版）+ 家长端
 ```
+
+后端会等 MySQL 健康检查通过后才启动；MySQL 首次初始化约需半分钟。
 
 浏览器访问 Flutter 学生端 `http://<服务器IP>:8082`、旧版学生端 `http://<服务器IP>:8080`、家长端 `http://<服务器IP>:8081`（端口分别由 `.env` 中的 `KNOACT_STUDENT_PORT`、`KNOACT_HTTP_PORT`、`KNOACT_PARENT_PORT` 决定）。Flutter 学生端镜像构建时会下载约 1.5 GB 的 Flutter SDK（走 `storage.flutter-io.cn` 镜像），首次构建较慢。
 
@@ -96,6 +98,7 @@ docker compose --profile render up -d --build
 
 | 服务 | 说明 | 端口 |
 | --- | --- | --- |
+| `mysql` | MySQL 8.4，库名默认 `zhixueban`，字符集 utf8mb4 | 仅内部 `3306` |
 | `frontend` | 旧版学生端 Web，nginx 托管并反代 `/api`、`/uploads` | 对外 `8080` |
 | `parent-web` | 家长端，nginx 托管并反代 `/api`、`/uploads` | 对外 `8081` |
 | `student-app` | Flutter 学生端（Web），nginx 托管并反代 `/api`、`/uploads` | 对外 `8082` |
@@ -105,7 +108,7 @@ docker compose --profile render up -d --build
 
 | 数据卷 | 内容 |
 | --- | --- |
-| `knoact-data` | SQLite 数据库 `/data/zhixueban.db` |
+| `knoact-mysql` | MySQL 数据目录 |
 | `knoact-uploads` | 上传的 PDF 与拆页图片 |
 | `render-media` | 渲染出的动画视频 |
 
@@ -118,20 +121,24 @@ git pull && docker compose up -d --build   # 更新版本（数据卷保留）
 docker compose down                        # 停止（保留数据卷）
 docker compose down -v                     # 停止并删除所有数据（慎用）
 
-# 备份数据库与上传文件
-docker run --rm -v knoact_knoact-data:/data -v knoact_knoact-uploads:/uploads -v "$PWD":/backup \
-  alpine tar czf /backup/knoact-backup-$(date +%F).tgz /data /uploads
+# 备份数据库
+docker compose exec mysql sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction "$MYSQL_DATABASE"' \
+  > knoact-db-$(date +%F).sql
+# 恢复数据库
+docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' < knoact-db-2026-11-01.sql
+# 备份上传文件
+docker run --rm -v knoact_knoact-uploads:/uploads -v "$PWD":/backup \
+  alpine tar czf /backup/knoact-uploads-$(date +%F).tgz /uploads
 ```
 
-### 使用 MySQL
+### 数据库
 
-在 `.env` 中设置 `DATABASE_URL`，后端和渲染服务会共用这个连接：
+docker 部署使用 compose 内置的 `mysql` 服务，连接串由 `.env` 里的 `MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_DATABASE` 拼出，后端与渲染服务共用。表结构由后端启动时自动创建。
 
-```bash
-DATABASE_URL=mysql+pymysql://user:password@mysql-host:3306/zhixueban?charset=utf8mb4
-```
-
-数据库需事先创建好，表结构由后端启动时自动创建。
+- 密码里含 `@ : / ? # %` 等字符时，要先做 URL 编码（例如 `@` 写成 `%40`），否则连接串解析出错。
+- MySQL 只在容器网络内可访问，没有映射到宿主机；需要从外部连接时，自行在 `mysql` 服务下加 `ports`。
+- 改用外部 MySQL：删掉 `mysql` 服务和后端的 `depends_on: mysql`，并把 `docker-compose.yml` 里的 `x-db-url` 改成外部地址。
+- 本地开发仍默认用 SQLite（见下文），不需要 MySQL。
 
 ## 本地开发
 
@@ -192,7 +199,9 @@ flutter test && flutter analyze
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `DATABASE_URL` | 本地 `sqlite:///./zhixueban.db`；容器 `sqlite:////data/zhixueban.db` | 数据库连接 |
+| `DATABASE_URL` | 本地 `sqlite:///./zhixueban.db`；docker 部署由 `MYSQL_*` 拼出 | 数据库连接 |
+| `MYSQL_DATABASE` / `MYSQL_USER` | `zhixueban` / `knoact` | docker 部署的 MySQL 库名与账号 |
+| `MYSQL_PASSWORD` / `MYSQL_ROOT_PASSWORD` | 无，必须设置 | docker 部署的 MySQL 密码 |
 | `KNOACT_RENDER_SERVICE_URL` | 本地 `http://127.0.0.1:8011`；容器 `http://render:8011` | 渲染服务地址 |
 | `KNOACT_RENDER_SANDBOX` | `subprocess`（容器内为 `docker`） | manim 执行方式：`subprocess` / `docker` / `off` |
 | `KNOACT_RENDER_RUNNER_URL` | `http://localhost:8901`（容器内为 `http://sandbox-runner:8901`） | sandbox runner 地址 |

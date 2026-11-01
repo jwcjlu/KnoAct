@@ -126,14 +126,19 @@ def persist_turn(ctx, capability_name, answer, citations, tool_events, results_b
     """落库 Turn + ToolCall。失败不阻断响应（对话是主链路，DB 是副产物）。"""
     import logging
     from ..database import SessionLocal
-    from ..models import Turn, ToolCall
+    from ..models import Turn, ToolCall, User, Lesson
 
     logger = logging.getLogger(__name__)
     db = SessionLocal()
     try:
+        # user_id / lesson_id 是外键：0 或不存在的 id 不能落库
+        if not ctx.user_id or db.get(User, ctx.user_id) is None:
+            logger.warning("persist turn skipped: user %s not found", ctx.user_id)
+            return
+        lesson_id = ctx.lesson_id if ctx.lesson_id and db.get(Lesson, ctx.lesson_id) else None
         status = "done" if answer else "error"
         turn = Turn(
-            user_id=ctx.user_id, lesson_id=ctx.lesson_id, capability=capability_name,
+            user_id=ctx.user_id, lesson_id=lesson_id, capability=capability_name,
             mode=ctx.mode, question=ctx.question, context=ctx.text,
             status=status, final_answer=answer,
             citations=json.dumps(citations, ensure_ascii=False),

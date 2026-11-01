@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import KnowledgePoint
+from ..services.cleanup import detach_points
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
@@ -39,6 +40,7 @@ def add_knowledge(req: KnowledgeReq, db: Session = Depends(get_db)):
 def delete_knowledge(point_id: int, db: Session = Depends(get_db)):
     p = db.get(KnowledgePoint, point_id)
     if p:
+        detach_points(db, [p.id])
         db.delete(p); db.commit()
         return {"ok": True}
     return {"ok": False, "error": "not found"}

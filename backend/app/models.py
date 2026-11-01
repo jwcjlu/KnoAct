@@ -1,7 +1,11 @@
 from datetime import datetime, date
 from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, Text as TextCls, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
+
+# MySQL 的 TEXT 上限 64KB（中文约 2 万字），课文/上下文等长文本在 MySQL 上用 MEDIUMTEXT
+LongText = TextCls().with_variant(MEDIUMTEXT(), "mysql")
 
 class User(Base):
     __tablename__ = "users"
@@ -57,7 +61,7 @@ class WordBank(Base):
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     subject: Mapped[str] = mapped_column(String(16))
     word: Mapped[str] = mapped_column(String(64))
-    extra: Mapped[str] = mapped_column(TextCls, default="")  # 拼音/音标/词性/释义，按学科
+    extra: Mapped[str] = mapped_column(LongText, default="")  # 拼音/音标/词性/释义，按学科
 
 class KnowledgePoint(Base):
     __tablename__ = "knowledge_points"
@@ -65,25 +69,25 @@ class KnowledgePoint(Base):
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)
     subject: Mapped[str] = mapped_column(String(16))
     category: Mapped[str] = mapped_column(String(32))
-    content: Mapped[str] = mapped_column(TextCls)
+    content: Mapped[str] = mapped_column(LongText)
 
 class Text(Base):
     __tablename__ = "texts"
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
-    content: Mapped[str] = mapped_column(TextCls)
+    content: Mapped[str] = mapped_column(LongText)
 
 class Question(Base):
     __tablename__ = "questions"
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     qtype: Mapped[str] = mapped_column(String(16), default="reading")   # knowledge | listening | reading | math
-    question: Mapped[str] = mapped_column(TextCls)
-    answer: Mapped[str] = mapped_column(TextCls, default="")
+    question: Mapped[str] = mapped_column(LongText)
+    answer: Mapped[str] = mapped_column(LongText, default="")
     subject: Mapped[str] = mapped_column(String(16), default="")        # 学科：语文/英语/数学
     date: Mapped[date] = mapped_column(Date, nullable=True)             # 题目归属日期（每日生成的题）
     status: Mapped[str] = mapped_column(String(16), default="published") # pending | published | rejected
-    extra: Mapped[str] = mapped_column(TextCls, default="")             # 附加数据 JSON
+    extra: Mapped[str] = mapped_column(LongText, default="")             # 附加数据 JSON
     task_type: Mapped[str] = mapped_column(String(16), default="reading") # knowledge | listening | reading | math
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -92,8 +96,8 @@ class Note(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     author_role: Mapped[str] = mapped_column(String(16))  # child | parent
-    content: Mapped[str] = mapped_column(TextCls)
-    anchor_text: Mapped[str] = mapped_column(TextCls, default="")
+    content: Mapped[str] = mapped_column(LongText)
+    anchor_text: Mapped[str] = mapped_column(LongText, default="")
     page_number: Mapped[int] = mapped_column(Integer, nullable=True)
     knowledge_point_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -104,13 +108,13 @@ class Annotation(Base):
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), default=0)
     kind: Mapped[str] = mapped_column(String(16))           # highlight | underline | note | glossary
-    quote: Mapped[str] = mapped_column(TextCls)             # 被选中的原文片段
-    note: Mapped[str] = mapped_column(TextCls, default="")  # 笔记内容 / 生词释义
+    quote: Mapped[str] = mapped_column(LongText)             # 被选中的原文片段
+    note: Mapped[str] = mapped_column(LongText, default="")  # 笔记内容 / 生词释义
     color: Mapped[str] = mapped_column(String(16), default="yellow")
     page_number: Mapped[int] = mapped_column(Integer, default=1)
     # 归一化矩形坐标（JSON 文本，如 [[x0,y0,x1,y1],...]，0~1 相对页宽高），
     # 用于在原文上精确铺高亮/下划线，对齐 DeepTutor 的 normalised rects 机制。
-    rects: Mapped[str] = mapped_column(TextCls, default="")
+    rects: Mapped[str] = mapped_column(LongText, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class WordMastery(Base):
@@ -122,7 +126,7 @@ class WordMastery(Base):
     is_weak: Mapped[bool] = mapped_column(Boolean, default=False)
     next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)  # 迁移回填
-    attempts: Mapped[str] = mapped_column(TextCls, default="[]")
+    attempts: Mapped[str] = mapped_column(LongText, default="[]")
     mastery: Mapped[float] = mapped_column(Float, default=0.0)
 
 class Mistake(Base):
@@ -130,9 +134,9 @@ class Mistake(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     source_type: Mapped[str] = mapped_column(String(32))  # dictation | review | listening | reading | goal
-    question: Mapped[str] = mapped_column(TextCls)
-    your_answer: Mapped[str] = mapped_column(TextCls)
-    correct_answer: Mapped[str] = mapped_column(TextCls)
+    question: Mapped[str] = mapped_column(LongText)
+    your_answer: Mapped[str] = mapped_column(LongText)
+    correct_answer: Mapped[str] = mapped_column(LongText)
     mistake_count: Mapped[int] = mapped_column(Integer, default=1)
     consecutive_correct: Mapped[int] = mapped_column(Integer, default=0)
     word_bank_id: Mapped[int] = mapped_column(ForeignKey("word_banks.id"), nullable=True)
@@ -159,7 +163,7 @@ class Goal(Base):
     __tablename__ = "goals"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    content: Mapped[str] = mapped_column(TextCls)
+    content: Mapped[str] = mapped_column(LongText)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | in_progress | done
     achieved_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
@@ -176,7 +180,7 @@ class ModelConfig(Base):
     __tablename__ = "model_config"
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str] = mapped_column(String(64), unique=True)   # ai_provider / ai_model / ai_key / tts_provider / tts_voice / tts_key / tts_speed / tts_repeat
-    value: Mapped[str] = mapped_column(TextCls, default="")
+    value: Mapped[str] = mapped_column(LongText, default="")
 
 class Task(Base):
     __tablename__ = "tasks"
@@ -190,7 +194,7 @@ class Task(Base):
     task_type: Mapped[str] = mapped_column(String(16))          # dictation|knowledge|review|reading|listening|custom
     title: Mapped[str] = mapped_column(String(255))
     detail: Mapped[str] = mapped_column(String(255), default="")
-    content: Mapped[str] = mapped_column(TextCls, default="")   # JSON 文本快照
+    content: Mapped[str] = mapped_column(LongText, default="")   # JSON 文本快照
     points: Mapped[int] = mapped_column(Integer, default=20)
     content_status: Mapped[str] = mapped_column(String(16), default="pending_review")  # pending_review|published
     submit_status: Mapped[str] = mapped_column(String(16), default="not_started")      # not_started|submitted|approved
@@ -208,7 +212,7 @@ class ModelConnection(Base):
     name: Mapped[str] = mapped_column(String(128), default="")
     base_url: Mapped[str] = mapped_column(String(512), default="")
     api_key: Mapped[str] = mapped_column(String(512), default="")
-    extra_headers: Mapped[str] = mapped_column(TextCls, default="")  # JSON 文本
+    extra_headers: Mapped[str] = mapped_column(LongText, default="")  # JSON 文本
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -220,7 +224,7 @@ class ModelProfile(Base):
     connection_id: Mapped[int] = mapped_column(ForeignKey("model_connections.id"), nullable=True)
     model: Mapped[str] = mapped_column(String(128), default="")
     name: Mapped[str] = mapped_column(String(128), default="")
-    options: Mapped[str] = mapped_column(TextCls, default="")  # JSON 文本
+    options: Mapped[str] = mapped_column(LongText, default="")  # JSON 文本
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -238,7 +242,7 @@ class Quiz(Base):
     id: Mapped[int] = mapped_column(primary_key=True)          # 即 quiz_id
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     user_id: Mapped[int] = mapped_column(Integer, default=0)
-    questions: Mapped[str] = mapped_column(TextCls)            # JSON：[{id,prompt,choices,correct_index,evidence}]
+    questions: Mapped[str] = mapped_column(LongText)            # JSON：[{id,prompt,choices,correct_index,evidence}]
     score: Mapped[int] = mapped_column(Integer, nullable=True) # None=未作答
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -249,7 +253,7 @@ class KnowledgeMastery(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     knowledge_point_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"))
-    attempts: Mapped[str] = mapped_column(TextCls, default="[]")  # JSON：[true, false, ...]
+    attempts: Mapped[str] = mapped_column(LongText, default="[]")  # JSON：[true, false, ...]
     mastery: Mapped[float] = mapped_column(Float, default=0.0)
     mastered: Mapped[bool] = mapped_column(Boolean, default=False)
     next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
@@ -264,11 +268,11 @@ class Turn(Base):
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)
     capability: Mapped[str] = mapped_column(String(32))   # chat | visualize | solve
     mode: Mapped[str] = mapped_column(String(16))          # 冗余存原始 mode
-    question: Mapped[str] = mapped_column(TextCls)
-    context: Mapped[str] = mapped_column(TextCls, default="")
+    question: Mapped[str] = mapped_column(LongText)
+    context: Mapped[str] = mapped_column(LongText, default="")
     status: Mapped[str] = mapped_column(String(16), default="running")  # running|done|error
-    final_answer: Mapped[str] = mapped_column(TextCls, default="")
-    citations: Mapped[str] = mapped_column(TextCls, default="[]")  # JSON 数组文本
+    final_answer: Mapped[str] = mapped_column(LongText, default="")
+    citations: Mapped[str] = mapped_column(LongText, default="[]")  # JSON 数组文本
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
@@ -280,8 +284,8 @@ class ToolCall(Base):
     turn_id: Mapped[int] = mapped_column(ForeignKey("turns.id"))
     step: Mapped[int] = mapped_column(Integer)
     tool_name: Mapped[str] = mapped_column(String(64))
-    args: Mapped[str] = mapped_column(TextCls, default="{}")   # JSON 文本
-    result: Mapped[str] = mapped_column(TextCls, default="{}")  # JSON 文本
+    args: Mapped[str] = mapped_column(LongText, default="{}")   # JSON 文本
+    result: Mapped[str] = mapped_column(LongText, default="{}")  # JSON 文本
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -292,10 +296,10 @@ class RenderTask(Base):
     task_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     turn_id: Mapped[int] = mapped_column(ForeignKey("turns.id"), nullable=True)
-    prompt: Mapped[str] = mapped_column(TextCls, default="")
-    narration: Mapped[str] = mapped_column(TextCls, default="")
+    prompt: Mapped[str] = mapped_column(LongText, default="")
+    narration: Mapped[str] = mapped_column(LongText, default="")
     status: Mapped[str] = mapped_column(String(16), default="submitted")
     video_url: Mapped[str] = mapped_column(String(255), default="")
-    error: Mapped[str] = mapped_column(TextCls, default="")
+    error: Mapped[str] = mapped_column(LongText, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

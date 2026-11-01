@@ -84,3 +84,25 @@ def test_generate_quiz_returns_503_when_ai_unconfigured(setup_db):
 def test_submit_quiz_expired_returns_409(setup_db):
     r = client.post("/api/quiz/submit", json={"quiz_id": 999999, "answers": []})
     assert r.status_code == 409
+
+
+def test_submit_quiz_ignores_unknown_knowledge_point(setup_db):
+    """AI 编造/已删除的知识点 id 不能落进外键列：错题照收，只是不关联知识点。"""
+    from app.models import KnowledgeMastery, Mistake
+    lid = _seed_lesson()
+    db = SessionLocal()
+    uid = db.query(User).first().id
+    q = {"id": "q1", "prompt": "白鹭像什么？", "choices": ["诗", "画", "歌", "书"],
+         "correct_index": 0, "evidence": "白鹭是一首精巧的诗", "knowledge_point_id": 999}
+    quiz = Quiz(lesson_id=lid, user_id=uid, questions=json.dumps([q], ensure_ascii=False))
+    db.add(quiz); db.commit(); qid = quiz.id
+    db.close()
+
+    r = client.post("/api/quiz/submit", json={"quiz_id": qid, "answers": [{"question_id": "q1", "selected_index": 1}]})
+    assert r.status_code == 200
+    assert r.json()["score"] == 0
+    db = SessionLocal()
+    assert db.query(KnowledgeMastery).count() == 0
+    m = db.query(Mistake).filter_by(user_id=uid).one()
+    assert m.knowledge_point_id is None and m.your_answer == "画"
+    db.close()

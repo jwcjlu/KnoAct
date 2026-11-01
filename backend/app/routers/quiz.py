@@ -82,6 +82,12 @@ def quiz_submit(req: QuizSubmitReq, db: Session = Depends(get_db)):
         if not isinstance(a.get("selected_index"), int):
             raise HTTPException(status_code=422, detail="选项无效")
     results = grade_answers(questions, req.answers)
+    # 题目里的知识点 id 由 AI 选出，可能已被删除或是编造的；只认库里存在的
+    kp_ids = {q.get("knowledge_point_id") for q in questions if isinstance(q.get("knowledge_point_id"), int)}
+    valid_kp = {r[0] for r in db.query(KnowledgePoint.id).filter(KnowledgePoint.id.in_(kp_ids)).all()} if kp_ids else set()
+    for q in questions:
+        if q.get("knowledge_point_id") not in valid_kp:
+            q["knowledge_point_id"] = None
     if quiz.user_id:
         from ..services.mastery import record_attempt as record_mastery
         for q, r in zip(questions, results):
@@ -126,10 +132,13 @@ def ask_questions(req: AskQuestionsReq, db: Session = Depends(get_db)):
 async def ask_reply(req: AskReplyReq, db: Session = Depends(get_db)):
     from ..core.context import UnifiedContext
     from ..runtime.orchestrator import route_to_capability
+    from ..models import User
     ctx_text = req.context or _lesson_text(db, req.lesson_id)
     replies_text = json.dumps(req.replies, ensure_ascii=False)
+    # 与 /api/ask 一致：尚无鉴权，先取第一个孩子作占位用户
+    child = db.query(User).filter_by(role="child").first()
     ctx = UnifiedContext(
-        user_id=0, lesson_id=req.lesson_id,
+        user_id=child.id if child else 0, lesson_id=req.lesson_id,
         question=f"学生对这些诊断性问题的回答：{replies_text}，请基于回答继续用小学生能懂的话讲解课文，涉及原文某句时在那句后标 [第N句]。",
         text=ctx_text,
         mode="chat",

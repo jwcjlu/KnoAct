@@ -1,4 +1,5 @@
 from app import models  # noqa: F401  ensure all models registered on Base.metadata
+from conftest import make_lesson
 
 
 def test_create_all_tables():
@@ -13,10 +14,8 @@ def test_create_all_tables():
 
 
 def test_word_bank_roundtrip(db):
-    from app.models import Lesson, WordBank
-    lesson = Lesson(document_id=1, subject="语文", title="第1课", start_page=1, end_page=3)
-    db.add(lesson)
-    db.flush()
+    from app.models import WordBank
+    lesson = make_lesson(db)
     db.add(WordBank(lesson_id=lesson.id, subject="语文", word="徘徊", extra="pái huái"))
     db.commit()
     got = db.query(WordBank).filter_by(word="徘徊").first()
@@ -27,7 +26,7 @@ def test_question_has_new_fields():
     from app.database import SessionLocal
     from app.models import Question
     db = SessionLocal()
-    q = Question(lesson_id=1, qtype="knowledge", question="测试题",
+    q = Question(lesson_id=make_lesson(db).id, qtype="knowledge", question="测试题",
                  subject="语文", status="pending", extra='{"keywords":["a"]}', task_type="knowledge")
     db.add(q); db.flush()
     assert q.subject == "语文"
