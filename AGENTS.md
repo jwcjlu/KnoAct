@@ -11,20 +11,24 @@
 
 KnoAct（知学伴）是一个面向小学生的 AI 学习伙伴：上传 PDF 教材 →
 自动拆课 → AI 提取生词/知识点/课文 → 孩子端做听写、听力、阅读、边读边问测验，
-家长端管理教材/目标/任务/规则。后端是 **FastAPI + SQLAlchemy**，前端分两个
-**单文件原生 JS** 应用（无框架，`render*()` 函数拼 HTML 字符串）：`frontend/`
-是旧版学生端 Web（已冻结，将由 Flutter 学生 App 取代），`parent-web/` 是独立的
-家长端，均直接调用后端 `/api`。数据库用 SQLite
+家长端管理教材/目标/任务/规则。后端是 **FastAPI + SQLAlchemy**。前端有三个：
+`student-app/` 是 **Flutter 学生端**（Web + Android，Riverpod + go_router），逐步
+替代旧版；另有两个**单文件原生 JS** 应用（无框架，`render*()` 函数拼 HTML 字符串）：
+`frontend/` 是旧版学生端 Web（已冻结，将由 Flutter 学生 App 取代），`parent-web/`
+是独立的家长端。三者均直接调用后端 `/api`。数据库用 SQLite
 （生产可切 MySQL），所有 AI/语音能力都走可配置的 provider 抽象层，未配置时
 回落本地 `fake` 兜底，保证任何环境下都能跑起来。
 
 ## Architecture（现状）
 
 ```
-  frontend/  旧版学生端 Web (冻结，待 Flutter 取代)    parent-web/  家长端 (独立)
-  index.html + app.js (原生 JS，静态托管 :8766)      index.html + app.js (原生 JS，:8767)
-        │                                                  │
-        └──────────── fetch → http://127.0.0.1:8010/api ───┘
+  student-app/  Flutter 学生端 (Web + Android)
+  Riverpod + go_router + dio (docker :8082，nginx 反代 /api)
+        │
+        │   frontend/  旧版学生端 Web (冻结，待 Flutter 取代)    parent-web/  家长端 (独立)
+        │   index.html + app.js (原生 JS，静态托管 :8766)      index.html + app.js (原生 JS，:8767)
+        │         │                                                  │
+        └─────────┴────────── fetch → http://127.0.0.1:8010/api ─────┘
                                │
                                ▼
 ┌──────────────────────────────────────────────┐
@@ -156,6 +160,10 @@ binding (ModelProfile + ModelConnection)  →  legacy (ModelConfig 老键)  → 
 `python -m http.server 8767 --directory parent-web`（`API` 默认
 `http://127.0.0.1:8010`）。运行配置见 `.claude/launch.json`（prototype/backend/frontend/parent-web 四个）。
 
+Flutter 学生端（`student-app/`）：`flutter run -d chrome`（连 `127.0.0.1:8010`），
+安卓必须 `--dart-define=API_BASE=http://10.0.2.2:8010`（模拟器）；`API_BASE=` 空值时
+Web 走同源。验证：`flutter analyze && flutter test`（Flutter 位于 `E:\dev\flutter`）。
+
 ## Key Files
 
 | Path                                      | Purpose                              |
@@ -178,6 +186,10 @@ binding (ModelProfile + ModelConnection)  →  legacy (ModelConfig 老键)  → 
 | `backend/app/runtime/`                    | `turn_engine.py`（TurnEngine 多步工具循环）+ `orchestrator.py`（route_to_capability + _persist 落库 Turn/ToolCall） |
 | `backend/app/capabilities/`               | `registry.py`（CapabilityRegistry）+ `chat.py`（Chat/Visualize/Solve 三 capability） |
 | `backend/tests/`                          | pytest，`conftest.py` + 每领域 test   |
+| `student-app/lib/core/`                   | Flutter 学生端：`router.dart`（登录守卫 + 三 Tab Shell）、`api_client.dart`、`config.dart`（`API_BASE` 解析） |
+| `student-app/lib/features/`               | `auth`（按名字登录、会话、`currentChildIdProvider`）· `home`（首页任务/积分兑换）· `center`（听力/阅读答题、错题收录、任务自动提交、朗读）· `profile` · `shell` |
+| `student-app/test/`                       | flutter_test：`app_flow_test.dart`（整 App 流程）+ 每功能 test |
+| `student-app/Dockerfile` / `nginx.conf`   | Flutter Web 镜像（自带 CanvasKit）与 nginx 反代/缓存配置 |
 | `frontend/index.html` / `frontend/app.js` | 旧版学生端 Web（已冻结，待 Flutter 学生 App 取代；含对话栏 UI） |
 | `parent-web/index.html` / `parent-web/app.js` | 家长端（独立单文件原生 JS，调用后端 `/api`） |
 | `prototype/`                              | 早期原型（静态）                     |

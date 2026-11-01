@@ -178,6 +178,12 @@ flutter test && flutter analyze
 
 国内网络先设置环境变量 `PUB_HOSTED_URL=https://pub.flutter-io.cn`、`FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn`。不传 `API_BASE` 时连 `http://127.0.0.1:8010`；`--dart-define=API_BASE=`（空值）时 Web 走页面同源（docker 部署即如此，由 nginx 反代 `/api`、`/uploads`）。
 
+已知限制：
+
+- **中文字体运行时联网下载**：Flutter Web 渲染中文时，回退字体在运行时从 `fonts.gstatic.com` 下载；访问不了该域名的网络中，中文可能显示为空白或方块。后续改为自托管字体。
+- **安卓仅适合开发调试**：主 Manifest 允许明文 HTTP（`usesCleartextTraffic`），release 构建仍使用 debug 签名，正式发布前需在子项目 5 处理。
+- **安卓必须传后端地址**：安卓上不传 `API_BASE` 会连设备自身的 `127.0.0.1`，必须加 `--dart-define=API_BASE=...`（模拟器用 `http://10.0.2.2:8010`，真机用电脑的局域网地址）。
+
 ### 动画渲染服务
 
 见 [render_service/README.md](render_service/README.md)，本地需要 manim、ffmpeg 与 LaTeX。

@@ -1,11 +1,11 @@
 {
-    "name": "student_app",
-    "short_name": "student_app",
+    "name": "知学伴 · 学生端",
+    "short_name": "知学伴",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#3158E8",
+    "theme_color": "#3158E8",
+    "description": "知学伴学生端：小学生的 AI 学习伙伴",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
