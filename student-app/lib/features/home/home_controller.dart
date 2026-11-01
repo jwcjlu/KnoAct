@@ -15,48 +15,62 @@ class HomeData {
 }
 
 class HomeController extends AsyncNotifier<HomeData> {
+  /// 最近一次请求的学科；界面显示的学科以 state.value?.subject 为准
   String _subject = subjects.first;
+
+  /// 每次发起加载自增，只有最新一次的结果会写入 state
+  int _gen = 0;
 
   @override
   Future<HomeData> build() {
     ref.watch(sessionProvider);
-    return _load();
+    _gen++;
+    return _load(_subject);
   }
 
-  Future<HomeData> _load() async {
+  Future<HomeData> _load(String subject) async {
     final uid = ref.read(currentChildIdProvider);
     final repo = ref.read(homeRepositoryProvider);
     final results = await Future.wait([
-      repo.snapshot(uid, _subject),
+      repo.snapshot(uid, subject),
       repo.tasks(uid, apiDate(DateTime.now())),
       repo.balance(uid),
     ]);
     return HomeData(
-      subject: _subject,
+      subject: subject,
       snapshot: results[0] as HomeSnapshot,
       tasks: results[1] as List<StudyTask>,
       points: results[2] as int,
     );
   }
 
-  Future<void> setSubject(String subject) async {
-    if (subject == _subject) return;
-    _subject = subject;
-    state = await AsyncValue.guard(_load);
+  Future<void> _refresh(String subject) async {
+    final gen = ++_gen;
+    final next = await AsyncValue.guard(() => _load(subject));
+    if (!ref.mounted || gen != _gen) return;
+    state = next;
   }
 
-  Future<void> reload() async {
-    state = await AsyncValue.guard(_load);
+  Future<void> setSubject(String subject) async {
+    if (subject == state.value?.subject) return;
+    final previous = state.value?.subject ?? _subject;
+    _subject = subject;
+    await _refresh(subject);
+    if (ref.mounted && _subject == subject && state.hasError) _subject = previous;
   }
+
+  Future<void> reload() => _refresh(_subject);
 
   /// 返回提示文案
   Future<String> redeem(String device, int minutes) async {
     final uid = ref.read(currentChildIdProvider);
     final ok = await ref.read(homeRepositoryProvider).redeem(uid, device, minutes);
     if (!ok) return '积分还不够，再完成几个任务吧';
+    final msg = '已兑换${device == 'tablet' ? '平板' : '手机'} $minutes 分钟，等待家长确认';
+    if (!ref.mounted) return msg;
     await reload();
-    ref.invalidate(pointsProvider);
-    return '已兑换${device == 'tablet' ? '平板' : '手机'} $minutes 分钟，等待家长确认';
+    if (ref.mounted) ref.invalidate(pointsProvider);
+    return msg;
   }
 }
 

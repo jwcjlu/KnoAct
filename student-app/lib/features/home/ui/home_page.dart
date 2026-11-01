@@ -17,6 +17,7 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   final _tasksKey = GlobalKey();
+  bool _redeeming = false;
 
   void _onTask(StudyTask t) {
     switch (taskAction(t)) {
@@ -32,16 +33,23 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _redeem(String device, int minutes) async {
+    if (_redeeming) return;
+    _redeeming = true;
     try {
       final msg = await ref.read(homeControllerProvider.notifier).redeem(device, minutes);
       if (mounted) showMessage(context, msg);
     } catch (_) {
       if (mounted) showMessage(context, '兑换失败，请稍后重试');
+    } finally {
+      _redeeming = false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(homeControllerProvider, (prev, next) {
+      if (next.hasError && next.hasValue && !next.isLoading) showMessage(context, '刷新失败，请稍后重试');
+    });
     final async = ref.watch(homeControllerProvider);
     final data = async.value;
     if (data == null) {
