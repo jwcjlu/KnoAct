@@ -25,6 +25,7 @@ class BackendSpeechPlayer implements SpeechPlayer {
   bool _audioCreated = false;
   bool _ttsCreated = false;
   int _seq = 0;
+  bool _disposed = false;
 
   AudioPlayer get _audioPlayer {
     _audioCreated = true;
@@ -44,9 +45,13 @@ class BackendSpeechPlayer implements SpeechPlayer {
   @override
   Future<void> speak(String raw) async {
     final text = raw.replaceAll('\n', ' ');
-    if (text.trim().isEmpty) return;
+    if (_disposed || text.trim().isEmpty) return;
     final seq = ++_seq;
-    await _stopAll();
+    try {
+      await _stopAll();
+    } catch (_) {
+      // 停止失败不影响本次播放
+    }
     try {
       final r = await _api.getBytes('/api/tts/synthesize', query: {'text': text});
       if (seq != _seq) return;
@@ -68,12 +73,20 @@ class BackendSpeechPlayer implements SpeechPlayer {
 
   @override
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     _seq++;
-    if (_audioCreated) {
-      await _audio.stop();
-      await _audio.dispose();
+    try {
+      if (_audioCreated) {
+        try {
+          await _audio.stop();
+        } finally {
+          await _audio.dispose();
+        }
+      }
+    } finally {
+      if (_ttsCreated) await _tts.stop();
     }
-    if (_ttsCreated) await _tts.stop();
   }
 }
 
