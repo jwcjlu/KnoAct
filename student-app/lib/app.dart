@@ -19,7 +19,7 @@ class StudentApp extends ConsumerWidget {
       );
     }
     return MaterialApp.router(
-      title: '知学伴',
+      title: '知学伴 · 学生端',
       theme: buildTheme(),
       routerConfig: ref.watch(routerProvider),
     );

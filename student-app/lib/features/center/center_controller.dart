@@ -134,8 +134,9 @@ class CenterController extends Notifier<CenterState> {
   Future<void> _load(CenterTab tab) async {
     final uid = _uid;
     if (uid == null) return;
-    final token = ++_loadToken;
+    // 先读写 state（可能触发换孩子后的 build 并自增 _loadToken），再取本次 token
     state = state.copyWith(tab: tab, material: const AsyncLoading(), inputs: const [], results: const [], submitFailed: false);
+    final token = ++_loadToken;
     final repo = ref.read(centerRepositoryProvider);
     final result = await AsyncValue.guard(
       () => tab == CenterTab.listening ? repo.listening(uid) : repo.reading(uid),
