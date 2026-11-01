@@ -29,7 +29,8 @@ class HomeRepository {
   }
 
   Future<void> submitTask(int taskId) async {
-    await _api.post('/api/tasks/$taskId/submit');
+    final d = asMap(await _api.post('/api/tasks/$taskId/submit'));
+    if (d['ok'] != true) throw ApiException('提交任务失败');
   }
 }
 
