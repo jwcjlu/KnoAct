@@ -32,6 +32,12 @@ void main() {
     expect(CenterMaterial.empty.questions, isEmpty);
   });
 
+  test('材料解析容错：非字符串 text、非列表 questions', () {
+    final m = CenterMaterial.fromJson({'text': 123, 'questions': 'x'});
+    expect(m.text, '123');
+    expect(m.questions, isEmpty);
+  });
+
   test('朗读语言：含英文字母用 en-US', () {
     expect(speechLanguage('Hello'), 'en-US');
     expect(speechLanguage('你好'), 'zh-CN');

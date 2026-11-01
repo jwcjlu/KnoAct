@@ -11,7 +11,7 @@ class CenterMaterial {
   factory CenterMaterial.fromJson(Map<String, dynamic> j) {
     final qs = j['questions'];
     return CenterMaterial(
-      text: (j['text'] as String?) ?? '',
+      text: '${j['text'] ?? ''}',
       questions: [
         if (qs is List)
           for (final q in qs.whereType<Map>()) CenterQuestion('${q['question'] ?? ''}', '${q['answer'] ?? ''}'),
