@@ -1252,6 +1252,7 @@ async function init(){
   try{ await loadConfig(); }catch(e){}
   try{ await loadParentData(); }catch(e){}
   if(!Array.isArray(pdfDocs)) pdfDocs = [];
+  try{ await reloadChildData(); }catch(e){}
   render();
 }
 
