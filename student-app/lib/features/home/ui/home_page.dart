@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/widgets.dart';
+import '../../center/center_controller.dart';
+import '../../center/center_logic.dart';
 import '../data/home_models.dart';
 import '../home_controller.dart';
 import '../home_logic.dart';
@@ -22,7 +24,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   void _onTask(StudyTask t) {
     switch (taskAction(t)) {
       case TaskAction.openReading:
+        ref.read(centerControllerProvider.notifier).openForTask(t.id, CenterTab.reading);
+        context.go('/center');
       case TaskAction.openListening:
+        ref.read(centerControllerProvider.notifier).openForTask(t.id, CenterTab.listening);
         context.go('/center');
       case TaskAction.comingSoon:
         showMessage(context, '该练习即将在 App 上线，可先在网页版完成');

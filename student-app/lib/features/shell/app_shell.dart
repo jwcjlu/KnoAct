@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
+import '../center/center_controller.dart';
 import '../home/home_controller.dart';
 
 const _destinations = [
@@ -30,6 +31,8 @@ class _AppShellState extends ConsumerState<AppShell> {
       widget.navigationShell.goBranch(index, initialLocation: index == widget.navigationShell.currentIndex);
 
   void _onIndexChanged(int? from, int to) {
+    if (from == 1 && to != 1) ref.read(centerControllerProvider.notifier).leave();
+    if (to == 1) ref.read(centerControllerProvider.notifier).enter();
     if (from == null) return;
     if (to == 0) ref.read(homeControllerProvider.notifier).reload();
     if (to == 2) ref.invalidate(pointsProvider);
