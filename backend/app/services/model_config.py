@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace as dc_replace
 
 from sqlalchemy.orm import Session
 
-from ..models import ModelConfig, ModelConnection, ModelProfile, RoleBinding
+from ..models import ModelConfig, ModelConnection, ModelProfile, RoleBinding, ChildConfig
 from .provider_registry import find
 
 MASK = "***"
@@ -79,14 +79,65 @@ def _legacy(db: Session, role: str) -> Resolved | None:
     return None
 
 
-def resolve(db: Session, role: str) -> Resolved:
-    """三级降级：binding → legacy → default。绝不抛异常。"""
+_CHILD_ROLE_PREFIXES = {
+    "llm": "llm",
+    "tts": "tts",
+}
+
+
+def _child_overlay(db: Session, child_id: int, role: str, base: Resolved) -> Resolved:
+    """孩子覆盖层：用 ChildConfig 里的角色前缀键覆盖已解析的全局结果。
+
+    只有当该孩子存在任一该角色前缀的键时才启用（否则原样返回 base，source 不变）。
+    `llm` 的覆盖同时作用于 `task`/`embedding`/`search`/`stt`/`imagegen`（它们继承 llm），
+    故继承类角色查的是 `llm_` 前缀键，并落在已继承 llm 的 base 上。
+    """
+    prefix = "llm" if role in ("llm", "task", "embedding", "search", "stt", "imagegen") else role
+    if prefix not in _CHILD_ROLE_PREFIXES:
+        return base
+    rows = db.query(ChildConfig).filter(
+        ChildConfig.user_id == child_id,
+        ChildConfig.key.like(f"{prefix}_%"),
+    ).all()
+    if not rows:
+        return base
+    kv = {r.key: r.value for r in rows}
+
+    provider = kv.get(f"{prefix}_provider") or base.provider
+    model = kv.get(f"{prefix}_model") or base.model
+    base_url = kv.get(f"{prefix}_base_url") or base.base_url
+    api_key = kv.get(f"{prefix}_api_key") or base.api_key
+    options = dict(base.options)
+    if prefix == "llm":
+        if kv.get("llm_vision_model"):
+            options["vision_model"] = kv["llm_vision_model"]
+    else:  # tts
+        if kv.get("tts_voice"):
+            options["voice"] = kv["tts_voice"]
+        if kv.get("tts_speed"):
+            options["speed"] = kv["tts_speed"]
+        if kv.get("tts_repeat"):
+            options["repeat"] = kv["tts_repeat"]
+    return dc_replace(
+        base,
+        role=role,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        options=options,
+        source="child",
+    )
+
+
+def _resolve_base(db: Session, role: str) -> Resolved:
+    """三级降级：binding → legacy → default。绝不抛异常。（不含孩子覆盖层）"""
     binding = db.get(RoleBinding, role)
 
     # task 默认跟随 llm；reference 模式配了 profile 才用自己那份
     if role == "task":
         if binding is None or binding.mode == "inherit" or not binding.profile_id:
-            inherited = resolve(db, "llm")
+            inherited = _resolve_base(db, "llm")
             return dc_replace(inherited, role="task", source=inherited.source)
 
     if binding is not None and binding.profile_id:
@@ -110,16 +161,24 @@ def resolve(db: Session, role: str) -> Resolved:
         return legacy
 
     if role in ("embedding", "search", "stt", "imagegen"):
-        inherited = resolve(db, "llm")
+        inherited = _resolve_base(db, "llm")
         if inherited.source != "default":
             return dc_replace(inherited, role=role, source="legacy")
 
     # task 永远不低于 llm：profile/连接坏了也退到 llm，不退 fake
     if role == "task":
-        inherited = resolve(db, "llm")
+        inherited = _resolve_base(db, "llm")
         return dc_replace(inherited, role="task", source=inherited.source)
 
     return Resolved(role=role, provider="fake", source="default")
+
+
+def resolve(db: Session, role: str, child_id: int | None = None) -> Resolved:
+    """三级降级：binding → legacy → default，child_id 非空时孩子覆盖层优先。绝不抛异常。"""
+    base = _resolve_base(db, role)
+    if child_id is None:
+        return base
+    return _child_overlay(db, child_id, role, base)
 
 
 def _redact_inplace(obj):

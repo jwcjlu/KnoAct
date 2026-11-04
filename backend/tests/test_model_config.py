@@ -1,12 +1,12 @@
 import pytest
 
 from app.database import SessionLocal
-from app.models import ModelConfig, ModelConnection, ModelProfile, RoleBinding
+from app.models import ModelConfig, ModelConnection, ModelProfile, RoleBinding, User, ChildConfig
 from app.services.model_config import resolve
 
 
 def _clear(db):
-    for m in (RoleBinding, ModelProfile, ModelConnection, ModelConfig):
+    for m in (RoleBinding, ModelProfile, ModelConnection, ModelConfig, ChildConfig, User):
         db.query(m).delete()
     db.commit()
 
@@ -398,4 +398,104 @@ def test_migration_connection_names_are_distinct():
 
     names = [c.name for c in db.query(ModelConnection).all()]
     assert len(names) == len(set(names)), f"连接名不能重复：{names}"
+    db.close()
+
+
+def _make_child(db, name="晨晨", role="child", grade=3):
+    u = User(name=name, role=role, grade=grade)
+    db.add(u); db.flush()
+    return u
+
+
+def test_child_override_llm_partial():
+    """孩子只覆盖 provider/model，api_key/base_url 回落到全局。"""
+    db = SessionLocal()
+    _clear(db)
+    child = _make_child(db)
+    db.add(ModelConfig(key="ai_provider", value="openai"))
+    db.add(ModelConfig(key="ai_model", value="gpt-4o"))
+    db.add(ModelConfig(key="ai_key", value="sk-global"))
+    db.add(ModelConfig(key="ai_base_url", value="https://global/v1"))
+    db.add(ChildConfig(user_id=child.id, key="llm_provider", value="deepseek"))
+    db.add(ChildConfig(user_id=child.id, key="llm_model", value="deepseek-chat"))
+    db.commit()
+
+    r = resolve(db, "llm", child_id=child.id)
+    assert r.source == "child"
+    assert r.provider == "deepseek"
+    assert r.model == "deepseek-chat"
+    assert r.api_key == "sk-global"
+    assert r.base_url == "https://global/v1"
+    db.close()
+
+
+def test_child_without_llm_keys_behaves_like_global():
+    db = SessionLocal()
+    _clear(db)
+    child = _make_child(db)
+    other = _make_child(db, name="无覆盖孩子")
+    db.add(ModelConfig(key="ai_provider", value="deepseek"))
+    db.add(ModelConfig(key="ai_model", value="deepseek-chat"))
+    db.add(ChildConfig(user_id=other.id, key="llm_provider", value="glm"))
+    db.commit()
+
+    r = resolve(db, "llm", child_id=child.id)
+    assert r.source != "child"
+    assert r.provider == "deepseek"
+    assert r.model == "deepseek-chat"
+    db.close()
+
+
+def test_child_override_tts_options():
+    db = SessionLocal()
+    _clear(db)
+    child = _make_child(db)
+    db.add(ModelConfig(key="tts_provider", value="minimax"))
+    db.add(ModelConfig(key="tts_voice", value="male-qn-qingse"))
+    db.add(ChildConfig(user_id=child.id, key="tts_voice", value="female"))
+    db.add(ChildConfig(user_id=child.id, key="tts_speed", value="1.5"))
+    db.commit()
+
+    r = resolve(db, "tts", child_id=child.id)
+    assert r.source == "child"
+    assert r.options.get("voice") == "female"
+    assert r.options.get("speed") == "1.5"
+    assert r.provider == "minimax"  # 未覆盖，回落全局
+    db.close()
+
+
+def test_child_override_llm_propagates_to_task():
+    """task 继承 llm：孩子覆盖 llm 后，task 也反映孩子覆盖。"""
+    db = SessionLocal()
+    _clear(db)
+    child = _make_child(db)
+    db.add(ModelConfig(key="ai_provider", value="openai"))
+    db.add(ModelConfig(key="ai_model", value="gpt-4o"))
+    db.add(ChildConfig(user_id=child.id, key="llm_provider", value="deepseek"))
+    db.add(ChildConfig(user_id=child.id, key="llm_model", value="deepseek-chat"))
+    db.commit()
+
+    r = resolve(db, "task", child_id=child.id)
+    assert r.role == "task"
+    assert r.source == "child"
+    assert r.provider == "deepseek"
+    assert r.model == "deepseek-chat"
+    db.close()
+
+
+def test_resolve_without_child_id_unchanged():
+    """回归：child_id=None 与原先完全一致。"""
+    db = SessionLocal()
+    _clear(db)
+    db.add(ModelConfig(key="ai_provider", value="deepseek"))
+    db.add(ModelConfig(key="ai_model", value="deepseek-chat"))
+    db.commit()
+    r = resolve(db, "llm")
+    assert r.provider == "deepseek"
+    assert r.model == "deepseek-chat"
+    assert r.source == "legacy"
+
+    r_task = resolve(db, "task")
+    assert r_task.provider == "deepseek"
+    assert r_task.source == "legacy"
     db.close()

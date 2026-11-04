@@ -105,9 +105,9 @@ class FakeTTS(TTSProvider):
 PROVIDERS = {"minimax": MiniMaxTTS, "xunfei": XunfeiTTS, "openai": OpenAITTS, "fake": FakeTTS}
 
 
-def get_tts(db: Session) -> TTSProvider:
+def get_tts(db: Session, child_id: int | None = None) -> TTSProvider:
     from .model_config import resolve
-    r = resolve(db, "tts")
+    r = resolve(db, "tts", child_id)
     voice = r.options.get("voice", "")
     cls = PROVIDERS.get(r.provider, FakeTTS)
     if cls is OpenAITTS:

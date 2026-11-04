@@ -5,12 +5,13 @@ from ..core.context import UnifiedContext
 from ..core.tool_protocol import BaseTool, ToolParameter
 
 
-def _get_provider():
+def _get_provider(ctx: UnifiedContext | None = None):
     from ..database import SessionLocal
     from ..services.ai import get_provider
+    child_id = (ctx.user_id or None) if ctx is not None else None
     db = SessionLocal()
     try:
-        return get_provider(db)
+        return get_provider(db, child_id=child_id)
     finally:
         db.close()
 
@@ -26,7 +27,7 @@ class GenerateListeningTool(BaseTool):
     parameters = []
 
     def run(self, args, ctx: UnifiedContext) -> dict:
-        provider = _get_provider()
+        provider = _get_provider(ctx)
         words = args.get("words") or []
         kps = args.get("knowledge_points") or []
         try:
@@ -93,7 +94,7 @@ class GenerateDiagnosticQuestionsTool(BaseTool):
     ]
 
     def run(self, args, ctx: UnifiedContext) -> dict:
-        provider = _get_provider()
+        provider = _get_provider(ctx)
         context = (args.get("context") or "").strip()
         if not context:
             return {"intro": "", "questions": []}

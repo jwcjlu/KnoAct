@@ -36,7 +36,7 @@ class LookupWordTool(BaseTool):
             from ..database import SessionLocal
             db = SessionLocal()
             try:
-                provider = get_provider(db)
+                provider = get_provider(db, child_id=ctx.user_id or None)
                 meaning = provider.generate(
                     prompt=f"请解释教材中的这个词：「{word}」。用小学生能懂的话说明它的意思，50 字以内。",
                     system="你是小学生的学习助手，解释生词要简洁、准确。",

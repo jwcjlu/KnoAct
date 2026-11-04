@@ -108,16 +108,16 @@ class FakeProvider(AIProvider):
 
 PROVIDERS = {"deepseek": DeepSeekProvider, "glm": GLMProvider, "openai": OpenAICompatibleProvider, "fake": FakeProvider}
 
-def get_provider(db: Session) -> AIProvider:
+def get_provider(db: Session, child_id: int | None = None) -> AIProvider:
     from .model_config import resolve
-    r = resolve(db, "llm")
+    r = resolve(db, "llm", child_id)
     cls = PROVIDERS.get(r.provider, FakeProvider)
     if cls is OpenAICompatibleProvider:
         return cls(model=r.model, api_key=r.api_key, base_url=r.base_url)
     return cls(model=r.model, api_key=r.api_key)
 
 
-def ocr_image(db: Session, image_bytes: bytes, instruction: str = "识别图片中的全部文字，原样输出，不要解释。") -> str:
+def ocr_image(db: Session, image_bytes: bytes, instruction: str = "识别图片中的全部文字，原样输出，不要解释。", child_id: int | None = None) -> str:
     """用视觉模型对扫描版教材页面做 OCR。
 
     视觉模型取自 llm 档位的 options.vision_model，未设则回落老键，再没有则用默认值。
@@ -126,7 +126,7 @@ def ocr_image(db: Session, image_bytes: bytes, instruction: str = "识别图片�
     import base64
     from .model_config import resolve
 
-    r = resolve(db, "llm")
+    r = resolve(db, "llm", child_id)
     vision_model = r.options.get("vision_model", "")
     if not vision_model:
         from ..models import ModelConfig

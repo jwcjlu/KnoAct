@@ -74,7 +74,7 @@ def glossary(req: GlossaryReq, db: Session = Depends(get_db)):
     owner = _owner_id(db, req.user_id)
     if owner is None:
         return {"error": "没有孩子账号，无法保存标注"}
-    provider = get_provider(db)
+    provider = get_provider(db, child_id=owner)
     try:
         meaning = provider.generate(
             prompt=f"请解释教材中的这个词：「{req.quote}」。用小学生能懂的话说明它的意思，50 字以内。",

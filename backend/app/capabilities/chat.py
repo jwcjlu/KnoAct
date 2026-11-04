@@ -36,7 +36,7 @@ def _get_provider(ctx: UnifiedContext):
     from ..services.ai import get_provider
     db = SessionLocal()
     try:
-        provider = get_provider(db)
+        provider = get_provider(db, child_id=ctx.user_id or None)
         if ctx.model:
             provider.model = ctx.model
         return provider
