@@ -51,7 +51,7 @@ def _gen_dictation(db, lesson, user_id, count, new_ratio=5):
     )
 
 
-def _gen_knowledge(db, lesson, user_id, count, new_ratio=5):
+def _gen_knowledge(db, lesson, user_id, count, new_ratio=5, bucket_id=None):
     """按遗忘曲线出知识点：当前课取「新」名额，旧课到期知识点取「旧」名额。"""
     subject = lesson.subject
     new_pts = db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).order_by(KnowledgePoint.id).limit(new_ratio).all()
@@ -81,6 +81,7 @@ def _gen_knowledge(db, lesson, user_id, count, new_ratio=5):
             answer=item.get("answer") or "",
             subject=subject, date=datetime.utcnow().date(),
             status="pending", task_type="knowledge",
+            user_id=user_id, bucket_id=bucket_id,
             extra=json.dumps({"keywords": item.get("keywords") or [], "content": item.get("content") or ""}, ensure_ascii=False),
         ))
     return Task(
@@ -109,7 +110,7 @@ def _gen_review(db, lesson, user_id, count):
     )
 
 
-def _gen_listening(db, lesson):
+def _gen_listening(db, lesson, user_id=None, bucket_id=None):
     words = [w.word for w in db.query(WordBank).filter_by(lesson_id=lesson.id).all()]
     kps = [p.content for p in db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).all()]
     if not words:
@@ -125,6 +126,7 @@ def _gen_listening(db, lesson):
         answer=result.get("answer") or "",
         subject=lesson.subject, date=datetime.utcnow().date(),
         status="pending", task_type="listening",
+        user_id=user_id, bucket_id=bucket_id,
         extra=json.dumps({"dialogue": result.get("dialogue") or ""}, ensure_ascii=False),
     ))
     return Task(
@@ -136,7 +138,7 @@ def _gen_listening(db, lesson):
     )
 
 
-def _gen_math_practice(db, lesson):
+def _gen_math_practice(db, lesson, user_id=None, bucket_id=None):
     """数学练习：基于本课正文出计算/应用题，content 存题目 JSON。"""
     from .math_gen import generate_math_questions
     from ..models import Question
@@ -153,6 +155,7 @@ def _gen_math_practice(db, lesson):
             answer=str(q.get("answer") or q.get("ans") or ""),
             subject=lesson.subject, date=datetime.utcnow().date(),
             status="pending", task_type="math",
+            user_id=user_id, bucket_id=bucket_id,
             extra=json.dumps({k: q.get(k) for k in q if k not in ("question", "answer", "q", "ans")}, ensure_ascii=False),
         ))
     return Task(
@@ -167,11 +170,13 @@ def _gen_math_practice(db, lesson):
 def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = False):
     """为单个孩子生成当天各科任务。幂等：同 (user_id, subject, date) 已存在则跳过。
     force=True 时先删除该孩子当天全部任务再重新生成（家长手动触发覆盖重生成）。"""
+    from .bucket_service import ensure_bucket
+    bucket = ensure_bucket(db, user_id)
     if force:
         db.query(Task).filter_by(user_id=user_id, date=day).delete(synchronize_session=False)
-        # 同时删除当天该孩子的生成类题目，避免重复累积（Question 无 user_id，按 date 删）
+        # 同时删除当天该孩子的生成类题目，避免重复累积
         from ..models import Question
-        db.query(Question).filter_by(date=day).delete(synchronize_session=False)
+        db.query(Question).filter_by(date=day, user_id=user_id).delete(synchronize_session=False)
     subjects = ["语文", "英语", "数学"]
     for subject in subjects:
         exists = db.query(Task).filter_by(user_id=user_id, subject=subject, date=day).first()
@@ -180,25 +185,28 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
         lesson = _current_lesson(db, subject, user_id)
         if not lesson:
             continue
-        n_dict = _default_count(db, f"task_dictation_count_{subject}", 7)
-        n_know = _default_count(db, "task_knowledge_count", 5)
-        new_ratio = _default_count(db, "task_new_ratio", 5)
+        n_dict = _default_count(db, f"task_dictation_count_{subject}", 7, child_id=user_id)
+        n_know = _default_count(db, "task_knowledge_count", 5, child_id=user_id)
+        new_ratio = _default_count(db, "task_new_ratio", 5, child_id=user_id)
         gens = [_gen_dictation(db, lesson, user_id, n_dict, new_ratio),
-                _gen_knowledge(db, lesson, user_id, n_know, new_ratio),
+                _gen_knowledge(db, lesson, user_id, n_know, new_ratio, bucket.id),
                 _gen_review(db, lesson, user_id, n_dict)]
         if subject == "英语":
-            gens.append(_gen_listening(db, lesson))
+            gens.append(_gen_listening(db, lesson, user_id, bucket.id))
         if subject == "数学":
-            gens.append(_gen_math_practice(db, lesson))
+            gens.append(_gen_math_practice(db, lesson, user_id, bucket.id))
         for gen in gens:
             if gen is not None:
                 gen.user_id = user_id
                 gen.date = day
+                gen.bucket_id = bucket.id
                 db.add(gen)
     db.commit()
 
 
 def generate_daily_tasks(db: Session, day: date, force: bool = False):
     """定时任务入口：为所有孩子生成当天任务。force=True 时覆盖重生成。"""
+    from .bucket_service import ensure_bucket
     for (uid,) in db.query(User.id).filter_by(role="child").all():
+        ensure_bucket(db, uid)
         generate_tasks_for_user(db, uid, day, force=force)

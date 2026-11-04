@@ -174,6 +174,35 @@ def test_generated_questions_land_in_question_table():
     db.close()
 
 
+def test_generate_tasks_attaches_bucket():
+    from app.services.bucket_service import ensure_bucket
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 语文第1课含生词/知识点
+    bucket = ensure_bucket(db, uid)
+    generate_tasks_for_user(db, uid, date.today())
+    tasks = db.query(Task).filter_by(user_id=uid).all()
+    assert len(tasks) >= 1
+    for t in tasks:
+        assert t.bucket_id == bucket.id
+    db.close()
+
+
+def test_generated_questions_attach_bucket_and_user():
+    from app.services.bucket_service import ensure_bucket
+    db = SessionLocal()
+    db.query(Question).delete()
+    db.commit()
+    uid, l1_id = _setup(db)  # 语文第1课含知识点
+    bucket = ensure_bucket(db, uid)
+    generate_tasks_for_user(db, uid, date.today())
+    qs = db.query(Question).filter_by(task_type="knowledge", date=date.today()).all()
+    assert len(qs) >= 1
+    for q in qs:
+        assert q.bucket_id == bucket.id
+        assert q.user_id == uid
+    db.close()
+
+
 def test_dictation_isolates_due_words_across_users():
     db = SessionLocal()
     uid, l1_id = _setup(db)  # 孩子A：第1课（白鹭、矗立）
