@@ -15,19 +15,25 @@ router = APIRouter(tags=["learning"])
 MASTERY_REMOVE_AFTER = 3  # 连续答对 3 次视为已掌握，移出日常听写
 
 
-def _cfg_int(db, key, fallback):
-    from ..models import ModelConfig
-    row = db.query(ModelConfig).filter_by(key=key).first()
-    try:
-        return int(row.value) if row and row.value else fallback
-    except ValueError:
-        return fallback
+def _cfg_int(db, key, fallback, child_id=None):
+    from ..services.child_config import get_child_config_int
+    if child_id is None:
+        from ..models import ModelConfig
+        row = db.query(ModelConfig).filter_by(key=key).first()
+        try:
+            return int(row.value) if row and row.value else fallback
+        except ValueError:
+            return fallback
+    return get_child_config_int(db, child_id, key, fallback)
 
 
-def _cfg_str(db, key, fallback):
-    from ..models import ModelConfig
-    row = db.query(ModelConfig).filter_by(key=key).first()
-    return row.value if row and row.value else fallback
+def _cfg_str(db, key, fallback, child_id=None):
+    from ..services.child_config import get_child_config_str
+    if child_id is None:
+        from ..models import ModelConfig
+        row = db.query(ModelConfig).filter_by(key=key).first()
+        return row.value if row and row.value else fallback
+    return get_child_config_str(db, child_id, key, fallback)
 
 
 @router.get("/api/dictation/words")

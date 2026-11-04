@@ -20,13 +20,9 @@ def _current_lesson(db: Session, subject: str, user_id: int):
     return lessons[0]
 
 
-def _default_count(db: Session, key: str, fallback: int) -> int:
-    from ..models import ModelConfig
-    row = db.query(ModelConfig).filter_by(key=key).first()
-    try:
-        return int(row.value) if row and row.value else fallback
-    except ValueError:
-        return fallback
+def _default_count(db: Session, key: str, fallback: int, child_id=None) -> int:
+    from .child_config import get_child_config_int
+    return get_child_config_int(db, child_id, key, fallback)
 
 
 def _gen_dictation(db, lesson, user_id, count, new_ratio=5):
