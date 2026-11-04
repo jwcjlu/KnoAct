@@ -909,10 +909,18 @@ async function saveScreenGroups(){
   // 收集每个分组的每日上限（分钟）；规则保持现状不变
   const groups = screenGroups.map(g=>{
     const el = document.getElementById(`screen-limit-${g.id}`);
-    const mins = el ? parseFloat(el.value) : NaN;
-    const limitSeconds = (mins===mins && mins>=0) ? Math.round(mins*60) : (g.daily_limit_seconds||0);
+    const raw = el ? el.value.trim() : '';
+    // 空白 = 不限（后端 daily_limit_seconds 为 null）；填了数字才换算成秒
+    let limitSeconds = null;
+    if(raw !== ''){
+      const mins = parseFloat(raw);
+      if(mins===mins && mins>=0) limitSeconds = Math.round(mins*60);
+      else limitSeconds = (g.daily_limit_seconds||0);
+    }
     return {name:g.name, kind:g.kind, daily_limit_seconds:limitSeconds};
   });
+  // 注意：后端按 name 幂等 upsert 分组（忽略 id），规则也按 app_package + group_name 关联；
+  // 将来若做「分组改名」，需同步改规则里的 group_name，否则会新建/错挂分组。
   const rules = screenRules.map(r=>{
     const g = screenGroups.find(x=>x.id===r.group_id);
     return {app_package:r.app_package, app_name:r.app_name, group_name:(g&&g.name)||''};
