@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../../core/config.dart';
 import '../../../core/theme.dart';
@@ -98,10 +99,12 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
         // 教材原页（主视觉：原版课本页面图，对齐 Web 端）
         if (lesson.pages.isNotEmpty) ...[
           for (final page in lesson.pages) ...[
-            Image.network(
-              '$baseUrl${page.imagePath}',
+            CachedNetworkImage(
+              // ?v=documentVersion：教材重渲染后版本变、缓存自然失效
+              imageUrl: '$baseUrl${page.imagePath}?v=${lesson.documentVersion}',
               fit: BoxFit.contain,
-              errorBuilder: (_, _, _) => const SizedBox(height: 200, child: Center(child: Text('页面加载失败', style: TextStyle(color: AppColors.gray)))),
+              placeholder: (_, _) => const SizedBox(height: 200, child: Center(child: CircularProgressIndicator())),
+              errorWidget: (_, _, _) => const SizedBox(height: 200, child: Center(child: Text('页面加载失败', style: TextStyle(color: AppColors.gray)))),
             ),
             const SizedBox(height: 12),
           ],

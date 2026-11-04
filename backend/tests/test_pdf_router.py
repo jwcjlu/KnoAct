@@ -75,3 +75,28 @@ def test_extract_document_missing_file_marks_done(setup_db):
     l = s.query(Lesson).filter_by(document_id=did).first()
     assert l.extract_status == "pending"
     s.close()
+
+
+def test_list_lessons_has_document_version(setup_db):
+    """lesson 接口带 document_version（= document.created_at 毫秒时间戳），供前端页图缓存拼 ?v=。"""
+    from datetime import datetime
+    from app.models import PdfDocument, Lesson
+    from app.database import SessionLocal
+    s = SessionLocal()
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="uploads/语文.pdf",
+                      created_at=datetime(2026, 11, 4, 0, 0, 0))
+    s.add(doc); s.flush()
+    s.add(Lesson(document_id=doc.id, subject="语文", title="第 1 课", start_page=1, end_page=1,
+                 extract_status="done", audit_status="approved"))
+    s.commit()
+    did = doc.id
+    s.close()
+    lessons = _client().get(f"/api/pdf/documents/{did}/lessons").json()
+    assert lessons[0]["document_version"] == int(datetime(2026, 11, 4).timestamp() * 1000)
+
+
+def test_list_lessons_version_autopopulated(setup_db):
+    """未显式设 created_at 时，ORM default 自动填充，document_version 为非零时间戳。"""
+    did = _make_doc_with_lessons()
+    lessons = _client().get(f"/api/pdf/documents/{did}/lessons").json()
+    assert lessons[0]["document_version"] > 0

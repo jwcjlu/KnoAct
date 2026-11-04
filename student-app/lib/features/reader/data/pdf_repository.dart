@@ -29,6 +29,7 @@ class PdfLesson {
     required this.endPage,
     required this.texts,
     required this.pages,
+    this.documentVersion = 0,
   });
 
   factory PdfLesson.fromJson(Map<String, dynamic> j) => PdfLesson(
@@ -45,6 +46,7 @@ class PdfLesson {
                 imagePath: '${p['image_path'] ?? ''}',
               ),
         ],
+        documentVersion: (j['document_version'] as num?)?.toInt() ?? 0,
       );
 
   final int id;
@@ -53,6 +55,7 @@ class PdfLesson {
   final int endPage;
   final List<String> texts;
   final List<PdfPage> pages;
+  final int documentVersion;
 
   /// 课文全文（合并所有 text）
   String get fullText => texts.join('\n');

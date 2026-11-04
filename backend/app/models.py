@@ -24,6 +24,7 @@ class PdfDocument(Base):
     storage_path: Mapped[str] = mapped_column(String(512))
     edition: Mapped[str] = mapped_column(String(64), default="")  # 教材版本（人教版/苏教版…）
     grade: Mapped[int] = mapped_column(Integer, nullable=True)  # 年级 1~6
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)  # 作页图缓存版本（拼 ?v=）
 
 class PdfPage(Base):
     __tablename__ = "pdf_pages"

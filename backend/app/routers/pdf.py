@@ -63,6 +63,9 @@ def list_documents(db: Session = Depends(get_db)):
 
 @router.get("/documents/{document_id}/lessons")
 def list_document_lessons(document_id: int, db: Session = Depends(get_db)):
+    doc = db.get(PdfDocument, document_id)
+    # 页图缓存版本：document 创建时间戳（毫秒），前端拼 ?v= 使教材重渲染后缓存自然失效
+    doc_version = int(doc.created_at.timestamp() * 1000) if (doc and doc.created_at) else 0
     lessons = db.query(Lesson).filter_by(document_id=document_id).order_by(Lesson.start_page).all()
     out = []
     for l in lessons:
@@ -80,6 +83,7 @@ def list_document_lessons(document_id: int, db: Session = Depends(get_db)):
             "extract_status": l.extract_status, "audit_status": l.audit_status,
             "words": words, "points": points, "texts": texts,
             "pages": [{"page_number": p.page_number, "image_path": p.image_path} for p in pages],
+            "document_version": doc_version,
         })
     return out
 
