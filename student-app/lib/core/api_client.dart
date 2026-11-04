@@ -50,6 +50,20 @@ class ApiClient {
     }
   }
 
+  /// POST 并返回 SSE 字节流（用于 /api/ask/stream 等流式端点）
+  Future<Stream<List<int>>> postStream(String path, {Object? body}) async {
+    try {
+      final r = await _dio.post<ResponseBody>(
+        path,
+        data: body,
+        options: Options(responseType: ResponseType.stream, headers: {'Accept': 'text/event-stream'}),
+      );
+      return r.data?.stream ?? const Stream.empty();
+    } on DioException catch (e) {
+      throw _wrap(e);
+    }
+  }
+
   Future<dynamic> _send(Future<Response<dynamic>> Function() call) async {
     try {
       return (await call()).data;

@@ -32,7 +32,7 @@ class FakeHomeRepository implements HomeRepository {
   Future<List<StudyTask>> tasks(int userId, String date) async => const [
         StudyTask(id: 1, subject: '语文', taskType: 'dictation', title: '桂花雨 生词听写', detail: '', points: 20, submitStatus: 'approved'),
         StudyTask(id: 2, subject: '语文', taskType: 'reading', title: '桂花雨 阅读理解', detail: '', points: 20, submitStatus: 'not_started'),
-        StudyTask(id: 3, subject: '语文', taskType: 'math', title: '口算练习', detail: '', points: 20, submitStatus: 'not_started'),
+        StudyTask(id: 3, subject: '语文', taskType: 'review', title: '到期复习', detail: '', points: 20, submitStatus: 'not_started'),
         StudyTask(id: 4, subject: '英语', taskType: 'listening', title: '英语听力', detail: '', points: 20, submitStatus: 'submitted'),
       ];
 

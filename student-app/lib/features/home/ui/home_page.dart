@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
 import '../../auth/session.dart';
 import '../../center/center_controller.dart';
 import '../../center/center_logic.dart';
+import '../../dictation/dictation_controller.dart';
+import '../../knowledge_review/knowledge_controller.dart';
+import '../../math_exercise/math_controller.dart';
+import '../../reader/reader_controller.dart';
 import '../data/home_models.dart';
 import '../home_controller.dart';
 import '../home_logic.dart';
@@ -30,6 +35,15 @@ class _HomePageState extends ConsumerState<HomePage> {
       case TaskAction.openListening:
         ref.read(centerControllerProvider.notifier).openForTask(t.id, CenterTab.listening);
         context.go('/center');
+      case TaskAction.openMath:
+        ref.read(mathControllerProvider.notifier).init(taskId: t.id, title: t.title, content: t.content);
+        context.go('/math');
+      case TaskAction.openKnowledge:
+        ref.read(knowledgeControllerProvider.notifier).init(taskId: t.id, title: t.title, content: t.content);
+        context.go('/knowledge');
+      case TaskAction.openDictation:
+        ref.read(dictationControllerProvider.notifier).init(taskId: t.id, title: t.title, subject: t.subject, content: t.content);
+        context.go('/dictation');
       case TaskAction.comingSoon:
         showMessage(context, '该练习即将在 App 上线，可先在网页版完成');
       case TaskAction.done:
@@ -93,6 +107,22 @@ class _HomePageState extends ConsumerState<HomePage> {
         onRefresh: () => ref.read(homeControllerProvider.notifier).reload(),
         child: ListView(padding: const EdgeInsets.all(20), children: [
           GreetingHeader(name: data.snapshot.userName, points: data.points, now: now),
+          const SizedBox(height: 16),
+          // 个性化学习入口
+          Card(
+            color: AppColors.blue,
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              leading: const Icon(Icons.auto_stories, color: Colors.white, size: 32),
+              title: const Text('个性化学习', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+              subtitle: const Text('选教材读原文，划词查释义、记笔记', style: TextStyle(color: Colors.white70)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.white),
+              onTap: () {
+                ref.read(readerControllerProvider.notifier).loadDocuments();
+                context.go('/reader');
+              },
+            ),
+          ),
           const SizedBox(height: 16),
           if (wide)
             IntrinsicHeight(

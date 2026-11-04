@@ -41,6 +41,7 @@ class StudyTask {
     required this.detail,
     required this.points,
     required this.submitStatus,
+    this.content = '',
   });
 
   factory StudyTask.fromJson(Map<String, dynamic> j) => StudyTask(
@@ -51,6 +52,7 @@ class StudyTask {
         detail: (j['detail'] as String?) ?? '',
         points: _int(j['points'], 0),
         submitStatus: (j['submit_status'] as String?) ?? 'not_started',
+        content: (j['content'] as String?) ?? '',
       );
 
   final int id;
@@ -60,4 +62,7 @@ class StudyTask {
   final String detail;
   final int points;
   final String submitStatus;
+
+  /// 任务内容（JSON 字符串）：数学题 [{question, answer}]、知识点 [{id, content, keywords, ...}]、听写 [{id, word, extra}]
+  final String content;
 }

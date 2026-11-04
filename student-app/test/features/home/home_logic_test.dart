@@ -40,7 +40,10 @@ void main() {
     expect(taskAction(task(1, '语文', 'math', 'submitted')), TaskAction.waiting);
     expect(taskAction(task(1, '语文', 'reading', 'not_started')), TaskAction.openReading);
     expect(taskAction(task(1, '英语', 'listening', 'not_started')), TaskAction.openListening);
-    for (final type in ['dictation', 'math', 'knowledge', 'review', 'custom']) {
+    expect(taskAction(task(1, '语文', 'dictation', 'not_started')), TaskAction.openDictation);
+    expect(taskAction(task(1, '语文', 'math', 'not_started')), TaskAction.openMath);
+    expect(taskAction(task(1, '语文', 'knowledge', 'not_started')), TaskAction.openKnowledge);
+    for (final type in ['review', 'custom']) {
       expect(taskAction(task(1, '语文', type, 'not_started')), TaskAction.comingSoon);
     }
   });

@@ -18,7 +18,10 @@ class CenterRepository {
     final lp = snap['lesson_progress'];
     final lessonId = lp is Map && lp['current_lesson_id'] is num ? (lp['current_lesson_id'] as num).toInt() : null;
     if (lessonId == null) return CenterMaterial.empty;
-    return CenterMaterial.fromJson(asMap(await _api.get('/api/reading/material', query: {'lesson_id': lessonId})));
+    return CenterMaterial.fromJson(
+      asMap(await _api.get('/api/reading/material', query: {'lesson_id': lessonId})),
+      lessonId: lessonId,
+    );
   }
 
   Future<void> submitWrong({

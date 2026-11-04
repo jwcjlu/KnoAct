@@ -5,10 +5,12 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import '../center/center_controller.dart';
 import '../home/home_controller.dart';
+import '../wrongbook/wrongbook_controller.dart';
 
 const _destinations = [
   (icon: Icons.home_outlined, selected: Icons.home, label: '首页'),
   (icon: Icons.menu_book_outlined, selected: Icons.menu_book, label: '学习中心'),
+  (icon: Icons.error_outline, selected: Icons.error, label: '错题本'),
   (icon: Icons.person_outline, selected: Icons.person, label: '我的'),
 ];
 
@@ -35,7 +37,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (to == 1) ref.read(centerControllerProvider.notifier).enter();
     if (from == null) return;
     if (to == 0) ref.read(homeControllerProvider.notifier).reload();
-    if (to == 2) ref.invalidate(pointsProvider);
+    if (to == 2) ref.read(wrongbookControllerProvider.notifier).reload();
+    if (to == 3) ref.invalidate(pointsProvider);
   }
 
   @override

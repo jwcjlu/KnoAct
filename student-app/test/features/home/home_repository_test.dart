@@ -18,6 +18,9 @@ class FakeApi implements ApiClient {
   @override
   Future<({List<int> bytes, String contentType})> getBytes(String path, {Map<String, dynamic>? query}) =>
       throw UnimplementedError();
+
+  @override
+  Future<Stream<List<int>>> postStream(String path, {Object? body}) => throw UnimplementedError();
 }
 
 void main() {

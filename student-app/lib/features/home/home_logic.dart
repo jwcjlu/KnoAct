@@ -26,13 +26,16 @@ Map<String, ({int done, int total})> subjectProgress(List<StudyTask> tasks) => {
   return (todo: list.where((t) => !isDone(t)).toList(), done: list.where(isDone).toList());
 }
 
-enum TaskAction { done, waiting, openReading, openListening, comingSoon }
+enum TaskAction { done, waiting, openReading, openListening, openMath, openKnowledge, openDictation, comingSoon }
 
 TaskAction taskAction(StudyTask t) {
   if (t.submitStatus == 'approved') return TaskAction.done;
   if (t.submitStatus == 'submitted') return TaskAction.waiting;
   if (t.taskType == 'reading') return TaskAction.openReading;
   if (t.taskType == 'listening') return TaskAction.openListening;
+  if (t.taskType == 'math') return TaskAction.openMath;
+  if (t.taskType == 'knowledge') return TaskAction.openKnowledge;
+  if (t.taskType == 'dictation') return TaskAction.openDictation;
   return TaskAction.comingSoon;
 }
 

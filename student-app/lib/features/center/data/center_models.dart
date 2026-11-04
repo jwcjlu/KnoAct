@@ -6,9 +6,9 @@ class CenterQuestion {
 }
 
 class CenterMaterial {
-  const CenterMaterial({required this.text, required this.questions});
+  const CenterMaterial({required this.text, required this.questions, this.lessonId});
 
-  factory CenterMaterial.fromJson(Map<String, dynamic> j) {
+  factory CenterMaterial.fromJson(Map<String, dynamic> j, {int? lessonId}) {
     final qs = j['questions'];
     return CenterMaterial(
       text: '${j['text'] ?? ''}',
@@ -16,6 +16,7 @@ class CenterMaterial {
         if (qs is List)
           for (final q in qs.whereType<Map>()) CenterQuestion('${q['question'] ?? ''}', '${q['answer'] ?? ''}'),
       ],
+      lessonId: lessonId,
     );
   }
 
@@ -23,6 +24,9 @@ class CenterMaterial {
 
   final String text;
   final List<CenterQuestion> questions;
+
+  /// 当前阅读课的 id；「边读边问」和「做作业」需要它（听力材料无 lesson）
+  final int? lessonId;
 
   bool get isEmpty => text.isEmpty || questions.isEmpty;
 }

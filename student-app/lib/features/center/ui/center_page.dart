@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
+import '../../ask/ask_controller.dart';
+import '../../ask/ui/ask_panel.dart';
+import '../../assignment/assignment_controller.dart';
+import '../../reader/reader_controller.dart';
 import '../center_controller.dart';
 import '../center_logic.dart';
 import '../data/center_models.dart';
@@ -21,6 +26,21 @@ class CenterPage extends ConsumerWidget {
     final ctl = ref.read(centerControllerProvider.notifier);
     return ListView(padding: const EdgeInsets.all(20), children: [
       const Text('学习中心', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 12),
+      SectionCard(
+        padding: const EdgeInsets.all(12),
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.auto_stories, color: AppColors.blue),
+          title: const Text('个性化学习', style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text('选教材读原文，划词查释义、记笔记', style: TextStyle(fontSize: 12)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            ref.read(readerControllerProvider.notifier).loadDocuments();
+            context.go('/reader');
+          },
+        ),
+      ),
       const SizedBox(height: 12),
       SegmentedButton<CenterTab>(
         segments: [
@@ -90,7 +110,7 @@ class _MaterialView extends ConsumerWidget {
             : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('阅读课文', style: TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
-                Text(material.text, style: const TextStyle(height: 1.7)),
+                _ReadingView(material: material),
               ]),
       ),
       const SizedBox(height: 12),
@@ -178,5 +198,94 @@ class _QuestionCardState extends ConsumerState<_QuestionCard> {
           ),
       ]),
     );
+  }
+}
+
+class _ReadingView extends ConsumerStatefulWidget {
+  const _ReadingView({required this.material});
+
+  final CenterMaterial material;
+
+  @override
+  ConsumerState<_ReadingView> createState() => _ReadingViewState();
+}
+
+class _ReadingViewState extends ConsumerState<_ReadingView> {
+  int? _selected;
+  bool _chatOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initAsk();
+  }
+
+  void _initAsk() {
+    final lessonId = widget.material.lessonId;
+    if (lessonId == null) return;
+    ref.read(askControllerProvider.notifier).init(lessonId: lessonId, context: widget.material.text);
+  }
+
+  void _select(int i, List<String> sentences) {
+    setState(() {
+      _selected = _selected == i ? null : i;
+      final sentence = _selected == null ? '' : sentences[i];
+      ref.read(askControllerProvider.notifier).setSelected(sentence);
+      // 选中句子即展开对话栏，就地提问
+      _chatOpen = true;
+    });
+  }
+
+  void _doAssignment() {
+    final lessonId = widget.material.lessonId;
+    if (lessonId == null) return;
+    ref.read(assignmentControllerProvider.notifier).init(lessonId: lessonId, subject: '语文');
+    context.go('/assignment');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sentences = splitSentences(widget.material.text);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // 课文文本（点句选中，成为对话引用）
+      Text.rich(
+        TextSpan(
+          children: [
+            for (var i = 0; i < sentences.length; i++)
+              WidgetSpan(
+                child: GestureDetector(
+                  onTap: () => _select(i, sentences),
+                  child: Text(
+                    sentences[i],
+                    style: TextStyle(
+                      height: 1.7,
+                      backgroundColor: _selected == i ? AppColors.blueSoft : null,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 4),
+      const Text('点选句子，可就它提问', style: TextStyle(color: AppColors.gray, fontSize: 12)),
+      const SizedBox(height: 12),
+      if (_chatOpen)
+        const AskPanel()
+      else
+        FilledButton.icon(
+          key: const ValueKey('open-ask'),
+          onPressed: () => setState(() => _chatOpen = true),
+          icon: const Icon(Icons.auto_awesome, size: 18),
+          label: const Text('问问 AI'),
+        ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        key: const ValueKey('do-assignment'),
+        onPressed: _doAssignment,
+        icon: const Icon(Icons.edit_note, size: 18),
+        label: const Text('本课作业'),
+      ),
+    ]);
   }
 }

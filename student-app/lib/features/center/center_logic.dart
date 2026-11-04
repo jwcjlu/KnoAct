@@ -1,3 +1,5 @@
+export '../../core/text_utils.dart' show splitSentences;
+
 enum CenterTab { listening, reading }
 
 extension CenterTabX on CenterTab {

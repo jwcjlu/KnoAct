@@ -4,13 +4,20 @@ import 'package:go_router/go_router.dart';
 
 import '../features/auth/session.dart';
 import '../features/auth/ui/login_page.dart';
+import '../features/assignment/ui/assignment_page.dart';
 import '../features/center/ui/center_page.dart';
+import '../features/dictation/ui/dictation_page.dart';
 import '../features/home/ui/home_page.dart';
+import '../features/knowledge_review/ui/knowledge_page.dart';
+import '../features/math_exercise/ui/math_page.dart';
 import '../features/profile/ui/profile_page.dart';
+import '../features/reader/ui/reader_home_page.dart';
+import '../features/reader/ui/reader_view_page.dart';
 import '../features/shell/app_shell.dart';
+import '../features/wrongbook/ui/wrongbook_page.dart';
 
 /// 登录后可访问的页面；登录页与未知路径一律回到首页
-const _shellPaths = {'/home', '/center', '/profile'};
+const _shellPaths = {'/home', '/center', '/wrongbook', '/profile'};
 
 final routerProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier<int>(0);
@@ -23,15 +30,31 @@ final routerProvider = Provider<GoRouter>((ref) {
       final loggedIn = ref.read(sessionProvider).value != null;
       final path = state.uri.path;
       if (!loggedIn) return path == '/login' ? null : '/login';
-      return _shellPaths.contains(path) ? null : '/home';
+      if (_shellPaths.contains(path) ||
+          path == '/assignment' ||
+          path == '/math' ||
+          path == '/knowledge' ||
+          path == '/dictation' ||
+          path == '/reader' ||
+          path == '/reader/view') {
+        return null;
+      }
+      return '/home';
     },
     routes: [
       GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
+      GoRoute(path: '/assignment', builder: (_, _) => const AssignmentPage()),
+      GoRoute(path: '/math', builder: (_, _) => const MathPage()),
+      GoRoute(path: '/knowledge', builder: (_, _) => const KnowledgePage()),
+      GoRoute(path: '/dictation', builder: (_, _) => const DictationPage()),
+      GoRoute(path: '/reader', builder: (_, _) => const ReaderHomePage()),
+      GoRoute(path: '/reader/view', builder: (_, _) => const ReaderViewPage()),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => AppShell(navigationShell: shell),
         branches: [
           StatefulShellBranch(routes: [GoRoute(path: '/home', builder: (_, _) => const HomePage())]),
           StatefulShellBranch(routes: [GoRoute(path: '/center', builder: (_, _) => const CenterPage())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/wrongbook', builder: (_, _) => const WrongbookPage())]),
           StatefulShellBranch(routes: [GoRoute(path: '/profile', builder: (_, _) => const ProfilePage())]),
         ],
       ),

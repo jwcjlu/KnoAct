@@ -68,6 +68,10 @@ class FakeSpeechPlayer implements SpeechPlayer {
 
 Future<(ProviderContainer, FakeCenterRepository, FakeHomeRepository, FakeSpeechPlayer)> pumpCenter(WidgetTester tester) async {
   SharedPreferences.setMockInitialValues({'knoact_child_id': 4, 'knoact_child_name': '金同学'});
+  // 阅读页含个性化学习入口 + 课文 + 对话栏 + 题目 + 提交按钮，用较高窗口避免按钮被挤出屏幕
+  tester.view.physicalSize = const Size(420, 1400);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
   final center = FakeCenterRepository();
   final home = FakeHomeRepository();
   final speech = FakeSpeechPlayer();
@@ -102,6 +106,7 @@ void main() {
 
     await tester.enterText(find.byKey(const ValueKey('answer-0')), '春天');
     await tester.pump();
+    await tester.ensureVisible(find.byKey(const ValueKey('submit-0')));
     await tester.tap(find.byKey(const ValueKey('submit-0')));
     await tester.pumpAndSettle();
     expect(find.text('答错了，已收录进错题本'), findsOneWidget);
@@ -147,12 +152,15 @@ void main() {
     home.failSubmit = true;
     await tester.enterText(find.byKey(const ValueKey('answer-0')), '秋天');
     await tester.pump();
+    await tester.ensureVisible(find.byKey(const ValueKey('submit-0')));
     await tester.tap(find.byKey(const ValueKey('submit-0')));
     await tester.pumpAndSettle();
     expect(find.text('提交任务失败，请稍后重试'), findsOneWidget);
     expect(find.text('重新提交'), findsOneWidget);
 
     home.failSubmit = false;
+    await tester.dragUntilVisible(find.text('重新提交'), find.byType(ListView).first, const Offset(0, -200));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('重新提交'));
     await tester.pumpAndSettle();
     expect(home.submitted, [85]);
