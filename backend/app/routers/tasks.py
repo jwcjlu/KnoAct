@@ -60,8 +60,12 @@ def _to_dict(t: Task) -> dict:
 
 
 @router.get("")
-def list_tasks(user_id: int, date: date, role: str = "child", db: Session = Depends(get_db)):
+def list_tasks(user_id: int, date: date, role: str = "child", bucket_id: int | None = None, db: Session = Depends(get_db)):
+    from ..services.bucket_guard import resolve_bucket_id
+    bid = resolve_bucket_id(db, user_id, bucket_id)
     q = db.query(Task).filter_by(user_id=user_id, date=date)
+    if bid is not None:
+        q = q.filter_by(bucket_id=bid)
     if role == "child":
         q = q.filter_by(content_status="published")
     tasks = q.order_by(Task.id).all()

@@ -205,7 +205,7 @@ function childSelectHtml(){
 }
 function switchBucket(id){
   bucketId = Number(id) || null;
-  goalRows = []; reportRows = []; masteryReport = null;
+  goalRows = []; reportRows = []; masteryReport = null; parentTasks = [];
   reloadChildData().catch(()=>toast('加载孩子数据失败，请稍后重试'));
   if(CHILD_TABS.includes(parentTab)) render(); else renderChildSelect();
 }
@@ -255,8 +255,9 @@ async function loadKnowledge(){
 }
 async function loadGoals(){
   if(!uid){ goalRows = []; return; }
-  const u = uid;
-  const rows = await api(`/api/goals?user_id=${u}`);
+  const u = uid, b = bucketId;
+  const q = b ? `&bucket_id=${b}` : '';
+  const rows = await api(`/api/goals?user_id=${u}${q}`);
   if(u === uid) goalRows = rows;
 }
 async function loadReport(){
@@ -444,8 +445,9 @@ async function loadParentTasks(){
     const t = new Date();
     parentTaskDate = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
   }
-  const u = uid;
-  const tasks = await api(`/api/tasks?user_id=${u}&date=${parentTaskDate}&role=parent`);
+  const u = uid, b = bucketId;
+  const q = b ? `&bucket_id=${b}` : '';
+  const tasks = await api(`/api/tasks?user_id=${u}&date=${parentTaskDate}&role=parent${q}`);
   if(u === uid) parentTasks = Array.isArray(tasks) ? tasks : [];
 }
 const TASK_TYPE_LABEL = {

@@ -5,6 +5,7 @@ from app.database import SessionLocal
 from app.models import (
     User, Task, Point, LearningProgress, Mistake, Goal, LearningRecord,
     PdfDocument, Lesson, WordBank, KnowledgePoint, Text, WordMastery,
+    SchoolYearBucket,
 )
 from app.services.task_gen import generate_tasks_for_user
 
@@ -52,6 +53,32 @@ def test_approve_then_child_sees_task():
     assert client.post(f"/api/tasks/{tid}/approve").json() == {"ok": True}
     r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=child")
     assert len(r.json()) >= 1
+
+
+def test_list_tasks_filters_by_bucket_id():
+    uid = _seed()
+    db = SessionLocal()
+    b1 = SchoolYearBucket(user_id=uid, grade=3, school_year="2025-2026", status="archived")
+    b2 = SchoolYearBucket(user_id=uid, grade=4, school_year="2026-2027", status="active")
+    db.add_all([b1, b2])
+    db.flush()
+    t1 = Task(user_id=uid, date=date.today(), subject="语文", task_type="dictation",
+              title="历史桶任务", content_status="published", bucket_id=b1.id)
+    t2 = Task(user_id=uid, date=date.today(), subject="数学", task_type="custom",
+              title="当前桶任务", content_status="published", bucket_id=b2.id)
+    db.add_all([t1, t2])
+    db.commit()
+    b1id, b2id = b1.id, b2.id
+    db.close()
+
+    # 按历史桶过滤只返回该桶任务
+    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b1id}")
+    titles = [t["title"] for t in r.json()]
+    assert titles == ["历史桶任务"]
+
+    r2 = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b2id}")
+    titles2 = [t["title"] for t in r2.json()]
+    assert titles2 == ["当前桶任务"]
 
 
 def test_add_custom_task_and_confirm_awards_points():
