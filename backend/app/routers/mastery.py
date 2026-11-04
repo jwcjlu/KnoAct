@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import KnowledgeMastery, KnowledgePoint
 from ..services.mastery import record_attempt as _record
+from ..services.bucket_guard import resolve_bucket_id
 
 router = APIRouter(prefix="/api/mastery", tags=["mastery"])
 
@@ -21,10 +22,14 @@ class RecordReq(BaseModel):
 
 
 @router.get("/overview")
-def overview(user_id: int, subject: str = "", db: Session = Depends(get_db)):
+def overview(user_id: int, subject: str = "", bucket_id: int | None = None,
+             db: Session = Depends(get_db)):
+    bid = resolve_bucket_id(db, user_id, bucket_id)
     q = (db.query(KnowledgeMastery, KnowledgePoint)
          .join(KnowledgePoint, KnowledgeMastery.knowledge_point_id == KnowledgePoint.id)
          .filter(KnowledgeMastery.user_id == user_id))
+    if bid is not None:
+        q = q.filter(KnowledgeMastery.bucket_id == bid)
     if subject:
         q = q.filter(KnowledgePoint.subject == subject)
     rows = q.all()
@@ -40,13 +45,17 @@ def overview(user_id: int, subject: str = "", db: Session = Depends(get_db)):
 
 @router.post("/record")
 def record(req: RecordReq, db: Session = Depends(get_db)):
-    mastery = _record(db, req.user_id, req.target_type, req.target_id, req.is_correct)
+    bid = resolve_bucket_id(db, req.user_id, None)
+    mastery = _record(db, req.user_id, req.target_type, req.target_id,
+                      req.is_correct, bucket_id=bid)
     return {"mastery": mastery}
 
 
 @router.get("/report")
-def report(user_id: int, subject: str = "", db: Session = Depends(get_db)):
+def report(user_id: int, subject: str = "", bucket_id: int | None = None,
+           db: Session = Depends(get_db)):
     """掌握度报告：已掌握 / 薄弱 / 总数。"""
+    bid = resolve_bucket_id(db, user_id, bucket_id)
     kp_q = db.query(KnowledgePoint)
     if subject:
         kp_q = kp_q.filter(KnowledgePoint.subject == subject)
@@ -58,7 +67,8 @@ def report(user_id: int, subject: str = "", db: Session = Depends(get_db)):
     weak = 0
     for kp in all_kps:
         km = (db.query(KnowledgeMastery)
-              .filter_by(user_id=user_id, knowledge_point_id=kp.id).first())
+              .filter_by(user_id=user_id, knowledge_point_id=kp.id,
+                         bucket_id=bid).first())
         if km is None:
             continue  # 未答过，不计入 weak
         attempts = json.loads(km.attempts or "[]")

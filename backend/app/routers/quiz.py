@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Quiz, Text, KnowledgePoint, Lesson
 from ..services.quiz import grade_answers, strip_key
+from ..services.bucket_guard import resolve_bucket_id
 
 router = APIRouter(prefix="/api", tags=["read-and-ask"])
 
@@ -62,6 +63,7 @@ def quiz_generate(req: QuizGenerateReq, db: Session = Depends(get_db)):
     if not result.get("questions"):
         raise HTTPException(status_code=503, detail=result.get("error", "AI 未配置"))
     quiz = Quiz(lesson_id=req.lesson_id, user_id=req.user_id,
+                bucket_id=resolve_bucket_id(db, req.user_id, None),
                 questions=json.dumps(result["questions"], ensure_ascii=False))
     db.add(quiz)
     db.commit()
@@ -93,7 +95,8 @@ def quiz_submit(req: QuizSubmitReq, db: Session = Depends(get_db)):
         for q, r in zip(questions, results):
             kpid = q.get("knowledge_point_id")
             if kpid is not None:
-                record_mastery(db, quiz.user_id, "knowledge", kpid, r["is_correct"])
+                record_mastery(db, quiz.user_id, "knowledge", kpid, r["is_correct"],
+                               bucket_id=quiz.bucket_id)
     if quiz.user_id:
         from ..services.quiz import record_quiz_mistake
         for q, r in zip(questions, results):
@@ -105,7 +108,8 @@ def quiz_submit(req: QuizSubmitReq, db: Session = Depends(get_db)):
                     if isinstance(sel, int) and 0 <= sel < len(q["choices"]) else "")
             correct = q["choices"][q["correct_index"]]
             record_quiz_mistake(db, quiz.user_id, q["prompt"], your, correct,
-                                q.get("knowledge_point_id"))
+                                q.get("knowledge_point_id"),
+                                bucket_id=quiz.bucket_id)
     score = sum(1 for r in results if r["is_correct"])
     quiz.score = score
     db.commit()

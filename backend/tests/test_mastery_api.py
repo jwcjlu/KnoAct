@@ -58,3 +58,21 @@ def test_mastery_report_counts(setup_db):
     assert data["total"] >= 1
     assert data["mastered"] + data["weak"] >= 1
     assert len(data["rows"]) >= 1
+
+
+def test_mastery_record_scoped_to_bucket(setup_db, db):
+    from app.services.bucket_service import ensure_bucket
+    from app.models import User, KnowledgeMastery, KnowledgePoint, Lesson, PdfDocument
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="")
+    db.add(doc); db.flush()
+    lesson = Lesson(document_id=doc.id, subject="语文", title="课", start_page=1, end_page=1)
+    db.add(lesson); db.flush()
+    kp = KnowledgePoint(lesson_id=lesson.id, subject="语文", category="字词", content="苹果")
+    db.add(kp); db.flush()
+    u = User(name="晨晨", role="child", grade=3)
+    db.add(u); db.commit()
+    b = ensure_bucket(db, u.id)
+    from app.services.mastery import record_attempt
+    record_attempt(db, u.id, "knowledge", kp.id, True, bucket_id=b.id)
+    row = db.query(KnowledgeMastery).filter_by(user_id=u.id, knowledge_point_id=kp.id).first()
+    assert row.bucket_id == b.id

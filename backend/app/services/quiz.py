@@ -172,10 +172,12 @@ def grade_answers(questions: list[dict], answers: list[dict]) -> list[dict]:
 
 def record_quiz_mistake(db: Session, user_id: int, question: str,
                         your_answer: str, correct_answer: str,
-                        kp_id: int | None = None) -> None:
+                        kp_id: int | None = None,
+                        bucket_id: int | None = None) -> None:
     """测验答错收错题本，按 (user_id, kp_id, question) 去重累加。"""
     from ..models import Mistake
-    q = db.query(Mistake).filter_by(user_id=user_id, question=question)
+    q = db.query(Mistake).filter_by(user_id=user_id, question=question,
+                                    bucket_id=bucket_id)
     if kp_id is not None:
         q = q.filter_by(knowledge_point_id=kp_id)
     existing = q.first()
@@ -187,5 +189,6 @@ def record_quiz_mistake(db: Session, user_id: int, question: str,
             user_id=user_id, source_type="reading",
             question=question, your_answer=your_answer,
             correct_answer=correct_answer, knowledge_point_id=kp_id,
+            bucket_id=bucket_id,
         ))
     db.commit()

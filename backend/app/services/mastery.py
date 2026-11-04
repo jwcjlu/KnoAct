@@ -76,22 +76,27 @@ def _append(attempts: list, is_correct: bool) -> tuple[float, bool, datetime]:
 
 
 def record_attempt(db: Session, user_id: int, target_type: str,
-                   target_id: int, is_correct: bool) -> float:
+                   target_id: int, is_correct: bool,
+                   bucket_id: int | None = None) -> float:
     """记录一次答题，更新对应掌握度。返回新 mastery。
 
     target_type: 'knowledge' | 'word'
     """
     if target_type == "knowledge":
         row = (db.query(KnowledgeMastery)
-               .filter_by(user_id=user_id, knowledge_point_id=target_id).first())
+               .filter_by(user_id=user_id, knowledge_point_id=target_id,
+                          bucket_id=bucket_id).first())
         if not row:
-            row = KnowledgeMastery(user_id=user_id, knowledge_point_id=target_id)
+            row = KnowledgeMastery(user_id=user_id, knowledge_point_id=target_id,
+                                   bucket_id=bucket_id)
             db.add(row)
     else:
         row = (db.query(WordMastery)
-               .filter_by(user_id=user_id, word_bank_id=target_id).first())
+               .filter_by(user_id=user_id, word_bank_id=target_id,
+                          bucket_id=bucket_id).first())
         if not row:
             row = WordMastery(user_id=user_id, word_bank_id=target_id,
+                              bucket_id=bucket_id,
                               correct_count=0, mistake_count=0, is_weak=False)
             db.add(row)
 
