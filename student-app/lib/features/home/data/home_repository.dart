@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/providers.dart';
+import '../../wrongbook/data/bucket_models.dart';
 import 'home_models.dart';
 
 class HomeRepository {
@@ -17,10 +18,16 @@ class HomeRepository {
     return [for (final t in list) StudyTask.fromJson(asMap(t))];
   }
 
-  Future<int> balance(int userId) async {
-    final d = asMap(await _api.get('/api/points/balance', query: {'user_id': userId}));
+  Future<int> balance(int userId, {int? bucketId}) async {
+    final d = asMap(await _api.get('/api/points/balance', query: {
+      'user_id': userId,
+      'bucket_id': ?bucketId,
+    }));
     return (d['balance'] as num?)?.toInt() ?? 0;
   }
+
+  Future<List<BucketInfo>> buckets(int userId) async =>
+      parseBuckets(await _api.get('/api/buckets', query: {'user_id': userId}));
 
   /// 返回是否兑换成功（积分不足为 false）
   Future<bool> redeem(int userId, String device, int minutes) async {

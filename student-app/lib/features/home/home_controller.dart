@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/session.dart';
+import '../wrongbook/data/bucket_models.dart';
 import 'data/home_models.dart';
 import 'data/home_repository.dart';
 import 'home_logic.dart';
@@ -29,6 +30,8 @@ class HomeController extends AsyncNotifier<HomeData> {
   @override
   Future<HomeData> build() {
     final uid = ref.watch(currentChildIdProvider);
+    // 学年桶切换（含首次解析出 active 桶）时重新加载，把 bucketId 带进 balance 查询
+    ref.watch(homeBucketsProvider.select((s) => s.bucketId));
     _gen++;
     if (uid != _uid) {
       _uid = uid;
@@ -44,7 +47,7 @@ class HomeController extends AsyncNotifier<HomeData> {
     final results = await Future.wait([
       repo.snapshot(uid, subject),
       repo.tasks(uid, apiDate(DateTime.now())),
-      repo.balance(uid),
+      repo.balance(uid, bucketId: ref.read(homeBucketsProvider).bucketId),
     ]);
     return HomeData(
       childId: uid,
@@ -91,9 +94,72 @@ class HomeController extends AsyncNotifier<HomeData> {
 
 final homeControllerProvider = AsyncNotifierProvider.autoDispose<HomeController, HomeData>(HomeController.new);
 
+/// 首页积分学年桶选择（active + archived）。
+/// 换孩子时重建并解析出默认选中的 active 桶。
+class HomeBucketsState {
+  const HomeBucketsState({this.buckets = const [], this.bucketId, this.isReadOnly = false});
+
+  final List<BucketInfo> buckets;
+  final int? bucketId;
+  final bool isReadOnly;
+}
+
+class HomeBucketsController extends Notifier<HomeBucketsState> {
+  int _loadToken = 0;
+
+  int? get _uid => ref.read(currentChildIdProvider);
+
+  @override
+  HomeBucketsState build() {
+    ref.watch(currentChildIdProvider);
+    _loadToken++;
+    _resolve();
+    return const HomeBucketsState();
+  }
+
+  bool _stale(int token, int uid) => !ref.mounted || token != _loadToken || _uid != uid;
+
+  Future<void> setBucket(int id) async {
+    if (state.bucketId == id) return;
+    final bucket = _bucket(id);
+    state = HomeBucketsState(
+      buckets: state.buckets,
+      bucketId: id,
+      isReadOnly: bucket == null ? false : !bucket.isActive,
+    );
+    ref.invalidate(pointsProvider);
+  }
+
+  BucketInfo? _bucket(int id) {
+    for (final b in state.buckets) {
+      if (b.id == id) return b;
+    }
+    return null;
+  }
+
+  Future<void> _resolve() async {
+    final uid = _uid;
+    if (uid == null) return;
+    final token = ++_loadToken;
+    final buckets = await AsyncValue.guard(() => ref.read(homeRepositoryProvider).buckets(uid));
+    if (_stale(token, uid)) return;
+    final list = buckets.value ?? const <BucketInfo>[];
+    final active = list.where((b) => b.isActive);
+    final selected = active.isNotEmpty ? active.first : (list.isNotEmpty ? list.first : null);
+    state = HomeBucketsState(
+      buckets: list,
+      bucketId: selected?.id,
+      isReadOnly: selected == null ? false : !selected.isActive,
+    );
+  }
+}
+
+final homeBucketsProvider = NotifierProvider<HomeBucketsController, HomeBucketsState>(HomeBucketsController.new);
+
 /// 「我的」页积分（以 /api/points/balance 为准）；未登录时保持加载中
 final pointsProvider = FutureProvider.autoDispose<int>((ref) {
   final uid = ref.watch(currentChildIdProvider);
   if (uid == null) return Completer<int>().future;
-  return ref.read(homeRepositoryProvider).balance(uid);
+  final bucketId = ref.watch(homeBucketsProvider).bucketId;
+  return ref.read(homeRepositoryProvider).balance(uid, bucketId: bucketId);
 });

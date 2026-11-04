@@ -11,6 +11,7 @@ import 'package:student_app/features/center/speech_player.dart';
 import 'package:student_app/features/center/ui/center_page.dart';
 import 'package:student_app/features/home/data/home_models.dart';
 import 'package:student_app/features/home/data/home_repository.dart';
+import 'package:student_app/features/wrongbook/data/bucket_models.dart';
 
 class FakeCenterRepository implements CenterRepository {
   final wrong = <String>[];
@@ -44,7 +45,9 @@ class FakeHomeRepository implements HomeRepository {
   @override
   Future<List<StudyTask>> tasks(int userId, String date) => throw UnimplementedError();
   @override
-  Future<int> balance(int userId) => throw UnimplementedError();
+  Future<int> balance(int userId, {int? bucketId}) => throw UnimplementedError();
+  @override
+  Future<List<BucketInfo>> buckets(int userId) async => const [];
   @override
   Future<bool> redeem(int userId, String device, int minutes) => throw UnimplementedError();
 }

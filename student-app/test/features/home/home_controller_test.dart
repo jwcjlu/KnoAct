@@ -10,6 +10,7 @@ import 'package:student_app/features/home/data/home_models.dart';
 import 'package:student_app/features/home/data/home_repository.dart';
 import 'package:student_app/features/home/home_controller.dart';
 import 'package:student_app/features/home/ui/home_page.dart';
+import 'package:student_app/features/wrongbook/data/bucket_models.dart';
 
 const _lessonBySubject = {'语文': 3, '英语': 5, '数学': 2};
 
@@ -20,6 +21,7 @@ class ControllableHomeRepository implements HomeRepository {
   int redeemCalls = 0;
   int snapshotCalls = 0;
   int balanceCalls = 0;
+  List<BucketInfo> bucketList = const [];
 
   @override
   Future<HomeSnapshot> snapshot(int userId, String subject) async {
@@ -39,10 +41,13 @@ class ControllableHomeRepository implements HomeRepository {
       ];
 
   @override
-  Future<int> balance(int userId) async {
+  Future<int> balance(int userId, {int? bucketId}) async {
     balanceCalls++;
     return 350;
   }
+
+  @override
+  Future<List<BucketInfo>> buckets(int userId) async => bucketList;
 
   @override
   Future<bool> redeem(int userId, String device, int minutes) async {

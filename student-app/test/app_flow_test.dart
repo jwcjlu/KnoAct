@@ -12,6 +12,7 @@ import 'package:student_app/features/center/data/center_repository.dart';
 import 'package:student_app/features/center/speech_player.dart';
 import 'package:student_app/features/home/data/home_models.dart';
 import 'package:student_app/features/home/data/home_repository.dart';
+import 'package:student_app/features/wrongbook/data/bucket_models.dart';
 
 const _a = Child(4, '金同学');
 const _b = Child(5, '李同学');
@@ -45,7 +46,10 @@ class FlowHomeRepository implements HomeRepository {
       ];
 
   @override
-  Future<int> balance(int userId) async => _points[userId]!;
+  Future<int> balance(int userId, {int? bucketId}) async => _points[userId]!;
+
+  @override
+  Future<List<BucketInfo>> buckets(int userId) async => const [];
 
   @override
   Future<bool> redeem(int userId, String device, int minutes) async => true;

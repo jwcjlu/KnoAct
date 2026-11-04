@@ -108,6 +108,8 @@ class _HomePageState extends ConsumerState<HomePage> {
         child: ListView(padding: const EdgeInsets.all(20), children: [
           GreetingHeader(name: data.snapshot.userName, points: data.points, now: now),
           const SizedBox(height: 16),
+          const _BucketSelector(),
+          const SizedBox(height: 16),
           // 个性化学习入口
           Card(
             color: AppColors.blue,
@@ -189,5 +191,38 @@ class _TaskGrid extends StatelessWidget {
         for (final w in children) SizedBox(width: width, child: w),
       ]);
     });
+  }
+}
+
+/// 首页积分学年切换：只有一个桶时隐藏，选中历史学年时显示提示
+class _BucketSelector extends ConsumerWidget {
+  const _BucketSelector();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(homeBucketsProvider);
+    final ctl = ref.read(homeBucketsProvider.notifier);
+    if (s.buckets.length <= 1) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(spacing: 8, children: [
+        for (final b in s.buckets)
+          ChoiceChip(
+            key: ValueKey('home-bucket-${b.id}'),
+            selected: s.bucketId == b.id,
+            onSelected: (_) => ctl.setBucket(b.id),
+            label: Text('${b.schoolYear} · ${b.grade}年级${b.isActive ? '（当前）' : ''}'),
+          ),
+      ]),
+      if (s.isReadOnly) ...[
+        const SizedBox(height: 8),
+        Container(
+          key: const ValueKey('home-bucket-readonly-banner'),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(color: AppColors.orangeSoft, borderRadius: BorderRadius.circular(8)),
+          child: const Text('历史学年积分', style: TextStyle(color: AppColors.orange, fontSize: 13, fontWeight: FontWeight.w600)),
+        ),
+      ],
+    ]);
   }
 }

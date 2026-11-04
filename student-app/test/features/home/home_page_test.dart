@@ -8,15 +8,18 @@ import 'package:student_app/features/home/data/home_models.dart';
 import 'package:student_app/features/home/data/home_repository.dart';
 import 'package:student_app/features/home/ui/home_page.dart';
 import 'package:student_app/features/home/ui/home_sections.dart';
+import 'package:student_app/features/wrongbook/data/bucket_models.dart';
 
 class FakeHomeRepository implements HomeRepository {
-  FakeHomeRepository({this.fail = false});
+  FakeHomeRepository({this.fail = false, this.bucketList = const []});
 
   bool fail;
   final snapshotSubjects = <String>[];
   int redeemCalls = 0;
   bool redeemOk = true;
   int balanceValue = 350;
+  final List<BucketInfo> bucketList;
+  final balanceQueries = <int?>[];
 
   @override
   Future<HomeSnapshot> snapshot(int userId, String subject) async {
@@ -37,7 +40,13 @@ class FakeHomeRepository implements HomeRepository {
       ];
 
   @override
-  Future<int> balance(int userId) async => balanceValue;
+  Future<int> balance(int userId, {int? bucketId}) async {
+    balanceQueries.add(bucketId);
+    return balanceValue;
+  }
+
+  @override
+  Future<List<BucketInfo>> buckets(int userId) async => bucketList;
 
   @override
   Future<bool> redeem(int userId, String device, int minutes) async {
@@ -139,5 +148,36 @@ void main() {
   testWidgets('加载失败显示重试', (tester) async {
     await pumpHome(tester, FakeHomeRepository(fail: true));
     expect(find.text('重试'), findsOneWidget);
+  });
+
+  testWidgets('只有一个桶时不显示学年选择器', (tester) async {
+    final repo = FakeHomeRepository(
+      bucketList: const [BucketInfo(id: 9, grade: 4, schoolYear: '2026-2027', status: 'active')],
+    );
+    await pumpHome(tester, repo);
+    expect(find.byKey(const ValueKey('home-bucket-9')), findsNothing);
+    expect(find.byKey(const ValueKey('home-bucket-readonly-banner')), findsNothing);
+  });
+
+  testWidgets('多个桶时显示学年选择器，切到历史桶更新积分查询', (tester) async {
+    final repo = FakeHomeRepository(
+      bucketList: const [
+        BucketInfo(id: 9, grade: 4, schoolYear: '2026-2027', status: 'active'),
+        BucketInfo(id: 2, grade: 3, schoolYear: '2025-2026', status: 'archived'),
+      ],
+    );
+    await pumpHome(tester, repo);
+
+    // 两个学年 chip 都在，默认选中 active 桶，不显示只读提示
+    expect(find.text('2026-2027 · 4年级（当前）'), findsOneWidget);
+    expect(find.text('2025-2026 · 3年级'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-bucket-readonly-banner')), findsNothing);
+
+    // 切到归档桶：显示历史学年提示，积分重新查询带 bucket_id
+    await tester.tap(find.byKey(const ValueKey('home-bucket-2')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('home-bucket-readonly-banner')), findsOneWidget);
+    expect(find.text('历史学年积分'), findsOneWidget);
+    expect(repo.balanceQueries, contains(2));
   });
 }
