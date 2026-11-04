@@ -63,3 +63,13 @@ def test_point_belongs_to_bucket(setup_db, db):
     p = Point(user_id=child.id, bucket_id=b.id, delta=20, reason="完成听写")
     db.add(p); db.commit()
     assert db.get(Point, p.id).bucket_id == b.id
+
+
+def test_pdf_document_has_edition_grade(setup_db, db):
+    from app.models import PdfDocument
+    d = PdfDocument(filename="语文.pdf", subject="语文", storage_path="",
+                    edition="人教版", grade=3)
+    db.add(d); db.commit()
+    got = db.get(PdfDocument, d.id)
+    assert got.edition == "人教版"
+    assert got.grade == 3

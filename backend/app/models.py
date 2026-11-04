@@ -22,6 +22,8 @@ class PdfDocument(Base):
     filename: Mapped[str] = mapped_column(String(255))
     subject: Mapped[str] = mapped_column(String(16))  # '语文' | '英语' | '数学'
     storage_path: Mapped[str] = mapped_column(String(512))
+    edition: Mapped[str] = mapped_column(String(64), default="")  # 教材版本（人教版/苏教版…）
+    grade: Mapped[int] = mapped_column(Integer, nullable=True)  # 年级 1~6
 
 class PdfPage(Base):
     __tablename__ = "pdf_pages"
