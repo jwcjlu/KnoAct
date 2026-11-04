@@ -1,15 +1,48 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import User
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
+# 孩子档案端点：挂在 /api/children 下（前端/测试直接调用此路径）。
+children_router = APIRouter(prefix="/api/children", tags=["children"])
+
 
 @router.get("")
-def list_users(role: str | None = None, db: Session = Depends(get_db)):
-    """用户列表（家长端选择孩子用）：可按 role 过滤，按 id 升序。"""
+def list_users(role: str | None = None, parent_id: int | None = None, db: Session = Depends(get_db)):
+    """用户列表（家长端选择孩子用）：可按 role / parent_id 过滤，按 id 升序。"""
     q = db.query(User)
     if role:
         q = q.filter_by(role=role)
-    return [{"id": u.id, "name": u.name, "role": u.role} for u in q.order_by(User.id).all()]
+    if parent_id is not None:
+        q = q.filter_by(parent_id=parent_id)
+    return [{"id": u.id, "name": u.name, "role": u.role, "grade": u.grade, "edition": u.edition}
+            for u in q.order_by(User.id).all()]
+
+
+class CreateChildReq(BaseModel):
+    parent_id: int
+    name: str
+    grade: int
+    edition: str = ""
+
+
+@children_router.post("")
+def create_child(req: CreateChildReq, db: Session = Depends(get_db)):
+    from ..services.bucket_service import ensure_bucket
+    child = User(name=req.name, role="child", grade=req.grade,
+                 edition=req.edition, parent_id=req.parent_id)
+    db.add(child); db.commit(); db.refresh(child)
+    ensure_bucket(db, child.id)
+    return {"id": child.id, "name": child.name, "role": child.role,
+            "grade": child.grade, "edition": child.edition}
+
+
+@children_router.post("/{child_id}/promote")
+def promote_child(child_id: int, db: Session = Depends(get_db)):
+    from ..services.bucket_service import promote_grade
+    promote_grade(db, child_id)
+    child = db.get(User, child_id)
+    return {"id": child.id, "grade": child.grade}

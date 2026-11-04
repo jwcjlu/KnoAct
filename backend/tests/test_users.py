@@ -22,7 +22,7 @@ def test_list_children_filters_by_role_and_sorts_by_id(setup_db):
     assert resp.status_code == 200
     data = resp.json()
     assert [u["name"] for u in data] == ["金同学", "林晨"]
-    assert all(set(u) == {"id", "name", "role"} for u in data)
+    assert all(set(u) == {"id", "name", "role", "grade", "edition"} for u in data)
     assert data[0]["id"] < data[1]["id"]
 
 
