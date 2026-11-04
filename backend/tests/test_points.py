@@ -13,9 +13,11 @@ def _client():
 def test_get_points_balance(setup_db):
     from app.models import Point
     from app.database import SessionLocal
+    from app.services.bucket_service import ensure_bucket
     s = SessionLocal()
     uid = make_user(s).id
-    s.add(Point(user_id=uid, delta=100, reason="听写")); s.commit(); s.close()
+    bid = ensure_bucket(s, uid).id
+    s.add(Point(user_id=uid, bucket_id=bid, delta=100, reason="听写")); s.commit(); s.close()
     resp = _client().get(f"/api/points/balance?user_id={uid}")
     assert resp.status_code == 200
     assert resp.json()["balance"] == 100

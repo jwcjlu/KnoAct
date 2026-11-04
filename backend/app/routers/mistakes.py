@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Mistake
+from ..services.bucket_guard import resolve_bucket_id, assert_writable
 
 router = APIRouter(prefix="/api/mistakes", tags=["mistakes"])
 
@@ -13,8 +14,11 @@ REMOVE_AFTER = 3  # 连续答对 3 次自动移出错题本
 
 
 @router.get("")
-def list_mistakes(user_id: int, subject: str = "", db: Session = Depends(get_db)):
+def list_mistakes(user_id: int, subject: str = "", bucket_id: int | None = None, db: Session = Depends(get_db)):
     q = db.query(Mistake).filter_by(user_id=user_id)
+    bid = resolve_bucket_id(db, user_id, bucket_id)
+    if bid is not None:
+        q = q.filter_by(bucket_id=bid)
     if subject and subject != "全部":
         q = q.filter(Mistake.source_type.in_(_subject_sources(subject)))
     rows = q.order_by(Mistake.id.desc()).all()
@@ -43,6 +47,10 @@ def mark_correct(mistake_id: int, db: Session = Depends(get_db)):
     m = db.get(Mistake, mistake_id)
     if not m:
         return {"removed": False, "error": "not found"}
+    try:
+        assert_writable(db, m.user_id, m.bucket_id)
+    except PermissionError:
+        return {"removed": False, "error": "历史学年只读"}
     from ..services.mastery import record_attempt, GATE
 
     removed = False
@@ -68,6 +76,10 @@ def mark_wrong(mistake_id: int, db: Session = Depends(get_db)):
     m = db.get(Mistake, mistake_id)
     if not m:
         return {"error": "not found"}
+    try:
+        assert_writable(db, m.user_id, m.bucket_id)
+    except PermissionError:
+        return {"error": "历史学年只读", "removed": False}
     from ..services.mastery import record_attempt
 
     if m.word_bank_id:
@@ -82,9 +94,13 @@ def mark_wrong(mistake_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/report")
-def weakness_report(user_id: int, db: Session = Depends(get_db)):
+def weakness_report(user_id: int, bucket_id: int | None = None, db: Session = Depends(get_db)):
     """近 30 天按题型汇总错误频率，供家长端薄弱报告。"""
-    mistakes = db.query(Mistake).filter_by(user_id=user_id).all()
+    q = db.query(Mistake).filter_by(user_id=user_id)
+    bid = resolve_bucket_id(db, user_id, bucket_id)
+    if bid is not None:
+        q = q.filter_by(bucket_id=bid)
+    mistakes = q.all()
     counter = Counter(m.source_type for m in mistakes)
     # 题型中文名
     names = {"dictation": "听写", "review": "复习", "listening": "听力", "reading": "阅读", "goal": "考核"}

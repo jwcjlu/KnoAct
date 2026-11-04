@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Point, Reward
+from ..services.bucket_guard import resolve_bucket_id, assert_writable
 
 router = APIRouter(prefix="/api/points", tags=["points"])
 
@@ -14,17 +15,25 @@ class RedeemReq(BaseModel):
     minutes: int
 
 @router.get("/balance")
-def balance(user_id: int, db: Session = Depends(get_db)):
-    total = sum(p.delta for p in db.query(Point).filter_by(user_id=user_id).all())
+def balance(user_id: int, bucket_id: int | None = None, db: Session = Depends(get_db)):
+    bid = resolve_bucket_id(db, user_id, bucket_id)
+    if bid is None:
+        return {"balance": 0}
+    total = sum(p.delta for p in db.query(Point).filter_by(user_id=user_id, bucket_id=bid).all())
     return {"balance": total}
 
 @router.post("/redeem")
-def redeem(req: RedeemReq, db: Session = Depends(get_db)):
+def redeem(req: RedeemReq, bucket_id: int | None = None, db: Session = Depends(get_db)):
+    assert_writable(db, req.user_id, bucket_id)
+    bid = resolve_bucket_id(db, req.user_id, bucket_id)
     cost = RATES.get(req.device, 300)
-    total = sum(p.delta for p in db.query(Point).filter_by(user_id=req.user_id).all())
+    q = db.query(Point).filter_by(user_id=req.user_id)
+    if bid is not None:
+        q = q.filter_by(bucket_id=bid)
+    total = sum(p.delta for p in q.all())
     if total < cost:
         return {"success": False, "reason": "积分不足"}
-    db.add(Point(user_id=req.user_id, delta=-cost, reason=f"兑换 {req.device} {req.minutes} 分钟"))
+    db.add(Point(user_id=req.user_id, bucket_id=bid, delta=-cost, reason=f"兑换 {req.device} {req.minutes} 分钟"))
     db.add(Reward(user_id=req.user_id, device=req.device, minutes=req.minutes, points_cost=cost))
     db.commit()
     return {"success": True, "cost": cost}
