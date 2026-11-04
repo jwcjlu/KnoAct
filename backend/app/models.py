@@ -341,3 +341,44 @@ class ChildConfig(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     key: Mapped[str] = mapped_column(String(64))
     value: Mapped[str] = mapped_column(LongText, default="")
+
+
+class AppGroup(Base):
+    """屏幕时间 App 分组；kind: learn=学习 / fun=娱乐 / custom=自定义。"""
+    __tablename__ = "app_groups"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_app_group_user_name"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16), default="custom")  # learn | fun | custom
+    daily_limit_seconds: Mapped[int] = mapped_column(Integer, nullable=True)  # 空 = 不限
+
+
+class AppRule(Base):
+    """App 包名 → 分组的映射。"""
+    __tablename__ = "app_rules"
+    __table_args__ = (
+        UniqueConstraint("user_id", "app_package", name="uq_app_rule_user_package"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    app_package: Mapped[str] = mapped_column(String(255))
+    app_name: Mapped[str] = mapped_column(String(255), default="")
+    group_id: Mapped[int] = mapped_column(ForeignKey("app_groups.id"))
+
+
+class ScreenUsage(Base):
+    """每孩子每天每 App 的前台使用时长（上报去重累加）。"""
+    __tablename__ = "screen_usage"
+    __table_args__ = (
+        UniqueConstraint("child_id", "date", "app_package", name="uq_screen_usage_child_date_pkg"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    child_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    date: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD
+    app_package: Mapped[str] = mapped_column(String(255))
+    app_name: Mapped[str] = mapped_column(String(255), default="")
+    duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    group_id: Mapped[int] = mapped_column(ForeignKey("app_groups.id"), nullable=True)
