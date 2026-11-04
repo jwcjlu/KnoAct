@@ -1,5 +1,4 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dio/dio.dart';
 import 'usage_api.dart';
 
 /// 超时：超过 daily_limit_seconds（null = 不限）。
@@ -20,25 +19,32 @@ class ScreenRule {
 
 /// 上报本地累计时长到后端，拉取规则并做本地超时提醒。
 class ScreenTimeSync {
-  ScreenTimeSync(this.api);
+  ScreenTimeSync(this.api, this.dio);
 
   final UsageApi api;
+  final Dio dio;
 
-  /// 拉取并缓存规则（本地判超时用）。
-  Future<List<ScreenRule>> fetchRules(int childId, String baseUrl) async {
-    // baseUrl 由 ApiClient 提供；这里简化为直接 http 调用由上层注入。
-    // 实际实现经 dio GET /api/screen-time/groups?user_id=
-    return [];
+  Future<List<ScreenRule>> fetchRules(int childId) async {
+    final r = await dio.get('/api/screen-time/groups', queryParameters: {'user_id': childId});
+    final data = r.data as Map<String, dynamic>;
+    final groups = (data['groups'] as List).cast<Map<String, dynamic>>();
+    return groups
+        .map((g) => ScreenRule(
+              groupId: g['id'] as int,
+              name: g['name'] as String,
+              kind: g['kind'] as String,
+              limitSeconds: g['daily_limit_seconds'] as int?,
+            ))
+        .toList();
   }
 
-  /// 计算某组今日是否超时（本地缓存数据）。
-  ///
-  /// 契约：`daySeconds` 必须是**已按该组预过滤**的 map —— 其 key 仅为该
-  /// 分组内的 package，值为各自当日累计秒数。调用方（Task 7）负责先筛出
-  /// 该 rule 所辖的 package 再传入；此处直接把 `daySeconds.values` 全部累加，
-  /// 不会自行按 groupId 过滤。
-  bool groupOvertime(Map<String, int> daySeconds, ScreenRule rule) {
-    final total = daySeconds.values.fold<int>(0, (a, b) => a + b);
-    return isOvertime(total, rule.limitSeconds);
+  /// 把某天本地缓存的「包名→秒」上报后端（累加语义由后端保证）。
+  Future<void> reportDay(int childId, String date, Map<String, int> daySeconds) async {
+    if (daySeconds.isEmpty) return;
+    final items = daySeconds.entries
+        .map((e) => {'app_package': e.key, 'app_name': '', 'duration_seconds': e.value})
+        .toList();
+    await dio.post('/api/screen-time/report',
+        data: {'child_id': childId, 'date': date, 'items': items});
   }
 }
