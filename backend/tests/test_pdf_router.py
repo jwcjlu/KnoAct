@@ -100,3 +100,29 @@ def test_list_lessons_version_autopopulated(setup_db):
     did = _make_doc_with_lessons()
     lessons = _client().get(f"/api/pdf/documents/{did}/lessons").json()
     assert lessons[0]["document_version"] > 0
+
+
+def test_user_document_unique(setup_db):
+    """UserDocument 唯一约束：同一孩子对同一教材只能绑定一次（Task 1）。
+
+    注意：list 返回 grade/edition 标签的断言留给 Task 2（list_documents 尚未加这些字段）。
+    """
+    from app.models import User, PdfDocument, UserDocument
+    from app.database import SessionLocal
+    s = SessionLocal()
+    c1 = User(name="晨晨", role="child", grade=3, edition="人教")
+    d = PdfDocument(filename="语文.pdf", subject="语文", storage_path="x", grade=3, edition="人教")
+    s.add_all([c1, d])
+    s.flush()
+    s.add(UserDocument(user_id=c1.id, document_id=d.id))
+    s.commit()
+    # 重复绑定被唯一约束拒绝
+    try:
+        s.add(UserDocument(user_id=c1.id, document_id=d.id))
+        s.commit()
+        dup_rejected = False
+    except Exception:
+        s.rollback()
+        dup_rejected = True
+    s.close()
+    assert dup_rejected is True

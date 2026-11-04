@@ -344,6 +344,17 @@ class ChildConfig(Base):
     value: Mapped[str] = mapped_column(LongText, default="")
 
 
+class UserDocument(Base):
+    """孩子 ↔ 教材 绑定：孩子能看哪些教材由家长显式选配；一本可绑多孩子（共享）。"""
+    __tablename__ = "user_documents"
+    __table_args__ = (
+        UniqueConstraint("user_id", "document_id", name="uq_user_document"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    document_id: Mapped[int] = mapped_column(ForeignKey("pdf_documents.id"))
+
+
 class AppGroup(Base):
     """屏幕时间 App 分组；kind: learn=学习 / fun=娱乐 / custom=自定义。"""
     __tablename__ = "app_groups"

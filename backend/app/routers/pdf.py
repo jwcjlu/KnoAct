@@ -15,11 +15,14 @@ _EXTRACT_PROGRESS = {}
 
 
 @router.post("/upload")
-async def upload_pdf(subject: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_pdf(subject: str = Form(...), grade: int = Form(None),
+                     edition: str = Form(""), file: UploadFile = File(...),
+                     db: Session = Depends(get_db)):
     os.makedirs("uploads", exist_ok=True)
 
     # 先建文档记录拿到 id，用「id + 原文件名」生成唯一存储路径，避免重名文件互相覆盖/共用
-    doc = PdfDocument(filename=file.filename, subject=subject, storage_path="")
+    doc = PdfDocument(filename=file.filename, subject=subject, storage_path="",
+                      grade=grade, edition=edition)
     db.add(doc); db.commit(); db.refresh(doc)
 
     safe_name = os.path.basename(file.filename or "upload.pdf")
