@@ -9,6 +9,7 @@ from ..models import Lesson, WordBank, Point
 from ..models import KnowledgePoint, Mistake, WordMastery, LearningProgress
 from ..services.scheduler import select_words, next_review_after
 from ..services.ai import get_provider
+from ..services.bucket_guard import resolve_bucket_id
 
 router = APIRouter(tags=["learning"])
 
@@ -81,7 +82,9 @@ def dictation_grade(req: GradeReq, db: Session = Depends(get_db)):
     if w:
         from ..services.mastery import record_attempt as record_mastery
         # user_id 是可空外键：未传（0）时存 NULL
-        record_mastery(db, req.user_id or None, "word", w.id, correct)
+        bid = resolve_bucket_id(db, req.user_id, None) if req.user_id else None
+        record_mastery(db, req.user_id or None, "word", w.id, correct,
+                       bucket_id=bid)
     return {"correct": correct}
 
 class WrongWord(BaseModel):
@@ -98,7 +101,9 @@ class CompleteReq(BaseModel):
 @router.post("/api/dictation/complete")
 def dictation_complete(req: CompleteReq, db: Session = Depends(get_db)):
     awarded = max(req.correct * 2, 10)
-    db.add(Point(user_id=req.user_id, delta=awarded, reason="听写打卡"))
+    bid = resolve_bucket_id(db, req.user_id, None)
+    db.add(Point(user_id=req.user_id, delta=awarded, reason="听写打卡",
+                 bucket_id=bid))
     # 错词自动收录进错题本
     for ww in req.wrong_words:
         db.add(Mistake(
@@ -106,6 +111,7 @@ def dictation_complete(req: CompleteReq, db: Session = Depends(get_db)):
             question=f"听写词语：{ww.word}",
             your_answer=ww.your_answer, correct_answer=ww.word,
             word_bank_id=ww.word_id if ww.word_id else None,
+            bucket_id=bid,
         ))
     db.commit()
     return {"points_awarded": awarded, "mistakes_recorded": len(req.wrong_words)}
@@ -289,10 +295,12 @@ def assignment_grade(req: AssignmentGradeReq, db: Session = Depends(get_db)):
     # 知识点 id 来自 AI 出题，只认库里存在的
     kp_ids = {a.get("knowledge_point_id") for a in answers if isinstance(a.get("knowledge_point_id"), int)}
     valid_kp = {r[0] for r in db.query(KnowledgePoint.id).filter(KnowledgePoint.id.in_(kp_ids)).all()} if kp_ids else set()
+    bid = resolve_bucket_id(db, req.user_id, None)
     for a in answers:
         kpid = a.get("knowledge_point_id")
         if kpid in valid_kp:
-            record_attempt(db, req.user_id, "knowledge", kpid, bool(a.get("is_correct")))
+            record_attempt(db, req.user_id, "knowledge", kpid, bool(a.get("is_correct")),
+                           bucket_id=bid)
     if passed:
         lessons = db.query(Lesson).filter_by(subject=req.subject).order_by(Lesson.id).all()
         prog = db.query(LearningProgress).filter_by(user_id=req.user_id, subject=req.subject).first()

@@ -85,3 +85,38 @@ def test_record_quiz_mistake_distinct_kp_separate(setup_db):
     rows = db.query(Mistake).filter_by(user_id=uid, question="Q").all()
     assert len(rows) == 2  # 不同 kp_id 不合并
     db.close()
+
+
+def test_mark_correct_updates_same_bucketed_mastery(setup_db):
+    """mark_correct 对挂桶的错题应更新同一桶内的掌握度行，而非 NULL 命名空间。"""
+    from app.models import WordMastery, KnowledgePoint, Lesson, PdfDocument
+    from app.services.bucket_service import ensure_bucket
+    db = SessionLocal()
+    doc = PdfDocument(filename="y.pdf", subject="语文", storage_path="")
+    db.add(doc); db.flush()
+    l = Lesson(document_id=doc.id, subject="语文", title="第1课",
+               start_page=1, end_page=1, extract_status="done", audit_status="approved")
+    db.add(l); db.flush()
+    wb = WordBank(lesson_id=l.id, subject="语文", word="白鹭", extra="pinyin")
+    db.add(wb); db.flush()
+    u = User(name="孩子", role="child", grade=3)
+    db.add(u); db.commit()
+    b = ensure_bucket(db, u.id)
+    uid, wbid, b_id = u.id, wb.id, b.id
+    m = Mistake(user_id=uid, source_type="dictation", question="白鹭",
+                your_answer="白露", correct_answer="白鹭", word_bank_id=wbid,
+                bucket_id=b_id)
+    db.add(m); db.commit(); mid = m.id
+    db.close()
+
+    client.post(f"/api/mistakes/{mid}/correct")
+
+    db = SessionLocal()
+    # 桶内行被更新，且不存在 NULL 命名空间的散行
+    bucketed = db.query(WordMastery).filter_by(user_id=uid, word_bank_id=wbid,
+                                               bucket_id=b_id).first()
+    assert bucketed is not None
+    null_row = db.query(WordMastery).filter_by(user_id=uid, word_bank_id=wbid,
+                                               bucket_id=None).first()
+    assert null_row is None
+    db.close()

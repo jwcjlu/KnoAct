@@ -155,6 +155,7 @@ def knowledge_review(task_id: int, req: KnowledgeReviewReq, db: Session = Depend
     """基础知识任务：孩子逐题简答，混合判分，落知识点掌握度，然后提交待家长确认。"""
     from ..services.mastery import record_attempt
     from ..services.knowledge_quiz import grade_knowledge_answer
+    from ..services.bucket_guard import resolve_bucket_id
     t = db.get(Task, task_id)
     if not t or t.task_type != "knowledge":
         return {"ok": False, "error": "任务不存在"}
@@ -164,6 +165,7 @@ def knowledge_review(task_id: int, req: KnowledgeReviewReq, db: Session = Depend
         points = json.loads(t.content or "[]")
     except ValueError:
         points = []
+    bid = resolve_bucket_id(db, req.user_id, None)
     by_id = {p.get("id"): p for p in points}
     results = []
     for a in req.answers:
@@ -174,7 +176,8 @@ def knowledge_review(task_id: int, req: KnowledgeReviewReq, db: Session = Depend
         is_correct, _ = grade_knowledge_answer(
             user_answer, p.get("keywords") or [], p.get("answer") or "", db=db)
         if p.get("id"):
-            record_attempt(db, req.user_id, "knowledge", p["id"], is_correct)
+            record_attempt(db, req.user_id, "knowledge", p["id"], is_correct,
+                           bucket_id=bid)
         p["last_correct"] = is_correct
         results.append({"id": p.get("id"), "is_correct": is_correct, "answer": p.get("answer") or ""})
     t.content = json.dumps(points, ensure_ascii=False)

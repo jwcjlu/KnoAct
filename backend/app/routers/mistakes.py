@@ -55,10 +55,12 @@ def mark_correct(mistake_id: int, db: Session = Depends(get_db)):
 
     removed = False
     if m.word_bank_id:
-        mastery = record_attempt(db, m.user_id, "word", m.word_bank_id, True)
+        mastery = record_attempt(db, m.user_id, "word", m.word_bank_id, True,
+                                 bucket_id=m.bucket_id)
         removed = mastery >= GATE
     elif m.knowledge_point_id:
-        mastery = record_attempt(db, m.user_id, "knowledge", m.knowledge_point_id, True)
+        mastery = record_attempt(db, m.user_id, "knowledge", m.knowledge_point_id, True,
+                                 bucket_id=m.bucket_id)
         removed = mastery >= GATE
     else:
         m.consecutive_correct += 1
@@ -83,9 +85,11 @@ def mark_wrong(mistake_id: int, db: Session = Depends(get_db)):
     from ..services.mastery import record_attempt
 
     if m.word_bank_id:
-        record_attempt(db, m.user_id, "word", m.word_bank_id, False)
+        record_attempt(db, m.user_id, "word", m.word_bank_id, False,
+                       bucket_id=m.bucket_id)
     elif m.knowledge_point_id:
-        record_attempt(db, m.user_id, "knowledge", m.knowledge_point_id, False)
+        record_attempt(db, m.user_id, "knowledge", m.knowledge_point_id, False,
+                       bucket_id=m.bucket_id)
     # 错题本自身的计数字段，无论走哪个分支都要更新
     m.mistake_count += 1
     m.consecutive_correct = 0
