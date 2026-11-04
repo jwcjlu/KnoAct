@@ -84,6 +84,29 @@ def test_review_wrong_to_mistake(setup_db):
     s.close()
 
 
+def test_review_wrong_to_mistake_scoped_to_bucket(setup_db):
+    from app.services.bucket_service import ensure_bucket
+    from app.models import Mistake
+    from app.database import SessionLocal
+    s = SessionLocal()
+    uid = make_user(s).id
+    s.commit()
+    b = ensure_bucket(s, uid)
+    b_id = b.id
+    s.close()
+
+    resp = _client().post("/api/review/submit", json={
+        "user_id": uid, "question": "go 的第三人称单数",
+        "your_answer": "gos", "correct_answer": "goes", "source_type": "review",
+    })
+    assert resp.status_code == 200
+    s = SessionLocal()
+    m = s.query(Mistake).filter_by(user_id=uid).first()
+    assert m is not None
+    assert m.bucket_id == b_id  # 错题挂在 active 桶，而非 NULL 命名空间
+    s.close()
+
+
 def test_listening_material(setup_db):
     uid = _seed_user()
     resp = _client().get(f"/api/listening/material?user_id={uid}")

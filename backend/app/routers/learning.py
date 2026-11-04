@@ -145,9 +145,11 @@ class ReviewSubmitReq(BaseModel):
 @router.post("/api/review/submit")
 def review_submit(req: ReviewSubmitReq, db: Session = Depends(get_db)):
     if req.your_answer.strip() != req.correct_answer.strip():
+        bid = resolve_bucket_id(db, req.user_id, None)
         db.add(Mistake(
             user_id=req.user_id, source_type=req.source_type,
             question=req.question, your_answer=req.your_answer, correct_answer=req.correct_answer,
+            bucket_id=bid,
         ))
         db.commit()
     return {"ok": True}
@@ -348,12 +350,14 @@ def appeal(req: AppealReq, db: Session = Depends(get_db)):
     # 本阶段简化：记录申诉到 Mistake 表（source_type="appeal"）或直接返回 ok
     # 家长复核 UI 是后续，这里先落一条记录供家长端查询
     from ..models import Mistake
+    bid = resolve_bucket_id(db, req.user_id, None)
     db.add(Mistake(
         user_id=req.user_id, source_type="appeal",
         question=f"听写申诉：{req.word}",
         your_answer=req.reason or "（未说明原因）",
         correct_answer=req.word,
         word_bank_id=req.word_id if req.word_id else None,
+        bucket_id=bid,
     ))
     db.commit()
     return {"ok": True}
