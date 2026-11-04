@@ -83,6 +83,8 @@ class Text(Base):
 class Question(Base):
     __tablename__ = "questions"
     id: Mapped[int] = mapped_column(primary_key=True)
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     qtype: Mapped[str] = mapped_column(String(16), default="reading")   # knowledge | listening | reading | math
     question: Mapped[str] = mapped_column(LongText)
@@ -129,6 +131,7 @@ class WordMastery(Base):
     is_weak: Mapped[bool] = mapped_column(Boolean, default=False)
     next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)  # 迁移回填
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     attempts: Mapped[str] = mapped_column(LongText, default="[]")
     mastery: Mapped[float] = mapped_column(Float, default=0.0)
 
@@ -136,6 +139,7 @@ class Mistake(Base):
     __tablename__ = "mistakes"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     source_type: Mapped[str] = mapped_column(String(32))  # dictation | review | listening | reading | goal
     question: Mapped[str] = mapped_column(LongText)
     your_answer: Mapped[str] = mapped_column(LongText)
@@ -158,6 +162,7 @@ class Point(Base):
     __tablename__ = "points"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     delta: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -166,6 +171,7 @@ class Goal(Base):
     __tablename__ = "goals"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     content: Mapped[str] = mapped_column(LongText)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | in_progress | done
     achieved_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
@@ -192,6 +198,7 @@ class Task(Base):
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     subject: Mapped[str] = mapped_column(String(16))            # '语文' | '英语'
     date: Mapped[date] = mapped_column(Date)                    # 任务所属日期
     task_type: Mapped[str] = mapped_column(String(16))          # dictation|knowledge|review|reading|listening|custom
@@ -245,6 +252,7 @@ class Quiz(Base):
     id: Mapped[int] = mapped_column(primary_key=True)          # 即 quiz_id
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     user_id: Mapped[int] = mapped_column(Integer, default=0)
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     questions: Mapped[str] = mapped_column(LongText)            # JSON：[{id,prompt,choices,correct_index,evidence}]
     score: Mapped[int] = mapped_column(Integer, nullable=True) # None=未作答
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -255,6 +263,7 @@ class KnowledgeMastery(Base):
     __tablename__ = "knowledge_mastery"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     knowledge_point_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"))
     attempts: Mapped[str] = mapped_column(LongText, default="[]")  # JSON：[true, false, ...]
     mastery: Mapped[float] = mapped_column(Float, default=0.0)
