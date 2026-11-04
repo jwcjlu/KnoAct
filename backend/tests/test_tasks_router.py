@@ -5,7 +5,7 @@ from app.database import SessionLocal
 from app.models import (
     User, Task, Point, LearningProgress, Mistake, Goal, LearningRecord,
     PdfDocument, Lesson, WordBank, KnowledgePoint, Text, WordMastery,
-    SchoolYearBucket,
+    SchoolYearBucket, UserDocument,
 )
 from app.services.task_gen import generate_tasks_for_user
 
@@ -31,6 +31,7 @@ def _seed():
     db.flush()
     db.add(WordBank(lesson_id=l1.id, subject="语文", word="白鹭", extra="pinyin 释义"))
     db.add(KnowledgePoint(subject="语文", category="字词", content="形近字辨析", lesson_id=l1.id))
+    db.add(UserDocument(user_id=u.id, document_id=doc.id))
     db.commit()
     return u.id
 

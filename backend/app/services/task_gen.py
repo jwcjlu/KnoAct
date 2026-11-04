@@ -4,13 +4,19 @@ from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
-from ..models import User, Lesson, LearningProgress, WordBank, KnowledgePoint, WordMastery, KnowledgeMastery, Task, Text
+from ..models import User, Lesson, LearningProgress, WordBank, KnowledgePoint, WordMastery, KnowledgeMastery, Task, Text, UserDocument
 
 
 def _current_lesson(db: Session, subject: str, user_id: int):
-    """按科返回当前课：LearningProgress 匹配 (user_id, subject) 则用它，否则回退该科第一课。"""
+    """按科返回当前课：只在孩子绑定的教材里选；LearningProgress 匹配 (user_id, subject)
+    则用它（须在绑定范围内），否则回退绑定教材该科第一课。未绑定任何教材则返回 None。"""
+    bound_doc_ids = [r[0] for r in db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
+    if not bound_doc_ids:
+        return None
     prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
-    lessons = db.query(Lesson).filter_by(subject=subject).order_by(Lesson.id).all()
+    lessons = (db.query(Lesson)
+               .filter(Lesson.subject == subject, Lesson.document_id.in_(bound_doc_ids))
+               .order_by(Lesson.id).all())
     if not lessons:
         return None
     if prog and prog.current_lesson_id:

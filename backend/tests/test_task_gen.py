@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, date, timedelta
 from app.database import SessionLocal, Base, engine
-from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question
+from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question, UserDocument
 from app.services.task_gen import generate_tasks_for_user, _current_lesson
 
 
@@ -14,6 +14,7 @@ def _setup(db):
     db.query(PdfDocument).delete()
     db.query(Task).delete()
     db.query(User).delete()
+    db.query(UserDocument).delete()
     db.commit()
     u = User(name="测试孩子", role="child")
     db.add(u); db.flush()
@@ -26,6 +27,7 @@ def _setup(db):
         db.add(WordBank(lesson_id=l1.id, subject="语文", word=w, extra="pinyin 释义"))
     db.add(KnowledgePoint(subject="语文", category="字词", content="形近字辨析", lesson_id=l1.id))
     db.add(Text(lesson_id=l1.id, content="白鹭是一首精巧的诗。"))
+    db.add(UserDocument(user_id=u.id, document_id=doc.id))  # 孩子绑定该教材
     db.commit()
     return u.id, l1.id
 
@@ -78,6 +80,7 @@ def _setup_english(db):
     db.query(PdfDocument).delete()
     db.query(Task).delete()
     db.query(User).delete()
+    db.query(UserDocument).delete()
     db.commit()
     u = User(name="测试孩子", role="child")
     db.add(u); db.flush()
@@ -89,6 +92,7 @@ def _setup_english(db):
     for w in ["apple", "banana"]:
         db.add(WordBank(lesson_id=l1.id, subject="英语", word=w, extra="释义"))
     db.add(KnowledgePoint(subject="英语", category="词汇", content="颜色词", lesson_id=l1.id))
+    db.add(UserDocument(user_id=u.id, document_id=doc.id))
     db.commit()
     return u.id, l1.id
 
@@ -114,6 +118,43 @@ def test_generate_tasks_no_lesson_produces_no_tasks():
 
     generate_tasks_for_user(db, uid, date.today())  # 两科均无课，不应抛异常
     assert db.query(Task).filter_by(user_id=uid, date=date.today()).count() == 0
+    db.close()
+
+
+def test_unbound_document_produces_no_tasks():
+    """有教材但未绑定给该孩子 → 该科选不到课 → 不生成任务。"""
+    db = SessionLocal()
+    db.query(WordMastery).delete()
+    db.query(WordBank).delete()
+    db.query(KnowledgePoint).delete()
+    db.query(Text).delete()
+    db.query(Lesson).delete()
+    db.query(PdfDocument).delete()
+    db.query(Task).delete()
+    db.query(User).delete()
+    db.query(UserDocument).delete()
+    db.commit()
+    u = User(name="未绑定孩子", role="child")
+    db.add(u); db.flush()
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="")
+    db.add(doc); db.flush()
+    l1 = Lesson(document_id=doc.id, subject="语文", title="第1课", start_page=1, end_page=1,
+                extract_status="done", audit_status="approved")
+    db.add(l1); db.flush()
+    for w in ["白鹭", "矗立"]:
+        db.add(WordBank(lesson_id=l1.id, subject="语文", word=w, extra="pinyin 释义"))
+    db.add(KnowledgePoint(subject="语文", category="字词", content="形近字辨析", lesson_id=l1.id))
+    db.add(Text(lesson_id=l1.id, content="白鹭是一首精巧的诗。"))
+    db.commit()
+    uid = u.id
+
+    generate_tasks_for_user(db, uid, date.today())
+    assert db.query(Task).filter_by(user_id=uid, date=date.today()).count() == 0
+    # 绑定后即可生成
+    db.add(UserDocument(user_id=uid, document_id=doc.id))
+    db.commit()
+    generate_tasks_for_user(db, uid, date.today())
+    assert db.query(Task).filter_by(user_id=uid, date=date.today()).count() > 0
     db.close()
 
 
