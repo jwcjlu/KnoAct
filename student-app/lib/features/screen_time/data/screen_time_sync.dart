@@ -32,6 +32,11 @@ class ScreenTimeSync {
   }
 
   /// 计算某组今日是否超时（本地缓存数据）。
+  ///
+  /// 契约：`daySeconds` 必须是**已按该组预过滤**的 map —— 其 key 仅为该
+  /// 分组内的 package，值为各自当日累计秒数。调用方（Task 7）负责先筛出
+  /// 该 rule 所辖的 package 再传入；此处直接把 `daySeconds.values` 全部累加，
+  /// 不会自行按 groupId 过滤。
   bool groupOvertime(Map<String, int> daySeconds, ScreenRule rule) {
     final total = daySeconds.values.fold<int>(0, (a, b) => a + b);
     return isOvertime(total, rule.limitSeconds);

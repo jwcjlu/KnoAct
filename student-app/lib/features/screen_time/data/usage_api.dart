@@ -45,7 +45,7 @@ class UsageApi {
     final sp = await SharedPreferences.getInstance();
     final out = <String, int>{};
     for (final k in sp.getKeys()) {
-      if (!k.startsWith('$date|') || k.contains('.name')) continue;
+      if (!k.startsWith('$date|') || k.endsWith('.name')) continue;
       final pkg = k.substring(date.length + 1);
       out[pkg] = sp.getInt(k) ?? 0;
     }
