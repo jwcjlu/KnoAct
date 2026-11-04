@@ -62,6 +62,8 @@ let parentTab = '教材';
 let pdfDocs = [];
 let pdfTab = null; // null | 'upload' | 'confirm'
 let confirmDocId = null;
+let boundUsers = [];   // 当前打开绑定弹窗的教材已绑定的孩子 id 列表
+let bindDocId = null;  // 正在绑定管理的教材 id
 let knowledgeRows = [];
 let goalRows = [];
 let reportRows = [];
@@ -613,6 +615,12 @@ function renderPdfTab(){
             <span style="font-size:13px;color:var(--gray2)">学科：</span>
             <select id="pdfSubject" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px"><option>语文</option><option>英语</option><option>数学</option></select>
           </div>
+          <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span style="font-size:13px;color:var(--gray2)">年级：</span>
+            <select id="pdfGrade" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px"><option value="">不限</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option></select>
+            <span style="font-size:13px;color:var(--gray2)">版本：</span>
+            <input id="pdfEdition" placeholder="如 人教/北师大（可空）" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px;width:200px">
+          </div>
           <div style="margin-top:12px"><span class="pdf-back" onclick="pdfTab=null;render()">${icon('arrow',14)} 返回教材列表</span></div>
         </div>
       </div>
@@ -624,8 +632,9 @@ function renderPdfTab(){
   const rows = pdfDocs.map(d=>`
     <div class="pdf-row">
       <div class="ic">${icon('book',22)}</div>
-      <div><div class="nm">${d.filename}</div><div class="meta">${d.subject} · ${d.lesson_count} 课 · 已审核 ${d.audited_count} 课</div></div>
+      <div><div class="nm">${d.filename}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''} · ${d.lesson_count} 课 · 已审核 ${d.audited_count} 课</div></div>
       <div style="display:flex;gap:6px;margin-left:auto">
+        <button class="btn-ghost" onclick="openDocBind(${d.id})">绑定孩子</button>
         <button class="btn-ghost" onclick="openDoc(${d.id})">查看/审核</button>
         <button class="btn-ghost" onclick="resplitDoc(${d.id})">重新拆分</button>
         <button class="btn-ghost" style="color:#c05b4a" onclick="removeDoc(${d.id})">移除</button>
@@ -633,6 +642,7 @@ function renderPdfTab(){
     </div>`).join('');
   const empty = pdfDocs.length===0 ? `<div style="text-align:center;padding:32px 0;color:#8e9691">还没有上传教材，点击下方按钮开始</div>` : rows;
   return `<div class="parent-grid">
+    ${renderDocBind()}
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('book',20)}</div><div><h3>教材管理</h3><div class="sub">上传 PDF，自动拆课；审核通过的课程进入孩子词库</div></div></div>
       <div class="bd">
@@ -736,13 +746,49 @@ async function uploadPdf(input){
   const f = input.files && input.files[0];
   if(!f) return;
   const subject = document.getElementById('pdfSubject').value;
+  const grade = document.getElementById('pdfGrade').value;
+  const edition = document.getElementById('pdfEdition').value.trim();
   const fd = new FormData();
   fd.append('subject', subject);
+  if(grade) fd.append('grade', grade);
+  if(edition) fd.append('edition', edition);
   fd.append('file', f);
   toast('上传中，正在自动拆课…');
   await apiForm('/api/pdf/upload', fd);
   await loadPdfDocs();
   pdfTab=null; render(); toast('上传完成，已自动拆课');
+}
+
+async function openDocBind(documentId){
+  const r = await api(`/api/pdf/documents/${documentId}/bound-users`);
+  boundUsers = (r && r.user_ids) || [];
+  bindDocId = documentId;
+  render();
+}
+
+async function toggleDocBind(userId, checked){
+  if(checked){
+    await api(`/api/pdf/documents/${bindDocId}/bind`, {method:'POST', body:{user_id:userId}});
+  } else {
+    await api(`/api/pdf/documents/${bindDocId}/bind?user_id=${userId}`, {method:'DELETE'});
+  }
+  const r = await api(`/api/pdf/documents/${bindDocId}/bound-users`);
+  boundUsers = (r && r.user_ids) || [];
+  render();
+}
+
+function renderDocBind(){
+  if(bindDocId === null) return '';
+  const rows = children.map(c=>`
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0">
+      <input type="checkbox" ${boundUsers.includes(c.id)?'checked':''} onchange="toggleDocBind(${c.id}, this.checked)">
+      <span>${escapeAttr(c.name)}${c.grade?('（'+c.grade+'年级）'):''}</span>
+    </label>`).join('');
+  return `<div class="parent-panel" style="grid-column:1/-1">
+    <div class="head"><div class="ic blue">${icon('star',20)}</div><div><h3>绑定孩子</h3><div class="sub">勾选能看到这本教材的孩子</div></div>
+      <button class="btn-ghost" style="margin-left:auto" onclick="bindDocId=null;render()">关闭</button></div>
+    <div class="bd">${rows || '<div style="color:#8e9691;padding:8px 0">还没有孩子，请先在孩子管理里添加</div>'}</div>
+  </div>`;
 }
 
 // ---- 知识点 ----
