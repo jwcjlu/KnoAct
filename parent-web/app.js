@@ -760,19 +760,21 @@ async function uploadPdf(input){
 }
 
 async function openDocBind(documentId){
-  const r = await api(`/api/pdf/documents/${documentId}/bound-users`);
-  boundUsers = (r && r.user_ids) || [];
   bindDocId = documentId;
+  const r = await api(`/api/pdf/documents/${documentId}/bound-users`);
+  if(bindDocId !== documentId) return; // 过期响应，忽略
+  boundUsers = (r && r.user_ids) || [];
   render();
 }
 
-async function toggleDocBind(userId, checked){
+async function toggleDocBind(documentId, userId, checked){
+  bindDocId = documentId;
   if(checked){
-    await api(`/api/pdf/documents/${bindDocId}/bind`, {method:'POST', body:{user_id:userId}});
+    await api(`/api/pdf/documents/${documentId}/bind`, {method:'POST', body:{user_id:userId}});
   } else {
-    await api(`/api/pdf/documents/${bindDocId}/bind?user_id=${userId}`, {method:'DELETE'});
+    await api(`/api/pdf/documents/${documentId}/bind?user_id=${userId}`, {method:'DELETE'});
   }
-  const r = await api(`/api/pdf/documents/${bindDocId}/bound-users`);
+  const r = await api(`/api/pdf/documents/${documentId}/bound-users`);
   boundUsers = (r && r.user_ids) || [];
   render();
 }
@@ -781,7 +783,7 @@ function renderDocBind(){
   if(bindDocId === null) return '';
   const rows = children.map(c=>`
     <label style="display:flex;align-items:center;gap:8px;padding:6px 0">
-      <input type="checkbox" ${boundUsers.includes(c.id)?'checked':''} onchange="toggleDocBind(${c.id}, this.checked)">
+      <input type="checkbox" ${boundUsers.includes(c.id)?'checked':''} onchange="toggleDocBind(${bindDocId}, ${c.id}, this.checked)">
       <span>${escapeAttr(c.name)}${c.grade?('（'+c.grade+'年级）'):''}</span>
     </label>`).join('');
   return `<div class="parent-panel" style="grid-column:1/-1">
