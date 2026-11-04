@@ -41,6 +41,8 @@ dependencies:
   audioplayers: 6.8.1
   flutter_tts: 4.2.5
   webview_flutter: ^4.14.1
+  workmanager: ^0.10.0
+  flutter_local_notifications: ^19.4.0
 
 dev_dependencies:
   flutter_test:
