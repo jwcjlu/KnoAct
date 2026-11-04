@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/config.dart';
 import 'data/auth_repository.dart';
 import 'data/session_store.dart';
 
@@ -11,7 +12,9 @@ class SessionNotifier extends AsyncNotifier<Child?> {
 
   Future<void> login(String name) async {
     final child = await ref.read(authRepositoryProvider).login(name.trim());
-    await ref.read(sessionStoreProvider).save(child);
+    final store = ref.read(sessionStoreProvider);
+    await store.save(child);
+    await store.saveApiBase(resolveApiBase());
     state = AsyncData(child);
   }
 

@@ -9,6 +9,17 @@ bool isOvertime(int seconds, int? limit) =>
 bool hitWarnThreshold(int seconds, int? limit) =>
     limit != null && seconds >= limit * 0.8;
 
+/// 按「包名→组 id」把当日各包时长归到各组（未知包不计入任何组）。
+Map<int, int> groupTotalsFromDay(Map<String, int> daySeconds, Map<String, int> packageGroups) {
+  final totals = <int, int>{};
+  for (final e in daySeconds.entries) {
+    final gid = packageGroups[e.key];
+    if (gid == null) continue;
+    totals[gid] = (totals[gid] ?? 0) + e.value;
+  }
+  return totals;
+}
+
 class ScreenRule {
   ScreenRule({required this.groupId, required this.name, required this.kind, this.limitSeconds});
   final int groupId;
@@ -25,10 +36,10 @@ class ScreenTimeSync {
   final Dio dio;
 
   Future<List<ScreenRule>> fetchRules(int childId) async {
-    final r = await dio.get('/api/screen-time/groups', queryParameters: {'user_id': childId});
-    final data = r.data as Map<String, dynamic>;
-    final groups = (data['groups'] as List).whereType<Map<String, dynamic>>();
+    final data = await _fetchGroupsData(childId);
+    final groups = data['groups'] as List;
     return groups
+        .whereType<Map<String, dynamic>>()
         .map((g) => ScreenRule(
               groupId: g['id'] as int,
               name: g['name'] as String,
@@ -36,6 +47,24 @@ class ScreenTimeSync {
               limitSeconds: g['daily_limit_seconds'] as int?,
             ))
         .toList();
+  }
+
+  /// 拉取「包名 → 组 id」映射，供 worker 按组精确统计当日时长。
+  Future<Map<String, int>> fetchPackageGroups(int childId) async {
+    final data = await _fetchGroupsData(childId);
+    final rules = data['rules'] as List;
+    final out = <String, int>{};
+    for (final r in rules.whereType<Map<String, dynamic>>()) {
+      final pkg = r['app_package'] as String?;
+      final gid = r['group_id'] as int?;
+      if (pkg != null && gid != null) out[pkg] = gid;
+    }
+    return out;
+  }
+
+  Future<Map<String, dynamic>> _fetchGroupsData(int childId) async {
+    final r = await dio.get('/api/screen-time/groups', queryParameters: {'user_id': childId});
+    return r.data as Map<String, dynamic>;
   }
 
   /// 把某天本地缓存的「包名→秒」上报后端（累加语义由后端保证）。

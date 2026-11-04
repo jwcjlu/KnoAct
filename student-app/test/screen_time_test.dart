@@ -24,6 +24,26 @@ void main() {
     expect(hitWarnThreshold(100, 3600), isFalse);
   });
 
+  test('groupTotalsFromDay：按组精确归集，未知包不计入', () {
+    final day = {
+      'com.douyin': 3000,   // 娱乐类
+      'com.game': 1000,     // 娱乐类
+      'com.knoact': 5000,   // 学习类
+      'com.unknown': 9999,  // 未映射 → 不计入任何组
+    };
+    final pkgGroups = {
+      'com.douyin': 1,
+      'com.game': 1,
+      'com.knoact': 2,
+    };
+    final totals = groupTotalsFromDay(day, pkgGroups);
+    expect(totals[1], 4000); // 娱乐类 = 3000 + 1000
+    expect(totals[2], 5000); // 学习类
+    expect(totals.containsKey(3), isFalse); // 未知组不出现
+    // 未知包 com.unknown 未计入任何组
+    expect(totals.values.fold<int>(0, (a, b) => a + b), 9000);
+  });
+
   test('reminder 状态机：超时只提醒一次', () async {
     SharedPreferences.setMockInitialValues({});
     final n = ReminderState();

@@ -36,7 +36,9 @@ void callbackDispatcher() {
     if (childId != 0) {
       final day = await api.readLocalDay(date);
       final names = await api.readLocalNames(date);
-      final dio = Dio(BaseOptions(baseUrl: resolveApiBase()));
+      // 真机上后台 isolate 拿不到编译期 API_BASE；优先用登录时持久化的地址。
+      final baseUrl = await SessionStore().readApiBase() ?? resolveApiBase();
+      final dio = Dio(BaseOptions(baseUrl: baseUrl));
       await ScreenTimeSync(api, dio).reportDay(childId, date, day, names: names);
       await _maybeNotify(childId, date, dio, api);
     }
@@ -49,14 +51,14 @@ final _notifs = FlutterLocalNotificationsPlugin();
 /// 拉取规则 + 读取当日时长，若超时且本组尚未提醒过则弹本地通知。
 Future<void> _maybeNotify(int childId, String date, Dio dio, UsageApi api) async {
   try {
-    final rules = await ScreenTimeSync(api, dio).fetchRules(childId);
+    final sync = ScreenTimeSync(api, dio);
+    final rules = await sync.fetchRules(childId);
+    final packageGroups = await sync.fetchPackageGroups(childId);
     final day = await api.readLocalDay(date);
     final state = ReminderState();
-    // 简化：把当日「所有包」时长合计，逐个与有限制组的 limit 比较。
-    // 按组精确过滤 day 需要包名→组映射，worker 本地没有，故以日总量近似。
-    final total = day.values.fold<int>(0, (a, b) => a + b);
+    final groupTotals = groupTotalsFromDay(day, packageGroups);
     for (final r in rules) {
-      final overtime = isOvertime(total, r.limitSeconds);
+      final overtime = isOvertime(groupTotals[r.groupId] ?? 0, r.limitSeconds);
       final warned = await state.wasNotified(date, r.name);
       if (state.shouldNotify(overtime: overtime, warned: warned)) {
         await _notifs.show(r.groupId, '该休息了', '「${r.name}」今日时长已用完', const NotificationDetails(
