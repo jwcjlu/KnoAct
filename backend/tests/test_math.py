@@ -91,6 +91,39 @@ def test_math_task_grade_endpoint(setup_db):
     assert r2.json()["ok"] is False
 
 
+def test_math_task_grade_scoped_to_bucket(setup_db):
+    import json
+    from datetime import date
+    from app.models import User, Task, Mistake
+    from app.database import SessionLocal
+    from app.services.bucket_service import ensure_bucket
+    from app.routers.math import router as math_router
+    s = SessionLocal()
+    s.add(User(name="晨晨", role="child", grade=3)); s.commit()
+    uid = s.query(User).filter_by(name="晨晨").first().id
+    b = ensure_bucket(s, uid)
+    b_id = b.id
+    qs = [{"question": "3 + 5 = ？", "answer": "8"}, {"question": "12 - 7 = ？", "answer": "5"}]
+    t = Task(user_id=uid, date=date.today(), subject="数学", task_type="math", title="数学练习",
+             content=json.dumps(qs, ensure_ascii=False), points=20, content_status="published",
+             bucket_id=b_id)
+    s.add(t); s.commit()
+    tid = t.id
+    s.close()
+
+    app = FastAPI()
+    app.include_router(math_router)
+    c = TestClient(app)
+    r = c.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["八", "6"]})
+    assert r.json()["ok"] is True
+
+    s2 = SessionLocal()
+    m = s2.query(Mistake).filter_by(user_id=uid, question="12 - 7 = ？").first()
+    assert m is not None
+    assert m.bucket_id == b_id  # 错题挂在 active 桶，而非 NULL 命名空间
+    s2.close()
+
+
 def test_progress_advance_subject_isolation(setup_db):
     from app.models import User, Lesson, LearningProgress
     from app.database import SessionLocal
