@@ -45,7 +45,8 @@ class ReaderController extends Notifier<ReaderState> {
 
   Future<void> loadDocuments() async {
     state = state.copyWith(documents: const AsyncLoading());
-    final result = await AsyncValue.guard(() => ref.read(pdfRepositoryProvider).documents());
+    final uid = _uid;
+    final result = await AsyncValue.guard(() => ref.read(pdfRepositoryProvider).documents(userId: uid));
     if (!ref.mounted) return;
     state = state.copyWith(documents: result);
   }

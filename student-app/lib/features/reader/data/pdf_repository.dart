@@ -90,8 +90,9 @@ class PdfRepository {
 
   final ApiClient _api;
 
-  Future<List<PdfDoc>> documents() async {
-    final list = await _api.get('/api/pdf/documents');
+  Future<List<PdfDoc>> documents({int? userId}) async {
+    final list = await _api.get('/api/pdf/documents',
+        query: userId != null ? {'user_id': userId} : null);
     return [for (final d in (list as List).whereType<Map>()) PdfDoc.fromJson(Map<String, dynamic>.from(d))];
   }
 
