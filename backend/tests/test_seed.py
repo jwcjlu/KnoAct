@@ -43,3 +43,31 @@ def test_seed_is_idempotent(setup_db):
     assert s.query(User).count() == 2  # 不重复
     assert s.query(Lesson).count() == 1
     s.close()
+
+
+def test_migrate_multi_student_columns_idempotent(setup_db):
+    """陈旧库补列迁移：给 users/pdf_documents 补 grade/edition/parent_id，幂等、数据不丢。"""
+    import sqlite3
+    from app.database import engine
+    # 造一个「缺列」的旧库形态：手动 drop 掉 users/pdf_documents 后按旧 schema 重建
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE IF EXISTS users")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS pdf_documents")
+        conn.exec_driver_sql("CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(64), role VARCHAR(16))")
+        conn.exec_driver_sql("CREATE TABLE pdf_documents (id INTEGER PRIMARY KEY, filename VARCHAR(255), subject VARCHAR(16), storage_path VARCHAR(512))")
+        conn.exec_driver_sql("INSERT INTO users (id, name, role) VALUES (1, '晨晨', 'child')")
+        conn.exec_driver_sql("INSERT INTO pdf_documents (id, filename, subject, storage_path) VALUES (1, '语文.pdf', '语文', 'uploads/语文.pdf')")
+
+    from app.seed import _migrate_multi_student_columns
+    _migrate_multi_student_columns()
+    _migrate_multi_student_columns()  # 幂等：再跑不报错
+
+    with engine.connect() as conn:
+        ucols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(users)")}
+        dcols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(pdf_documents)")}
+    assert {"grade", "edition", "parent_id"} <= ucols
+    assert {"edition", "grade"} <= dcols
+
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM users").scalar() == 1
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM pdf_documents").scalar() == 1

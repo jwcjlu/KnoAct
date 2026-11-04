@@ -40,6 +40,34 @@ def _migrate_pdf_document_created_at():
         conn.execute(text("UPDATE pdf_documents SET created_at = :now"), {"now": now})
 
 
+def _migrate_multi_student_columns():
+    """SQLite 加列迁移：多学生 + 年级桶功能给 users / pdf_documents 补的列。
+
+    create_all 不会改已有表，这里幂等补齐。历史孩子 grade/parent_id 留空（语义上可空），
+    edition 回填空串；pdf_documents 同理。
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+
+    if "users" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("users")}
+        with engine.begin() as conn:
+            if "grade" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN grade INTEGER"))
+            if "edition" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN edition VARCHAR(64) DEFAULT ''"))
+            if "parent_id" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN parent_id INTEGER"))
+
+    if "pdf_documents" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("pdf_documents")}
+        with engine.begin() as conn:
+            if "edition" not in cols:
+                conn.execute(text("ALTER TABLE pdf_documents ADD COLUMN edition VARCHAR(64) DEFAULT ''"))
+            if "grade" not in cols:
+                conn.execute(text("ALTER TABLE pdf_documents ADD COLUMN grade INTEGER"))
+
+
 DEFAULT_CHILD_NAME = "金同学"
 _LEGACY_CHILD_NAME = "金宇轩"
 
@@ -102,6 +130,7 @@ def seed():
     Base.metadata.create_all(bind=engine)
     _migrate_learning_progress()
     _migrate_pdf_document_created_at()
+    _migrate_multi_student_columns()
     db = SessionLocal()
     _rename_default_child(db)
     if db.query(User).count() == 0:
