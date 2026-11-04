@@ -48,21 +48,25 @@ final _notifs = FlutterLocalNotificationsPlugin();
 
 /// 拉取规则 + 读取当日时长，若超时且本组尚未提醒过则弹本地通知。
 Future<void> _maybeNotify(int childId, String date, Dio dio, UsageApi api) async {
-  final rules = await ScreenTimeSync(api, dio).fetchRules(childId);
-  final day = await api.readLocalDay(date);
-  final state = ReminderState();
-  // 简化：把当日「所有包」时长合计，逐个与娱乐/有限制组的 limit 比较。
-  // 按组精确过滤 day 需要包名→组映射，worker 本地没有，故以日总量近似。
-  final total = day.values.fold<int>(0, (a, b) => a + b);
-  for (final r in rules.where((r) => r.kind == 'fun' || r.limitSeconds != null)) {
-    final overtime = isOvertime(total, r.limitSeconds);
-    final warned = await state.wasNotified(date, r.name);
-    if (state.shouldNotify(overtime: overtime, warned: warned)) {
-      await _notifs.show(0, '该休息了', '「${r.name}」今日时长已用完', const NotificationDetails(
-        android: AndroidNotificationDetails('screen_time', '屏幕时间', importance: Importance.high),
-      ));
-      await state.markNotified(date, r.name);
+  try {
+    final rules = await ScreenTimeSync(api, dio).fetchRules(childId);
+    final day = await api.readLocalDay(date);
+    final state = ReminderState();
+    // 简化：把当日「所有包」时长合计，逐个与有限制组的 limit 比较。
+    // 按组精确过滤 day 需要包名→组映射，worker 本地没有，故以日总量近似。
+    final total = day.values.fold<int>(0, (a, b) => a + b);
+    for (final r in rules) {
+      final overtime = isOvertime(total, r.limitSeconds);
+      final warned = await state.wasNotified(date, r.name);
+      if (state.shouldNotify(overtime: overtime, warned: warned)) {
+        await _notifs.show(r.groupId, '该休息了', '「${r.name}」今日时长已用完', const NotificationDetails(
+          android: AndroidNotificationDetails('screen_time', '屏幕时间', importance: Importance.high),
+        ));
+        await state.markNotified(date, r.name);
+      }
     }
+  } catch (_) {
+    // 提醒失败不得让整个周期任务（含已完成的 reportDay）被判失败。
   }
 }
 
