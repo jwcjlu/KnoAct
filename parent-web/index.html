@@ -829,6 +829,7 @@
   .child-select select{border:1px solid var(--line3);border-radius:10px;padding:6px 10px;font-size:13px;font-family:inherit;background:#fff;color:var(--ink)}
   .child-select select:disabled{opacity:.6}
   .child-empty{font-size:13px;color:#8e9691}
+  .child-bucket-tag{font-size:12px;color:#8e9691;background:#eef0ed;border-radius:999px;padding:2px 10px;font-weight:600}
   .parent-tabs-narrow{display:none}
   @media(max-width:1024px){
     .parent-banner{flex-wrap:wrap;gap:12px}
@@ -855,6 +856,7 @@
       <div style="flex:1">
         <div class="user-name" id="userName">家长</div>
       </div>
+      <button class="btn-ghost" style="padding:4px 10px;font-size:11px" onclick="logoutParent()" title="退出家长登录">退出</button>
     </div>
   </aside>
 
@@ -866,6 +868,6 @@
 
 <!-- 改 app.js 后把 v= 后面的数字 +1，避免浏览器缓存旧脚本 -->
 <script src="config.js?v=1"></script>
-<script src="app.js?v=1"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

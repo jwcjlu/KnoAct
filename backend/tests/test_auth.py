@@ -23,3 +23,13 @@ def test_auth_login_creates_new_user(setup_db):
     resp = _client().post("/api/auth/login", json={"name": "新孩子"})
     assert resp.status_code == 200
     assert resp.json()["role"] == "child"
+
+
+def test_auth_login_creates_parent_user(setup_db):
+    resp = _client().post("/api/auth/login", json={"name": "金爸爸", "role": "parent"})
+    assert resp.status_code == 200
+    assert resp.json()["role"] == "parent"
+    # 已存在同名家长时直接返回，role 保持一致
+    again = _client().post("/api/auth/login", json={"name": "金爸爸", "role": "parent"})
+    assert again.json()["role"] == "parent"
+    assert again.json()["id"] == resp.json()["id"]

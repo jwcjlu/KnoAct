@@ -8,11 +8,12 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 class LoginReq(BaseModel):
     name: str
+    role: str = "child"
 
 @router.post("/login")
 def login(req: LoginReq, db: Session = Depends(get_db)):
     user = db.query(User).filter_by(name=req.name).first()
     if not user:
-        user = User(name=req.name, role="child")  # 简化：默认孩子
+        user = User(name=req.name, role=req.role)
         db.add(user); db.commit(); db.refresh(user)
     return {"id": user.id, "name": user.name, "role": user.role}

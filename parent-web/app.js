@@ -48,8 +48,13 @@ const PARENT_TABS = [
 ];
 const CHILD_TABS = ['目标','报告','任务'];   // 依赖当前孩子（uid）的 Tab
 const CHILD_KEY = 'knoact_parent_child_id';
+const PARENT_KEY = 'knoact_parent_id';
+let parentId = null;       // 当前登录家长 id（localStorage 持久化）
+let parentName = '';
 let uid = null;            // 当前孩子 id，由孩子列表决定；确定前不发依赖孩子的请求
-let children = [];         // [{id, name, role}]
+let children = [];         // [{id, name, role, grade, edition}]
+let buckets = [];          // [{id, grade, school_year, status}] 当前孩子的学年桶
+let bucketId = null;       // 当前选中桶（默认 active 桶）
 let childSwitching = false;
 let parentTab = '教材';
 
@@ -63,8 +68,9 @@ let reportRows = [];
 let masteryReport = null;
 async function loadMasteryReport(){
   if(!uid){ masteryReport = null; return null; }
-  const u = uid;
-  const report = await api(`/api/mastery/report?user_id=${u}`);
+  const u = uid, b = bucketId;
+  const q = b ? `&bucket_id=${b}` : '';
+  const report = await api(`/api/mastery/report?user_id=${u}${q}`);
   if(u === uid) masteryReport = report;
   return masteryReport;
 }
@@ -135,13 +141,24 @@ function render(){
 // ===== 家长端 =====
 // ---- 当前孩子 ----
 async function loadChildren(){
-  const list = await api('/api/users?role=child');
+  const q = parentId ? `&parent_id=${parentId}` : '';
+  const list = await api(`/api/users?role=child${q}`);
   if(!Array.isArray(list)) throw new Error('孩子列表接口返回异常');
   children = list;
   let saved = null;
   try{ saved = Number(localStorage.getItem(CHILD_KEY)); }catch(e){}
   const hit = children.find(c => c.id === saved);
   uid = hit ? hit.id : (children[0] ? children[0].id : null);
+  await loadBuckets();
+}
+async function loadBuckets(){
+  if(!uid){ buckets = []; bucketId = null; return; }
+  const u = uid;
+  const list = await api(`/api/buckets?user_id=${u}`);
+  if(u !== uid) return;
+  buckets = Array.isArray(list) ? list : [];
+  const active = buckets.find(b => b.status === 'active');
+  bucketId = active ? active.id : (buckets[0] ? buckets[0].id : null);
 }
 async function reloadChildData(){
   if(parentTab==='目标') await loadGoals();
@@ -154,6 +171,8 @@ async function switchChild(id){
   uid = Number(id) || null;
   try{ localStorage.setItem(CHILD_KEY, String(uid)); }catch(e){}
   goalRows = []; reportRows = []; masteryReport = null; parentTasks = [];
+  buckets = []; bucketId = null;
+  await loadBuckets();
   // 非孩子 Tab 只刷新下拉框，避免整页重绘冲掉未保存的输入
   childSwitching = true; CHILD_TABS.includes(parentTab) ? render() : renderChildSelect();
   try{ await reloadChildData(); }
@@ -165,12 +184,53 @@ function renderChildSelect(){
   if(host) host.innerHTML = childSelectHtml();
 }
 function childSelectHtml(){
-  if(!children.length) return `<span class="child-empty">暂无孩子</span>`;
+  if(!children.length){
+    return `<span class="child-empty">暂无孩子</span>
+      <button class="btn-ghost" style="padding:6px 12px" onclick="showAddChild()" title="新建孩子档案">${icon('check',14)} 新建孩子</button>`;
+  }
+  const bucketOpts = buckets.map(b=>
+    `<option value="${b.id}" ${b.id===bucketId?'selected':''}>${escapeAttr(b.school_year)} · ${escapeAttr(b.grade)}年级${b.status==='active'?'（当前）':''}</option>`
+  ).join('');
+  const bucketSel = buckets.length > 1
+    ? `<select onchange="switchBucket(this.value)" ${childSwitching?'disabled':''} title="查看不同学年数据">${bucketOpts}</select>`
+    : (buckets.length === 1 ? `<span class="child-bucket-tag">${escapeAttr(buckets[0].school_year)}</span>` : '');
   return `<label class="child-select">当前孩子
     <select onchange="switchChild(this.value)" ${childSwitching?'disabled':''}>
       ${children.map(c=>`<option value="${c.id}" ${c.id===uid?'selected':''}>${escapeAttr(c.name)}</option>`).join('')}
     </select>
-  </label>`;
+  </label>
+  ${bucketSel?`<label class="child-select">学年 ${bucketSel}</label>`:''}
+  <button class="btn-ghost" style="padding:6px 12px" onclick="promoteChild()" title="将当前孩子升到下一学年">${icon('arrow',14)} 升年级</button>
+  <button class="btn-ghost" style="padding:6px 12px" onclick="showAddChild()" title="新建孩子档案">${icon('check',14)} 新建孩子</button>`;
+}
+function switchBucket(id){
+  bucketId = Number(id) || null;
+  goalRows = []; reportRows = []; masteryReport = null;
+  reloadChildData().catch(()=>toast('加载孩子数据失败，请稍后重试'));
+  if(CHILD_TABS.includes(parentTab)) render(); else renderChildSelect();
+}
+async function promoteChild(){
+  if(!uid) return;
+  if(!confirm('将当前孩子升到下一学年（旧学年数据会保留在历史桶中）。确定吗？')) return;
+  await api(`/api/children/${uid}/promote`, {method:'POST'});
+  toast('已升年级');
+  await loadChildren();
+  render();
+}
+function showAddChild(){
+  if(!parentId){ toast('请先登录家长账号'); return; }
+  const name = prompt('孩子姓名');
+  if(!name || !name.trim()) return;
+  const grade = prompt('年级（1-6）', '1');
+  if(!grade || isNaN(Number(grade))) return;
+  const edition = prompt('教材版本（如 人教/苏教，可留空）', '') || '';
+  addChild(name.trim(), Number(grade), edition);
+}
+async function addChild(name, grade, edition){
+  await api('/api/children', {method:'POST', body:{parent_id: parentId, name, grade, edition}});
+  toast('孩子已创建');
+  await loadChildren();
+  render();
 }
 function setParentTab(t){
   parentTab=t;
@@ -201,8 +261,9 @@ async function loadGoals(){
 }
 async function loadReport(){
   if(!uid){ reportRows = []; return; }
-  const u = uid;
-  const rows = await api(`/api/mistakes/report?user_id=${u}`);
+  const u = uid, b = bucketId;
+  const q = b ? `&bucket_id=${b}` : '';
+  const rows = await api(`/api/mistakes/report?user_id=${u}${q}`);
   if(u === uid) reportRows = rows;
 }
 async function loadConfig(){
@@ -458,7 +519,47 @@ async function showAddTask(){
   await loadParentTasks(); render();
 }
 
+// ---- 家长登录 ----
+function renderLogin(){
+  return `<div class="parent-grid" style="display:block;max-width:420px;margin:60px auto 0">
+    <div class="parent-panel">
+      <div class="head"><div class="ic orange">${icon('star',20)}</div>
+        <div><h3>家长登录</h3><div class="sub">输入家长姓名，管理您的孩子</div></div></div>
+      <div class="bd">
+        <div style="display:flex;gap:8px">
+          <input id="parentNameInput" placeholder="家长姓名" style="flex:1;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"
+            onkeydown="if(event.key==='Enter')doParentLogin()">
+          <button class="btn-primary" style="padding:10px 20px" onclick="doParentLogin()">登录</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+async function doParentLogin(){
+  const input = document.getElementById('parentNameInput');
+  const name = (input && input.value) ? input.value.trim() : '';
+  if(!name){ toast('请输入家长姓名'); return; }
+  const r = await api('/api/auth/login', {method:'POST', body:{name, role:'parent'}});
+  if(!r || !r.id){ toast('登录失败，请稍后重试'); return; }
+  parentId = r.id; parentName = r.name;
+  try{ localStorage.setItem(PARENT_KEY, String(parentId)); localStorage.setItem('knoact_parent_name', r.name); }catch(e){}
+  document.getElementById('userName').textContent = r.name;
+  document.getElementById('userAvatar').textContent = (r.name||'家').slice(0,1);
+  await loadChildren();
+  render();
+}
+function logoutParent(){
+  parentId = null; parentName = '';
+  uid = null; children = []; buckets = []; bucketId = null;
+  try{ localStorage.removeItem(PARENT_KEY); localStorage.removeItem('knoact_parent_name'); }catch(e){}
+  document.getElementById('userName').textContent = '家长';
+  document.getElementById('userAvatar').textContent = '家';
+  renderNav();
+  render();
+}
+
 function renderParent(){
+  if(!parentId) return renderLogin();
   const tabs = PARENT_TABS.map(([t])=>
     `<button class="filter-btn ${parentTab===t?'active':''}" style="border-radius:10px;padding:8px 16px;font-size:13px;font-weight:600;color:${parentTab===t?'#3158e8':'#778079'};background:${parentTab===t?'#fff':'transparent'}" onclick="setParentTab('${t}')">${t}</button>`
   ).join('');
@@ -475,7 +576,7 @@ function renderParent(){
   else if(parentTab==='设置') body = renderSettingsTab();
 
   if(CHILD_TABS.includes(parentTab) && !uid){
-    body = `<div class="parent-panel"><div class="bd" style="text-align:center;padding:48px 0;color:#8e9691">暂无孩子：孩子首次登录学生端后会出现在这里</div></div>`;
+    body = `<div class="parent-panel"><div class="bd" style="text-align:center;padding:48px 0;color:#8e9691">暂无孩子：点击右上角「新建孩子」添加，或等孩子首次登录学生端后自动出现</div></div>`;
   }
   return `<div class="parent-banner">
     <div class="l"><div class="ic">${icon('star',20)}</div><div><div class="t">家长端 · 管理学习目标与规则</div><div class="s">在这里录入教材、设定目标、查看薄弱报告</div></div></div>
@@ -1252,8 +1353,18 @@ async function testVoice(){
 // ===== 初始化 =====
 async function init(){
   renderNav();
-  try{ await loadChildren(); }
-  catch(e){ children = []; uid = null; toast('无法获取孩子列表，请检查后端服务'); }
+  // 恢复家长登录态：仅有 id 时先渲染登录页，登录后拿到名字再更新侧栏
+  try{ const savedParent = Number(localStorage.getItem(PARENT_KEY)); if(savedParent) parentId = savedParent; }catch(e){}
+  if(parentId){
+    try{
+      // 用一次 children 请求验证 parent 仍有效（过滤由后端保证）
+      await loadChildren();
+      // 从孩子列表推导不出家长名字，尽力用缓存；无缓存时侧栏显示占位
+      const nm = localStorage.getItem('knoact_parent_name');
+      if(nm){ parentName = nm; document.getElementById('userName').textContent = nm; document.getElementById('userAvatar').textContent = nm.slice(0,1); }
+    }catch(e){ parentId = null; toast('家长会话已失效，请重新登录'); }
+  }
+  if(!parentId){ render(); return; }
   try{ await loadConfig(); }catch(e){}
   try{ await loadParentData(); }catch(e){}
   if(!Array.isArray(pdfDocs)) pdfDocs = [];
