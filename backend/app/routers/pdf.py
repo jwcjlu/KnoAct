@@ -1,8 +1,9 @@
 import os
 from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db, SessionLocal
-from ..models import PdfDocument, PdfPage, Lesson, WordBank, KnowledgePoint, Text, Question, Textbook
+from ..models import PdfDocument, PdfPage, Lesson, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
 from ..services.cleanup import purge_lesson_content, purge_lessons
 from ..services.pdf_split import render_pages, detect_lessons_from_pdf
 from ..services.lesson_extract import extract_lesson_content
@@ -50,14 +51,19 @@ async def upload_pdf(subject: str = Form(...), grade: int = Form(None),
 
 
 @router.get("/documents")
-def list_documents(db: Session = Depends(get_db)):
-    docs = db.query(PdfDocument).all()
+def list_documents(user_id: int = None, db: Session = Depends(get_db)):
+    q = db.query(PdfDocument)
+    if user_id is not None:
+        bound = db.query(UserDocument.document_id).filter_by(user_id=user_id)
+        q = q.filter(PdfDocument.id.in_(bound))
+    docs = q.all()
     out = []
     for d in docs:
         lessons = db.query(Lesson).filter_by(document_id=d.id).all()
         out.append({
             "id": d.id, "filename": d.filename, "subject": d.subject,
             "storage_path": d.storage_path,
+            "grade": d.grade, "edition": d.edition,
             "lesson_count": len(lessons),
             "audited_count": sum(1 for l in lessons if l.audit_status == "approved"),
         })
@@ -89,6 +95,32 @@ def list_document_lessons(document_id: int, db: Session = Depends(get_db)):
             "document_version": doc_version,
         })
     return out
+
+
+class BindReq(BaseModel):
+    user_id: int
+
+
+@router.post("/documents/{document_id}/bind")
+def bind_document(document_id: int, req: BindReq, db: Session = Depends(get_db)):
+    exists = db.query(UserDocument).filter_by(user_id=req.user_id, document_id=document_id).first()
+    if not exists:
+        db.add(UserDocument(user_id=req.user_id, document_id=document_id))
+        db.commit()
+    return {"ok": True}
+
+
+@router.delete("/documents/{document_id}/bind")
+def unbind_document(document_id: int, user_id: int, db: Session = Depends(get_db)):
+    db.query(UserDocument).filter_by(user_id=user_id, document_id=document_id).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/documents/{document_id}/bound-users")
+def bound_users(document_id: int, db: Session = Depends(get_db)):
+    ids = [r[0] for r in db.query(UserDocument.user_id).filter_by(document_id=document_id).all()]
+    return {"user_ids": ids}
 
 
 @router.post("/documents/{document_id}/extract")
@@ -214,6 +246,7 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
     purge_lessons(db, lesson_ids)
     db.query(PdfPage).filter_by(document_id=document_id).delete(synchronize_session=False)
     db.query(Textbook).filter_by(document_id=document_id).delete(synchronize_session=False)
+    db.query(UserDocument).filter_by(document_id=document_id).delete(synchronize_session=False)
 
     # 记录磁盘文件路径，用于删除
     storage = doc.storage_path

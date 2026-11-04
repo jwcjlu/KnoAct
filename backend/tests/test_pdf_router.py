@@ -126,3 +126,60 @@ def test_user_document_unique(setup_db):
         dup_rejected = True
     s.close()
     assert dup_rejected is True
+
+
+def test_bind_unbind_and_filter(setup_db):
+    from app.models import User, PdfDocument
+    from app.database import SessionLocal
+    s = SessionLocal()
+    c1 = User(name="晨晨", role="child", grade=3)
+    c2 = User(name="乐乐", role="child", grade=4)
+    d = PdfDocument(filename="语文.pdf", subject="语文", storage_path="x", grade=3, edition="人教")
+    s.add_all([c1, c2, d]); s.flush()
+    c1id, c2id, did = c1.id, c2.id, d.id
+    s.commit(); s.close()
+
+    c = _client()
+    # 绑定
+    r = c.post(f"/api/pdf/documents/{did}/bind", json={"user_id": c1id})
+    assert r.status_code == 200
+    # 幂等再绑
+    c.post(f"/api/pdf/documents/{did}/bind", json={"user_id": c1id})
+    # bound-users
+    r = c.get(f"/api/pdf/documents/{did}/bound-users").json()
+    assert c1id in r["user_ids"]
+    # 列表过滤：c1 能看到，c2 看不到
+    r = c.get(f"/api/pdf/documents?user_id={c1id}").json()
+    assert len(r) == 1
+    r = c.get(f"/api/pdf/documents?user_id={c2id}").json()
+    assert len(r) == 0
+    # 解绑
+    c.delete(f"/api/pdf/documents/{did}/bind?user_id={c1id}")
+    r = c.get(f"/api/pdf/documents?user_id={c1id}").json()
+    assert len(r) == 0
+
+
+def test_list_documents_returns_tags(setup_db):
+    from app.models import User, PdfDocument
+    from app.database import SessionLocal
+    s = SessionLocal()
+    d = PdfDocument(filename="数学.pdf", subject="数学", storage_path="y", grade=5, edition="北师大")
+    s.add(d); s.commit(); did = d.id; s.close()
+    docs = _client().get("/api/pdf/documents").json()
+    assert any(x["id"] == did and x["grade"] == 5 and x["edition"] == "北师大" for x in docs)
+
+
+def test_delete_document_cleans_bindings(setup_db):
+    from app.models import User, PdfDocument, UserDocument
+    from app.database import SessionLocal
+    s = SessionLocal()
+    c1 = User(name="晨晨", role="child", grade=3)
+    d = PdfDocument(filename="语文.pdf", subject="语文", storage_path="uploads/none.pdf", grade=3, edition="")
+    s.add_all([c1, d]); s.flush()
+    s.add(UserDocument(user_id=c1.id, document_id=d.id))
+    s.commit(); did = d.id; s.close()
+    c = _client()
+    c.delete(f"/api/pdf/documents/{did}")
+    s = SessionLocal()
+    assert s.query(UserDocument).count() == 0
+    s.close()
