@@ -44,9 +44,9 @@ function icon(name, size=18){
 // ===== 通用状态 =====
 const PARENT_TABS = [
   ['教材','book'],['知识点','brain'],['题目审核台','list'],['目标','star'],['报告','chart'],
-  ['任务','pen'],['规则','gift'],['学习配置','grid'],['设置','menu']
+  ['任务','pen'],['规则','gift'],['学习配置','grid'],['屏幕时间','clock'],['设置','menu']
 ];
-const CHILD_TABS = ['目标','报告','任务'];   // 依赖当前孩子（uid）的 Tab
+const CHILD_TABS = ['目标','报告','任务','屏幕时间'];   // 依赖当前孩子（uid）的 Tab
 const CHILD_KEY = 'knoact_parent_child_id';
 const PARENT_KEY = 'knoact_parent_id';
 let parentId = null;       // 当前登录家长 id（localStorage 持久化）
@@ -83,6 +83,12 @@ let ttsConfig = {provider:'minimax', voice:'清澈男声', key:'', baseUrl:'', m
 // 家长端任务审核
 let parentTaskDate = '';   // 家长端任务查看的日期（默认今天）
 let parentTasks = [];      // 当天全部任务（含待审核）
+
+// 屏幕时间
+let screenGroups = [];     // [{id,name,kind,daily_limit_seconds}]
+let screenRules = [];      // [{app_package,app_name,group_id}]
+let screenUsage = [];      // [{group_id,name,kind,duration_seconds,daily_limit_seconds,overtime}]
+let screenDate = '';       // 查看的日期（默认今天）
 
 const aiProviders = [
   {id:'deepseek',name:'DeepSeek',models:['deepseek-chat','deepseek-reasoner'],needsBaseUrl:false},
@@ -164,6 +170,7 @@ async function reloadChildData(){
   if(parentTab==='目标') await loadGoals();
   else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport()]);
   else if(parentTab==='任务') await loadParentTasks();
+  else if(parentTab==='屏幕时间') await Promise.all([loadScreenGroups(), loadScreenUsage()]);
 }
 // 切换期间禁用下拉框，避免快速连续切换时旧请求覆盖新数据
 async function switchChild(id){
@@ -241,6 +248,7 @@ function setParentTab(t){
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
+  if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
   if(t==='学习配置'){ loadConfig().then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
   render();
@@ -575,6 +583,7 @@ function renderParent(){
   else if(parentTab==='任务') body = renderTaskTab();
   else if(parentTab==='规则') body = renderRulesTab();
   else if(parentTab==='学习配置') body = renderLearningConfigTab();
+  else if(parentTab==='屏幕时间') body = renderScreenTab();
   else if(parentTab==='设置') body = renderSettingsTab();
 
   if(CHILD_TABS.includes(parentTab) && !uid){
@@ -865,7 +874,128 @@ function renderRulesTab(){
   </div>`;
 }
 
-// ---- 模型与服务（7 角色）----
+// ---- 屏幕时间 ----
+function fmtDuration(seconds){
+  seconds = Math.max(0, Math.round(seconds||0));
+  const m = Math.floor(seconds/60);
+  if(m < 60) return `${m}分钟`;
+  const h = Math.floor(m/60), rest = m%60;
+  return rest ? `${h}小时${rest}分` : `${h}小时`;
+}
+async function loadScreenGroups(){
+  if(!uid){ screenGroups = []; screenRules = []; return; }
+  const u = uid;
+  const d = await api(`/api/screen-time/groups?user_id=${u}`);
+  if(u !== uid) return;
+  screenGroups = (d && d.groups) || [];
+  screenRules = (d && d.rules) || [];
+}
+async function loadScreenUsage(){
+  if(!uid){ screenUsage = []; return; }
+  if(!screenDate){
+    const t = new Date();
+    screenDate = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  }
+  const u = uid, d = screenDate;
+  const res = await api(`/api/screen-time/usage?child_id=${u}&date=${d}`);
+  if(u === uid && d === screenDate) screenUsage = (res && res.groups) || [];
+}
+function changeScreenDate(){
+  screenDate = document.getElementById('screenDate').value;
+  loadScreenUsage().then(()=>render()).catch(()=>toast('加载使用情况失败，请稍后重试'));
+}
+async function saveScreenGroups(){
+  if(!uid) return;
+  // 收集每个分组的每日上限（分钟）；规则保持现状不变
+  const groups = screenGroups.map(g=>{
+    const el = document.getElementById(`screen-limit-${g.id}`);
+    const mins = el ? parseFloat(el.value) : NaN;
+    const limitSeconds = (mins===mins && mins>=0) ? Math.round(mins*60) : (g.daily_limit_seconds||0);
+    return {name:g.name, kind:g.kind, daily_limit_seconds:limitSeconds};
+  });
+  const rules = screenRules.map(r=>{
+    const g = screenGroups.find(x=>x.id===r.group_id);
+    return {app_package:r.app_package, app_name:r.app_name, group_name:(g&&g.name)||''};
+  }).filter(r=>r.group_name);
+  const res = await api('/api/screen-time/groups', {method:'PUT', body:{user_id:uid, groups, rules}});
+  if(res && res.ok){ toast('屏幕时间设置已保存'); await loadScreenGroups(); }
+  else { toast('保存失败，请稍后重试'); }
+}
+function renderScreenTab(){
+  const head = `<div class="parent-panel" style="grid-column:1/-1">
+    <div class="head">
+      <div class="ic blue">${icon('clock',20)}</div>
+      <div><h3>屏幕时间</h3><div class="sub">${screenDate} · 各分组每日使用时长与超时情况</div></div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <input type="date" id="screenDate" value="${screenDate}" onchange="changeScreenDate()"
+          style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px">
+        <button class="btn-primary" style="padding:8px 16px" onclick="saveScreenGroups()">保存</button>
+      </div>
+    </div>
+  </div>`;
+
+  if(!screenUsage.length){
+    return `<div class="parent-grid">
+      ${head}
+      <div class="parent-panel" style="grid-column:1/-1">
+        <div class="bd" style="text-align:center;padding:40px 0;color:#8e9691">
+          <div style="font-size:15px;font-weight:600;color:#5c6761;margin-bottom:6px">暂无屏幕时间数据</div>
+          <div style="font-size:13px">孩子端使用时长上报后，这里会按分组汇总展示。</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const rows = screenUsage.map(g=>{
+    const limitMins = g.daily_limit_seconds ? Math.round(g.daily_limit_seconds/60) : 0;
+    const limitText = g.daily_limit_seconds ? `${limitMins}分钟` : '未设';
+    const status = g.overtime
+      ? `<span class="g-status" style="background:#fff3f0;color:#c05b4a">超时</span>`
+      : `<span class="g-status" style="background:var(--green-soft2);color:var(--green)">正常</span>`;
+    return `<tr ${g.overtime?'style="color:red"':''}>
+      <td>${escapeAttr(g.name)}</td>
+      <td>${fmtDuration(g.duration_seconds)}</td>
+      <td>${limitText}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join('');
+
+  // 分组每日上限编辑（简单输入框），规则只读展示
+  const groupEditRows = screenGroups.map(g=>{
+    const limitMins = g.daily_limit_seconds ? Math.round(g.daily_limit_seconds/60) : '';
+    const grpRules = screenRules.filter(r=>r.group_id===g.id);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line2)">
+      <span style="font-size:13px;font-weight:600;min-width:90px">${escapeAttr(g.name)}</span>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--gray2)">每日上限
+        <input type="number" id="screen-limit-${g.id}" min="0" step="5" value="${limitMins}"
+          style="width:70px;border:1px solid var(--line3);border-radius:8px;padding:5px 8px;font-size:13px">分钟</label>
+      <span style="font-size:12px;color:#8e9691">${grpRules.length?('含应用：'+grpRules.map(r=>escapeAttr(r.app_name||r.app_package)).join('、')):''}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="parent-grid" style="display:block">
+    ${head}
+    <div class="parent-panel" style="margin-bottom:20px">
+      <div class="bd">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="color:var(--gray2);text-align:left;border-bottom:1px solid var(--line)">
+            <th style="padding:8px 10px">分组</th>
+            <th style="padding:8px 10px">今日时长</th>
+            <th style="padding:8px 10px">上限</th>
+            <th style="padding:8px 10px">状态</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="parent-panel">
+      <div class="head"><div class="ic purple">${icon('grid',20)}</div><div><h3>分组与每日上限</h3><div class="sub">调整各分组每日限额（分钟），点击右上角「保存」生效</div></div></div>
+      <div class="bd">${groupEditRows || '<p style="font-size:13px;color:var(--gray2)">暂无分组</p>'}</div>
+    </div>
+  </div>`;
+}
+
+
 let msCatalog = null;
 let msRoleTab = 'llm';
 let msProbe = {};
