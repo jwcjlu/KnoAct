@@ -70,5 +70,7 @@ def test_promote_grade_idempotent(setup_db, db):
 
 
 def test_current_school_year_september_boundary():
-    sy = current_school_year()
-    assert len(sy) == 9 and sy[4] == "-"
+    from datetime import date
+    assert current_school_year(date(2026, 9, 1)) == "2026-2027"   # 9/1 起进入新学年
+    assert current_school_year(date(2026, 8, 31)) == "2025-2026"  # 8/31 仍是上学年
+    assert current_school_year(date(2027, 1, 15)) == "2026-2027"  # 年初
