@@ -12,6 +12,9 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64))
     role: Mapped[str] = mapped_column(String(16))  # 'parent' | 'child'
+    grade: Mapped[int] = mapped_column(Integer, nullable=True)  # 当前年级 1~6
+    edition: Mapped[str] = mapped_column(String(64), default="")  # 教材版本（人教版/苏教版…）
+    parent_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)  # 所属家长
 
 class PdfDocument(Base):
     __tablename__ = "pdf_documents"
@@ -303,3 +306,27 @@ class RenderTask(Base):
     error: Mapped[str] = mapped_column(LongText, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SchoolYearBucket(Base):
+    """一个孩子的一个学年「桶」：升年级即封存旧桶、开新桶，历史数据按桶归档。"""
+    __tablename__ = "school_year_buckets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    grade: Mapped[int] = mapped_column(Integer)
+    school_year: Mapped[str] = mapped_column(String(16))          # 如 "2025-2026"
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | archived
+
+
+class ChildConfig(Base):
+    """孩子对全局配置的覆盖项；未配则回落全局 ModelConfig。跨学年沿用，不分桶。"""
+    __tablename__ = "child_config"
+    __table_args__ = (
+        UniqueConstraint("user_id", "key", name="uq_child_config_user_key"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    key: Mapped[str] = mapped_column(String(64))
+    value: Mapped[str] = mapped_column(LongText, default="")
