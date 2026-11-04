@@ -1,6 +1,8 @@
 import 'package:workmanager/workmanager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
+import '../../auth/data/session_store.dart';
+import '../../../core/config.dart';
 import 'usage_api.dart';
 import 'screen_time_sync.dart';
 
@@ -28,11 +30,12 @@ void callbackDispatcher() {
       await api.addLocalSeconds(date, s.package, s.appName, s.durationMs ~/ 1000);
     }
     await sp.setInt('last_sync_ms', now.millisecondsSinceEpoch);
-    final childId = sp.getInt('child_id') ?? 0;
+    final childId = sp.getInt(SessionStore.childIdKey) ?? 0;
     if (childId != 0) {
       final day = await api.readLocalDay(date);
-      final dio = Dio(BaseOptions(baseUrl: sp.getString('api_base') ?? 'http://127.0.0.1:8010'));
-      await ScreenTimeSync(api, dio).reportDay(childId, date, day);
+      final names = await api.readLocalNames(date);
+      final dio = Dio(BaseOptions(baseUrl: resolveApiBase()));
+      await ScreenTimeSync(api, dio).reportDay(childId, date, day, names: names);
     }
     return true;
   });

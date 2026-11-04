@@ -52,6 +52,18 @@ class UsageApi {
     return out;
   }
 
+  /// 某日各包名缓存的显示名（由 addLocalSeconds 的 appName 写入）。
+  Future<Map<String, String>> readLocalNames(String date) async {
+    final sp = await SharedPreferences.getInstance();
+    final out = <String, String>{};
+    for (final k in sp.getKeys()) {
+      if (!k.startsWith('$date|') || !k.endsWith('.name')) continue;
+      final pkg = k.substring(date.length + 1, k.length - '.name'.length);
+      out[pkg] = sp.getString(k) ?? '';
+    }
+    return out;
+  }
+
   Future<void> clearLocalDay(String date) async {
     final sp = await SharedPreferences.getInstance();
     for (final k in sp.getKeys().toList()) {

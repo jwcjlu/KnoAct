@@ -27,7 +27,7 @@ class ScreenTimeSync {
   Future<List<ScreenRule>> fetchRules(int childId) async {
     final r = await dio.get('/api/screen-time/groups', queryParameters: {'user_id': childId});
     final data = r.data as Map<String, dynamic>;
-    final groups = (data['groups'] as List).cast<Map<String, dynamic>>();
+    final groups = (data['groups'] as List).whereType<Map<String, dynamic>>();
     return groups
         .map((g) => ScreenRule(
               groupId: g['id'] as int,
@@ -39,10 +39,16 @@ class ScreenTimeSync {
   }
 
   /// 把某天本地缓存的「包名→秒」上报后端（累加语义由后端保证）。
-  Future<void> reportDay(int childId, String date, Map<String, int> daySeconds) async {
+  /// [names] 可选：包名→显示名，用于填充 app_name。
+  Future<void> reportDay(int childId, String date, Map<String, int> daySeconds,
+      {Map<String, String> names = const {}}) async {
     if (daySeconds.isEmpty) return;
     final items = daySeconds.entries
-        .map((e) => {'app_package': e.key, 'app_name': '', 'duration_seconds': e.value})
+        .map((e) => {
+              'app_package': e.key,
+              'app_name': names[e.key] ?? '',
+              'duration_seconds': e.value
+            })
         .toList();
     await dio.post('/api/screen-time/report',
         data: {'child_id': childId, 'date': date, 'items': items});
