@@ -22,6 +22,28 @@ class WrongbookPage extends ConsumerWidget {
         const SizedBox(height: 6),
         const Text('练习中的错题会自动收录，标记掌握后移出复习', style: TextStyle(color: AppColors.gray)),
         const SizedBox(height: 16),
+        if (s.buckets.length > 1) ...[
+          Wrap(spacing: 8, children: [
+            for (final b in s.buckets)
+              ChoiceChip(
+                key: ValueKey('wrongbook-bucket-${b.id}'),
+                selected: s.bucketId == b.id,
+                onSelected: (_) => ctl.setBucket(b.id),
+                label: Text('${b.schoolYear} · ${b.grade}年级${b.isActive ? '（当前）' : ''}'),
+              ),
+          ]),
+          const SizedBox(height: 16),
+        ],
+        if (s.isReadOnly) ...[
+          Container(
+            key: const ValueKey('wrongbook-readonly-banner'),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(color: AppColors.orangeSoft, borderRadius: BorderRadius.circular(8)),
+            child: const Text('历史学年（只读）', style: TextStyle(color: AppColors.orange, fontSize: 13, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(height: 16),
+        ],
         Wrap(spacing: 8, children: [
           for (final sub in _subjects)
             ChoiceChip(
@@ -69,7 +91,9 @@ class _MistakeCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final subject = mistakeSubject(item.sourceType);
     final srcName = mistakeSourceNames[item.sourceType] ?? item.sourceType;
-    final marking = ref.watch(wrongbookControllerProvider).markingId == item.id;
+    final s = ref.watch(wrongbookControllerProvider);
+    final marking = s.markingId == item.id;
+    final disabled = marking || s.isReadOnly;
     return SectionCard(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -98,7 +122,7 @@ class _MistakeCard extends ConsumerWidget {
           width: double.infinity,
           child: FilledButton.tonal(
             key: ValueKey('mistake-master-${item.id}'),
-            onPressed: marking ? null : () => ref.read(wrongbookControllerProvider.notifier).markMastered(item.id),
+            onPressed: disabled ? null : () => ref.read(wrongbookControllerProvider.notifier).markMastered(item.id),
             child: marking
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('标记已掌握'),
