@@ -74,3 +74,50 @@ def test_current_school_year_september_boundary():
     assert current_school_year(date(2026, 9, 1)) == "2026-2027"   # 9/1 起进入新学年
     assert current_school_year(date(2026, 8, 31)) == "2025-2026"  # 8/31 仍是上学年
     assert current_school_year(date(2027, 1, 15)) == "2026-2027"  # 年初
+
+
+def test_promote_grade_explicit_target_skip(setup_db, db):
+    child = _child(db, 3)
+    db.commit()
+    ensure_bucket(db, child.id)
+    b = promote_grade(db, child.id, target_grade=5)  # 跳级到 5
+    db.refresh(child)
+    assert child.grade == 5
+    assert b.grade == 5
+    assert get_active_bucket(db, child.id).grade == 5
+
+
+def test_promote_grade_explicit_target_same_grade_noop(setup_db, db):
+    child = _child(db, 3)
+    db.commit()
+    ensure_bucket(db, child.id)
+    promote_grade(db, child.id, target_grade=3)  # 留级到同级 = no-op
+    db.refresh(child)
+    assert child.grade == 3
+    # 只应有一个 active 桶，无新桶产生
+    assert len(db.query(SchoolYearBucket).filter_by(user_id=child.id).all()) == 1
+
+
+def test_promote_grade_no_existing_bucket(setup_db, db):
+    child = _child(db, 3)
+    db.commit()
+    b = promote_grade(db, child.id)  # 无 active 桶的 active is None 路径
+    db.refresh(child)
+    assert child.grade == 4
+    assert b.grade == 4
+    assert get_active_bucket(db, child.id).grade == 4
+
+
+def test_ensure_bucket_defaults_grade_3_when_none(setup_db, db):
+    child = _child(db, None)
+    db.commit()
+    b = ensure_bucket(db, child.id)
+    assert b.grade == 3
+
+
+def test_promote_grade_none_grade_yields_4(setup_db, db):
+    child = _child(db, None)
+    db.commit()
+    promote_grade(db, child.id)  # None 年级应按缺省 3 + 1 = 4，而非 0 + 1 = 1
+    db.refresh(child)
+    assert child.grade == 4

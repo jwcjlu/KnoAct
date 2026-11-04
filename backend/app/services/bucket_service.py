@@ -55,7 +55,8 @@ def promote_grade(db: Session, user_id: int, target_grade: int | None = None) ->
     user = db.get(User, user_id)
     if not user:
         raise ValueError(f"user {user_id} not found")
-    new_grade = target_grade if target_grade is not None else (user.grade or 0) + 1
+    base_grade = user.grade or 3  # 与 ensure_bucket 的缺省三年级保持一致
+    new_grade = target_grade if target_grade is not None else base_grade + 1
     if new_grade == user.grade:
         # 已是目标年级，确保有 active 桶即可（留级到同级视为 no-op）
         return ensure_bucket(db, user_id)
