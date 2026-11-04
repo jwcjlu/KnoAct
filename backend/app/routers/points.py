@@ -26,11 +26,10 @@ def balance(user_id: int, bucket_id: int | None = None, db: Session = Depends(ge
 def redeem(req: RedeemReq, bucket_id: int | None = None, db: Session = Depends(get_db)):
     assert_writable(db, req.user_id, bucket_id)
     bid = resolve_bucket_id(db, req.user_id, bucket_id)
+    if bid is None:
+        return {"success": False, "reason": "积分不足"}
     cost = RATES.get(req.device, 300)
-    q = db.query(Point).filter_by(user_id=req.user_id)
-    if bid is not None:
-        q = q.filter_by(bucket_id=bid)
-    total = sum(p.delta for p in q.all())
+    total = sum(p.delta for p in db.query(Point).filter_by(user_id=req.user_id, bucket_id=bid).all())
     if total < cost:
         return {"success": False, "reason": "积分不足"}
     db.add(Point(user_id=req.user_id, bucket_id=bid, delta=-cost, reason=f"兑换 {req.device} {req.minutes} 分钟"))
