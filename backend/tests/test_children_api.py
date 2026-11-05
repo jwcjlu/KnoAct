@@ -54,7 +54,8 @@ def test_promote_grade_endpoint(setup_db):
     assert any(b["status"] == "active" and b["grade"] == 4 for b in buckets)
 
 
-def test_archived_child_login_rejected(setup_db, client, db):
+def test_archived_child_login_rejected(setup_db, client, db, monkeypatch):
+    monkeypatch.setenv("KNOACT_LEGACY_NAME_LOGIN", "1")
     c = User(name="晨晨", role="child", status="archived")
     db.add(c); db.commit()
     r = client.post("/api/auth/login", json={"name": "晨晨"})
