@@ -250,17 +250,13 @@ async function addChild(name, grade, edition){
 async function loadArchivedChildren(){
   const q = parentId ? `&parent_id=${parentId}` : '';
   const list = await api(`/api/users?role=child&include_archived=1${q}`);
-  const all = Array.isArray(list) ? list : [];
-  // 接口不返回 status，用「全部（含归档）− 活跃」求差集得出已归档孩子
-  const activeIds = new Set(children.map(c => c.id));
-  archivedChildren = all.filter(c => !activeIds.has(c.id));
+  archivedChildren = Array.isArray(list) ? list.filter(c => c.status === 'archived') : [];
 }
 
 function renderChildMgmt(){
-  const archivedIds = new Set(archivedChildren.map(c => c.id));
   const visible = showArchived ? [...children, ...archivedChildren] : children;
   const rows = visible.map(c=>{
-    const isArchived = archivedIds.has(c.id);
+    const isArchived = c.status === 'archived';
     return `<div class="pdf-row">
       <div><div class="nm">${escapeAttr(c.name)}${isArchived?' <span style="color:#c05b4a">（已归档）</span>':''}</div>
         <div class="meta">${c.grade?c.grade+'年级':''}${c.edition?' · '+c.edition:''}</div></div>

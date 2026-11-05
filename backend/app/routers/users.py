@@ -21,7 +21,7 @@ def list_users(role: str | None = None, parent_id: int | None = None,
         q = q.filter_by(parent_id=parent_id)
     if not include_archived:
         q = q.filter(User.status != "archived")
-    return [{"id": u.id, "name": u.name, "role": u.role, "grade": u.grade, "edition": u.edition}
+    return [{"id": u.id, "name": u.name, "role": u.role, "grade": u.grade, "edition": u.edition, "status": u.status}
             for u in q.order_by(User.id).all()]
 
 
