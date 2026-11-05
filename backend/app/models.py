@@ -405,3 +405,40 @@ class ScreenUsage(Base):
     app_name: Mapped[str] = mapped_column(String(255), default="")
     duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
     group_id: Mapped[int] = mapped_column(ForeignKey("app_groups.id"), nullable=True)
+
+
+class OtpCode(Base):
+    __tablename__ = "otp_codes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    channel: Mapped[str] = mapped_column(String(16))  # phone | email
+    purpose: Mapped[str] = mapped_column(String(32))  # login | reset_password | bind_phone
+    code_hash: Mapped[str] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    token_hash: Mapped[str] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class FamilyInvite(Base):
+    __tablename__ = "family_invites"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    parent_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_by_child_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class FamilyBindRequest(Base):
+    __tablename__ = "family_bind_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    child_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    parent_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | approved | rejected

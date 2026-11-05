@@ -2,6 +2,20 @@
 from .database import SessionLocal, Base, engine
 from .models import User, Lesson, PdfDocument, WordBank, KnowledgePoint, Text, Question, ModelConfig
 from .models import ModelConnection, ModelProfile, RoleBinding, Quiz, KnowledgeMastery  # 注册到 Base.metadata，保证 create_all 建表
+from .models import OtpCode, RefreshToken, FamilyInvite, FamilyBindRequest  # noqa: F401 — auth 相关表
+
+
+def _ensure_auth_tables():
+    """已有 SQLite 库不会自动建新表；create_all 仅补缺失表，幂等。"""
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            OtpCode.__table__,
+            RefreshToken.__table__,
+            FamilyInvite.__table__,
+            FamilyBindRequest.__table__,
+        ],
+    )
 
 
 def _migrate_learning_progress():
@@ -249,6 +263,7 @@ SEED_KNOWLEDGE = [
 
 def seed():
     Base.metadata.create_all(bind=engine)
+    _ensure_auth_tables()
     _migrate_learning_progress()
     _migrate_pdf_document_created_at()
     _migrate_multi_student_columns()
