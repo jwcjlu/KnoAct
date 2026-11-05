@@ -28,3 +28,12 @@ def get_current_user(
     if user.status == "archived":
         raise HTTPException(status_code=403, detail={"error": "archived"})
     return user
+
+
+def require_role(*roles: str):
+    """依赖工厂：当前用户角色必须在 roles 内，否则 403 forbidden。"""
+    def _dep(user: User = Depends(get_current_user)) -> User:
+        if user.role not in roles:
+            raise HTTPException(status_code=403, detail={"error": "forbidden"})
+        return user
+    return _dep

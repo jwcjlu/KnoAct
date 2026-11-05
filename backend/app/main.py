@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users
 
 app = FastAPI(title="知学伴 API")
 
@@ -23,6 +23,7 @@ def health():
 
 app.include_router(auth.router)
 app.include_router(family.router)
+app.include_router(admin_users.router)
 app.include_router(config_router.router)
 app.include_router(pdf.router)
 app.include_router(progress.router)
