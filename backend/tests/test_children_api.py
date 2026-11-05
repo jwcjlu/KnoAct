@@ -61,6 +61,50 @@ def test_archived_child_login_rejected(setup_db, client, db):
     assert r.status_code == 403
 
 
+def test_edit_child_updates_fields(setup_db, client, db):
+    c = User(name="晨晨", role="child", grade=3, edition="人教")
+    db.add(c); db.commit()
+    r = client.put(f"/api/children/{c.id}", json={"name": "晨晨2", "grade": 5, "edition": "北师大"})
+    assert r.status_code == 200
+    assert r.json()["grade"] == 5
+    assert r.json()["edition"] == "北师大"
+    assert r.json()["name"] == "晨晨2"
+
+
+def test_archive_unarchive_idempotent(setup_db, client, db):
+    c = User(name="晨晨", role="child", grade=3)
+    db.add(c); db.commit()
+    assert client.post(f"/api/children/{c.id}/archive").json() == {"ok": True}
+    assert client.post(f"/api/children/{c.id}/archive").json() == {"ok": True}
+    db.expire_all()
+    assert db.get(User, c.id).status == "archived"
+    assert client.post(f"/api/children/{c.id}/unarchive").json() == {"ok": True}
+    db.expire_all()
+    assert db.get(User, c.id).status == "active"
+
+
+def test_child_documents_listing(setup_db, client, db):
+    from app.models import PdfDocument, UserDocument
+    c = User(name="晨晨", role="child", grade=3)
+    d = PdfDocument(filename="语文.pdf", subject="语文", storage_path="", grade=3, edition="人教")
+    db.add_all([c, d]); db.flush()
+    db.add(UserDocument(user_id=c.id, document_id=d.id))
+    db.commit()
+    r = client.get(f"/api/children/{c.id}/documents").json()
+    assert len(r["documents"]) == 1
+    assert r["documents"][0]["filename"] == "语文.pdf"
+
+
+def test_users_include_archived(setup_db, client, db):
+    db.add(User(name="活跃", role="child", status="active"))
+    db.add(User(name="归档", role="child", status="archived"))
+    db.commit()
+    active = client.get("/api/users?role=child").json()
+    assert all(u["name"] != "归档" for u in active)
+    allu = client.get("/api/users?role=child&include_archived=1").json()
+    assert any(u["name"] == "归档" for u in allu)
+
+
 def test_archived_child_excluded_from_daily_tasks(setup_db, db):
     from app.models import PdfDocument, Lesson, UserDocument, WordBank, KnowledgePoint, Text, Task
     from app.services.task_gen import generate_daily_tasks
