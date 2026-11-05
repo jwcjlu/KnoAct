@@ -49,9 +49,13 @@ const PARENT_TABS = [
 ];
 const CHILD_TABS = ['目标','报告','任务','屏幕时间'];   // 依赖当前孩子（uid）的 Tab
 const CHILD_KEY = 'knoact_parent_child_id';
-const PARENT_KEY = 'knoact_parent_id';
-let parentId = null;       // 当前登录家长 id（localStorage 持久化）
+const ACCESS_TOKEN_KEY = 'knoact_access_token';
+const REFRESH_TOKEN_KEY = 'knoact_refresh_token';
+let parentId = null;       // 当前登录家长 id（来自 /api/auth/me）
 let parentName = '';
+let loginAuthMode = 'login'; // 'login' | 'register'
+let familyInvite = null;   // {code, expires_at}
+let familyRequests = [];
 let uid = null;            // 当前孩子 id，由孩子列表决定；确定前不发依赖孩子的请求
 let children = [];         // [{id, name, role, grade, edition}]
 let buckets = [];          // [{id, grade, school_year, status}] 当前孩子的学年桶
@@ -114,8 +118,45 @@ function toast(msg){
   t._timer = setTimeout(()=>t.style.display='none',2400);
 }
 
+function getAccessToken(){
+  try{ return localStorage.getItem(ACCESS_TOKEN_KEY) || ''; }catch(e){ return ''; }
+}
+function getRefreshToken(){
+  try{ return localStorage.getItem(REFRESH_TOKEN_KEY) || ''; }catch(e){ return ''; }
+}
+function setTokens(access, refresh){
+  try{
+    localStorage.setItem(ACCESS_TOKEN_KEY, access);
+    if(refresh) localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
+  }catch(e){}
+}
+function clearAuthTokens(){
+  try{
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem('knoact_parent_id');
+    localStorage.removeItem('knoact_parent_name');
+  }catch(e){}
+}
+function authHeaders(extra={}){
+  const h = {'Content-Type':'application/json', ...extra};
+  const t = getAccessToken();
+  if(t) h.Authorization = `Bearer ${t}`;
+  return h;
+}
+function apiErrorMsg(data, fallback='请求失败'){
+  if(!data || typeof data !== 'object') return fallback;
+  const d = data.detail;
+  if(typeof d === 'string') return d;
+  if(d && typeof d === 'object' && d.error){
+    const map = {invalid_credentials:'账号或密码错误', login_name_taken:'登录名已被占用', invalid_login_name:'登录名格式无效'};
+    return map[d.error] || d.error;
+  }
+  if(data.error) return String(data.error);
+  return fallback;
+}
 async function api(path, opts={}){
-  const init = {headers:{'Content-Type':'application/json'}, ...opts};
+  const init = {headers: authHeaders(), ...opts};
   if(opts.body) init.body = JSON.stringify(opts.body);
   const r = await fetch(API + path, init);
   const ct = r.headers.get('content-type')||'';
@@ -123,7 +164,10 @@ async function api(path, opts={}){
 }
 const sleep = ms => new Promise(res=>setTimeout(res,ms));
 async function apiForm(path, formData){
-  const r = await fetch(API + path, {method:'POST', body:formData});
+  const h = {};
+  const t = getAccessToken();
+  if(t) h.Authorization = `Bearer ${t}`;
+  const r = await fetch(API + path, {method:'POST', headers:h, body:formData});
   const ct = r.headers.get('content-type')||'';
   return ct.includes('json') ? r.json() : r.text();
 }
@@ -277,6 +321,7 @@ function renderChildMgmt(){
         <button class="next-lesson-btn" style="margin-top:16px" onclick="showAddChild()">${icon('check',16)} 新建孩子</button>
       </div>
     </div>
+    ${renderFamilyBindPanel()}
     ${renderChildDocs()}
   </div>`;
 }
@@ -351,7 +396,7 @@ function setParentTab(t){
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
   if(t==='学习配置'){ loadConfig().then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
-  if(t==='孩子管理'){ loadChildren().then(()=>loadArchivedChildren()).then(()=>render()); return; }
+  if(t==='孩子管理'){ Promise.all([loadChildren(), loadArchivedChildren(), loadFamilyRequests()]).then(()=>render()); return; }
   render();
 }
 async function loadParentData(){ await loadPdfDocs(); }
@@ -631,42 +676,140 @@ async function showAddTask(){
 }
 
 // ---- 家长登录 ----
+function updateParentSidebar(){
+  const nm = parentName || '家长';
+  document.getElementById('userName').textContent = nm;
+  document.getElementById('userAvatar').textContent = (nm||'家').slice(0,1);
+}
+function applyParentSession(me){
+  if(!me || me.role !== 'parent') return false;
+  parentId = me.id;
+  parentName = me.display_name || me.name || me.login_name || '';
+  updateParentSidebar();
+  return true;
+}
 function renderLogin(){
+  const isReg = loginAuthMode === 'register';
+  const title = isReg ? '注册家长账号' : '家长登录';
+  const sub = isReg ? '创建账号后管理孩子与学习配置' : '使用登录名和密码进入家长端';
+  const toggle = isReg
+    ? `<button type="button" class="btn-ghost" style="padding:0;font-size:13px;color:var(--blue)" onclick="loginAuthMode='login';render()">已有账号？去登录</button>`
+    : `<button type="button" class="btn-ghost" style="padding:0;font-size:13px;color:var(--blue)" onclick="loginAuthMode='register';render()">没有账号？注册</button>`;
   return `<div class="parent-grid" style="display:block;max-width:420px;margin:60px auto 0">
     <div class="parent-panel">
       <div class="head"><div class="ic orange">${icon('star',20)}</div>
-        <div><h3>家长登录</h3><div class="sub">输入家长姓名，管理您的孩子</div></div></div>
-      <div class="bd">
-        <div style="display:flex;gap:8px">
-          <input id="parentNameInput" placeholder="家长姓名" style="flex:1;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"
-            onkeydown="if(event.key==='Enter')doParentLogin()">
-          <button class="btn-primary" style="padding:10px 20px" onclick="doParentLogin()">登录</button>
-        </div>
+        <div><h3>${title}</h3><div class="sub">${sub}</div></div></div>
+      <div class="bd" style="display:flex;flex-direction:column;gap:10px">
+        <input id="authLoginName" placeholder="登录名（字母数字下划线）" autocomplete="username"
+          style="border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"
+          onkeydown="if(event.key==='Enter')${isReg?'doParentRegister()':'doParentLogin()'}">
+        <input id="authPassword" type="password" placeholder="密码（至少 8 位）" autocomplete="${isReg?'new-password':'current-password'}"
+          style="border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"
+          onkeydown="if(event.key==='Enter')${isReg?'doParentRegister()':'doParentLogin()'}">
+        <button class="btn-primary" style="padding:10px 20px" onclick="${isReg?'doParentRegister()':'doParentLogin()'}">${isReg?'注册并登录':'登录'}</button>
+        <div style="text-align:center;margin-top:4px">${toggle}</div>
       </div>
     </div>
   </div>`;
 }
+async function finishAuthResponse(r, fallbackMsg){
+  if(!r || !r.access_token){
+    toast(apiErrorMsg(r, fallbackMsg));
+    return false;
+  }
+  setTokens(r.access_token, r.refresh_token);
+  const me = r.user || await api('/api/auth/me');
+  if(!applyParentSession(me)){
+    clearAuthTokens();
+    parentId = null;
+    toast('请使用家长账号登录');
+    return false;
+  }
+  await loadChildren();
+  try{ await loadConfig(); await loadParentData(); await reloadChildData(); }catch(e){}
+  render();
+  return true;
+}
 async function doParentLogin(){
-  const input = document.getElementById('parentNameInput');
-  const name = (input && input.value) ? input.value.trim() : '';
-  if(!name){ toast('请输入家长姓名'); return; }
-  const r = await api('/api/auth/login', {method:'POST', body:{name, role:'parent'}});
-  if(!r || !r.id){ toast('登录失败，请稍后重试'); return; }
-  parentId = r.id; parentName = r.name;
-  try{ localStorage.setItem(PARENT_KEY, String(parentId)); localStorage.setItem('knoact_parent_name', r.name); }catch(e){}
-  document.getElementById('userName').textContent = r.name;
-  document.getElementById('userAvatar').textContent = (r.name||'家').slice(0,1);
+  const login_name = (document.getElementById('authLoginName')?.value || '').trim();
+  const password = document.getElementById('authPassword')?.value ?? '';
+  if(!login_name || !password){ toast('请输入登录名和密码'); return; }
+  const r = await api('/api/auth/login', {method:'POST', body:{login_name, password}});
+  await finishAuthResponse(r, '登录失败');
+}
+async function doParentRegister(){
+  const login_name = (document.getElementById('authLoginName')?.value || '').trim();
+  const password = document.getElementById('authPassword')?.value ?? '';
+  if(!login_name || !password){ toast('请输入登录名和密码'); return; }
+  const r = await api('/api/auth/register', {method:'POST', body:{login_name, password, role:'parent'}});
+  if(await finishAuthResponse(r, '注册失败')) toast('注册成功');
+}
+async function logoutParent(){
+  const rt = getRefreshToken();
+  clearAuthTokens();
+  parentId = null; parentName = '';
+  uid = null; children = []; buckets = []; bucketId = null;
+  familyInvite = null; familyRequests = [];
+  updateParentSidebar();
+  if(rt){
+    try{ await api('/api/auth/logout', {method:'POST', body:{refresh_token: rt}}); }catch(e){}
+  }
+  renderNav();
+  render();
+}
+
+// ---- 家庭绑定（邀请码 + 孩子申请）----
+async function loadFamilyRequests(){
+  if(!parentId) return;
+  const list = await api('/api/family/requests');
+  familyRequests = Array.isArray(list) ? list : [];
+}
+async function generateFamilyInvite(){
+  if(!parentId){ toast('请先登录'); return; }
+  const r = await api('/api/family/invite', {method:'POST'});
+  if(!r || !r.code){ toast(apiErrorMsg(r, '生成邀请码失败')); return; }
+  familyInvite = {code: r.code, expires_at: r.expires_at};
+  toast('邀请码已生成（24 小时内有效）');
+  render();
+}
+async function approveFamilyRequest(id){
+  await api(`/api/family/requests/${id}/approve`, {method:'POST'});
+  toast('已通过绑定');
+  await loadFamilyRequests();
   await loadChildren();
   render();
 }
-function logoutParent(){
-  parentId = null; parentName = '';
-  uid = null; children = []; buckets = []; bucketId = null;
-  try{ localStorage.removeItem(PARENT_KEY); localStorage.removeItem('knoact_parent_name'); }catch(e){}
-  document.getElementById('userName').textContent = '家长';
-  document.getElementById('userAvatar').textContent = '家';
-  renderNav();
+async function rejectFamilyRequest(id){
+  await api(`/api/family/requests/${id}/reject`, {method:'POST'});
+  toast('已拒绝');
+  await loadFamilyRequests();
   render();
+}
+function renderFamilyBindPanel(){
+  const reqRows = familyRequests.map(r=>`
+    <div class="pdf-row">
+      <div><div class="nm">${escapeAttr(r.child_name || r.child_login_name || '孩子')}</div>
+        <div class="meta">登录名：${escapeAttr(r.child_login_name || '—')}</div></div>
+      <div style="display:flex;gap:6px;margin-left:auto">
+        <button class="btn-primary" style="padding:8px 14px" onclick="approveFamilyRequest(${r.id})">通过</button>
+        <button class="btn-ghost" style="color:#c05b4a" onclick="rejectFamilyRequest(${r.id})">拒绝</button>
+      </div>
+    </div>`).join('');
+  const inviteBlock = familyInvite
+    ? `<div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:var(--blue-soft2);font-size:13px">
+        <div>邀请码：<strong style="font-size:18px;letter-spacing:.12em">${escapeAttr(familyInvite.code)}</strong></div>
+        <div style="color:var(--gray2);margin-top:6px">有效期至 ${escapeAttr(familyInvite.expires_at || '')} · 请让孩子在学生端输入此码绑定</div>
+      </div>` : '';
+  return `<div class="parent-panel" style="grid-column:1/-1;margin-top:20px">
+    <div class="head"><div class="ic green">${icon('gift',20)}</div>
+      <div><h3>家庭绑定</h3><div class="sub">生成邀请码供孩子绑定，或审批孩子的绑定申请</div></div>
+      <button class="btn-ghost" style="margin-left:auto" onclick="generateFamilyInvite()">生成邀请码</button></div>
+    <div class="bd">
+      ${inviteBlock}
+      <div style="margin-top:${familyInvite?16:0}px;font-size:13px;font-weight:600;color:var(--ink2)">待审批申请</div>
+      ${reqRows || '<div style="color:#8e9691;padding:8px 0;margin-top:8px">暂无待处理申请</div>'}
+    </div>
+  </div>`;
 }
 
 function renderParent(){
@@ -1641,16 +1784,21 @@ async function testVoice(){
 // ===== 初始化 =====
 async function init(){
   renderNav();
-  // 恢复家长登录态：仅有 id 时先渲染登录页，登录后拿到名字再更新侧栏
-  try{ const savedParent = Number(localStorage.getItem(PARENT_KEY)); if(savedParent) parentId = savedParent; }catch(e){}
-  if(parentId){
+  if(getAccessToken()){
     try{
-      // 用一次 children 请求验证 parent 仍有效（过滤由后端保证）
-      await loadChildren();
-      // 从孩子列表推导不出家长名字，尽力用缓存；无缓存时侧栏显示占位
-      const nm = localStorage.getItem('knoact_parent_name');
-      if(nm){ parentName = nm; document.getElementById('userName').textContent = nm; document.getElementById('userAvatar').textContent = nm.slice(0,1); }
-    }catch(e){ parentId = null; toast('家长会话已失效，请重新登录'); }
+      const me = await api('/api/auth/me');
+      if(!applyParentSession(me)){
+        clearAuthTokens();
+        parentId = null;
+        toast('登录已失效，请重新登录');
+      }else{
+        await loadChildren();
+      }
+    }catch(e){
+      clearAuthTokens();
+      parentId = null;
+      toast('登录已失效，请重新登录');
+    }
   }
   if(!parentId){ render(); return; }
   try{ await loadConfig(); }catch(e){}
