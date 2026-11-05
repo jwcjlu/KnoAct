@@ -157,7 +157,8 @@ binding (ModelProfile + ModelConnection)  →  legacy (ModelConfig 老键)  → 
    报 JSONDecodeError。验证 API 用 `urllib`/`requests` 单进程做请求+解析。
 
 前端静态页：学生端 `python -m http.server 8766 --directory frontend`，家长端
-`python -m http.server 8767 --directory parent-web`（`API` 默认
+`python -m http.server 8767 --directory parent-web`，运营后台
+`python -m http.server 8768 --directory admin-web`（`API` 默认
 `http://127.0.0.1:8010`）。运行配置见 `.claude/launch.json`（prototype/backend/frontend/parent-web 四个）。
 
 Flutter 学生端（`student-app/`）：`flutter run -d chrome`（连 `127.0.0.1:8010`），

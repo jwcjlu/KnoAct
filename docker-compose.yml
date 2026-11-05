@@ -6,6 +6,7 @@
 #   backend     FastAPI 后端，连 mysql；上传文件挂卷持久化
 #   frontend    旧版学生端 Web（冻结，Flutter 学生端完成后移除）
 #   parent-web  家长端
+#   admin-web   运营后台（用户管理）
 #   student-app Flutter 学生端（Web），功能对齐后替代 frontend
 #   三个前端均由 nginx 托管静态页，并把 /api、/uploads 反代到 backend（同源，无跨域）
 # 动画渲染（可选，profile=render，镜像较大）：
@@ -82,6 +83,16 @@ services:
     restart: unless-stopped
     ports:
       - "${KNOACT_PARENT_PORT:-8081}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  admin-web:
+    build: ./admin-web
+    image: knoact-admin-web:latest
+    restart: unless-stopped
+    ports:
+      - "${KNOACT_ADMIN_PORT:-8768}:80"
     depends_on:
       backend:
         condition: service_healthy
