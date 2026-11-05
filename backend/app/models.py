@@ -11,11 +11,21 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64))
-    role: Mapped[str] = mapped_column(String(16))  # 'parent' | 'child'
+    login_name: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True)
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
+    display_name: Mapped[str] = mapped_column(String(64), default="")
+    role: Mapped[str] = mapped_column(String(16))  # 'parent' | 'child' | 'admin'
     grade: Mapped[int] = mapped_column(Integer, nullable=True)  # 当前年级 1~6
     edition: Mapped[str] = mapped_column(String(64), default="")  # 教材版本（人教版/苏教版…）
     parent_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)  # 所属家长
     status: Mapped[str] = mapped_column(String(16), default="active")  # active | archived
+    birth_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    gender: Mapped[str] = mapped_column(String(16), default="unknown")
+    interests: Mapped[str] = mapped_column(LongText, default="")
+    phone: Mapped[str] = mapped_column(String(20), default="")
+    email: Mapped[str] = mapped_column(String(128), default="")
+    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class PdfDocument(Base):
     __tablename__ = "pdf_documents"

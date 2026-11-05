@@ -84,6 +84,83 @@ def _migrate_user_status():
         conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR(16) DEFAULT 'active'"))
 
 
+def _migrate_account_columns(*, backfill: bool = True):
+    """SQLite 加列迁移：users 账号字段；回填 login_name/display_name、去重、默认密码、管理员账号。
+
+    create_all 不会改已有表，这里幂等补齐。seed 开头 ``backfill=False`` 仅 ALTER（先于 ORM），
+    结尾再完整跑一遍给新用户回填并确保 admin 存在。
+    """
+    import os
+    from collections import defaultdict
+    from sqlalchemy import inspect, text, or_
+    from .services.security import hash_password
+
+    insp = inspect(engine)
+    if "users" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("users")}
+    with engine.begin() as conn:
+        if "login_name" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN login_name VARCHAR(32)"))
+        if "password_hash" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) DEFAULT ''"))
+        if "display_name" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(64) DEFAULT ''"))
+        if "birth_month" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN birth_month VARCHAR(7)"))
+        if "gender" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN gender VARCHAR(16) DEFAULT 'unknown'"))
+        if "interests" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN interests TEXT DEFAULT ''"))
+        if "phone" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(20) DEFAULT ''"))
+        if "email" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(128) DEFAULT ''"))
+        if "phone_verified" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN phone_verified BOOLEAN DEFAULT 0"))
+        if "email_verified" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT 0"))
+
+    if not backfill:
+        return
+
+    db = SessionLocal()
+    try:
+        for u in db.query(User).filter(or_(User.login_name.is_(None), User.login_name == "")).all():
+            u.login_name = u.name
+        for u in db.query(User).filter(or_(User.display_name.is_(None), User.display_name == "")).all():
+            u.display_name = u.name
+        db.flush()
+
+        by_login: dict[str, list[User]] = defaultdict(list)
+        for u in db.query(User).order_by(User.id).all():
+            if u.login_name:
+                by_login[u.login_name].append(u)
+        for login, group in by_login.items():
+            if len(group) <= 1:
+                continue
+            for u in group[1:]:
+                u.login_name = f"{login}_{u.id}"
+
+        default_pwd = os.environ.get("ADMIN_INITIAL_PASSWORD", "ChangeMe123")
+        pwd_hash = hash_password(default_pwd)
+        for u in db.query(User).all():
+            if not u.password_hash:
+                u.password_hash = pwd_hash
+
+        if not db.query(User).filter_by(login_name="admin").first():
+            db.add(User(
+                name="管理员",
+                login_name="admin",
+                display_name="管理员",
+                role="admin",
+                password_hash=pwd_hash,
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+
 def _migrate_bucket_columns():
     """SQLite 加列迁移：学年桶功能给业务表补 bucket_id（可空，历史数据不挂桶），
     questions 额外补 user_id。create_all 不会改已有表，这里幂等补齐。
@@ -177,6 +254,7 @@ def seed():
     _migrate_multi_student_columns()
     _migrate_bucket_columns()
     _migrate_user_status()
+    _migrate_account_columns(backfill=False)
     db = SessionLocal()
     _rename_default_child(db)
     if db.query(User).count() == 0:
@@ -214,6 +292,7 @@ def seed():
             db.add(KnowledgePoint(subject=subject, category=category, content=content))
     db.commit()
     db.close()
+    _migrate_account_columns()
 
 if __name__ == "__main__":
     seed()
