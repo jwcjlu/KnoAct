@@ -68,3 +68,19 @@ def make_lesson(session, subject="语文", title="第1课", start_page=1, end_pa
                     start_page=start_page, end_page=end_page, **kw)
     session.add(lesson); session.flush()
     return lesson
+
+
+def auth_headers(user):
+    """给用户签发 Bearer 头（测试用）。"""
+    from app.services.security import create_access_token
+    token = create_access_token({"sub": str(user.id), "role": user.role})
+    return {"Authorization": f"Bearer {token}"}
+
+
+def make_account(session, login_name, role="child", parent=None):
+    """建带 login_name 的账号；parent 给定时绑定为其孩子。"""
+    from app.models import User
+    u = User(name=login_name, login_name=login_name, role=role,
+             parent_id=parent.id if parent else None)
+    session.add(u); session.commit()
+    return u
