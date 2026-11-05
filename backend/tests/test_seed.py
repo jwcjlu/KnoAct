@@ -71,3 +71,22 @@ def test_migrate_multi_student_columns_idempotent(setup_db):
     with engine.connect() as conn:
         assert conn.exec_driver_sql("SELECT COUNT(*) FROM users").scalar() == 1
         assert conn.exec_driver_sql("SELECT COUNT(*) FROM pdf_documents").scalar() == 1
+
+
+def test_migrate_bucket_columns_idempotent(setup_db):
+    """陈旧库补 bucket_id 迁移：给业务表补可空 bucket_id，幂等、不丢数据。"""
+    from app.database import engine
+    from app.seed import _migrate_bucket_columns
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE IF EXISTS tasks")
+        conn.exec_driver_sql("CREATE TABLE tasks (id INTEGER PRIMARY KEY, user_id INTEGER, subject VARCHAR(16), date DATE, task_type VARCHAR(16), title VARCHAR(255))")
+        conn.exec_driver_sql("INSERT INTO tasks (id, user_id, subject, date, task_type, title) VALUES (1, 1, '语文', '2026-11-05', 'dictation', '听写')")
+
+    _migrate_bucket_columns()
+    _migrate_bucket_columns()  # 幂等
+
+    with engine.connect() as conn:
+        cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(tasks)")}
+        cnt = conn.exec_driver_sql("SELECT COUNT(*) FROM tasks").scalar()
+    assert "bucket_id" in cols
+    assert cnt == 1  # 数据未丢

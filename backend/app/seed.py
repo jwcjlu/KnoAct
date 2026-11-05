@@ -68,6 +68,34 @@ def _migrate_multi_student_columns():
                 conn.execute(text("ALTER TABLE pdf_documents ADD COLUMN grade INTEGER"))
 
 
+def _migrate_bucket_columns():
+    """SQLite 加列迁移：学年桶功能给业务表补 bucket_id（可空，历史数据不挂桶），
+    questions 额外补 user_id。create_all 不会改已有表，这里幂等补齐。
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    existing = set(insp.get_table_names())
+    # 表 -> 需补的列（均为可空 INTEGER 外键，无需回填）
+    needs = {
+        "tasks": ["bucket_id"],
+        "questions": ["bucket_id", "user_id"],
+        "knowledge_mastery": ["bucket_id"],
+        "points": ["bucket_id"],
+        "goals": ["bucket_id"],
+        "quizzes": ["bucket_id"],
+        "word_mastery": ["bucket_id"],
+        "mistakes": ["bucket_id"],
+    }
+    for table, columns in needs.items():
+        if table not in existing:
+            continue
+        cols = {c["name"] for c in insp.get_columns(table)}
+        with engine.begin() as conn:
+            for col in columns:
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} INTEGER"))
+
+
 DEFAULT_CHILD_NAME = "金同学"
 _LEGACY_CHILD_NAME = "金宇轩"
 
@@ -131,6 +159,7 @@ def seed():
     _migrate_learning_progress()
     _migrate_pdf_document_created_at()
     _migrate_multi_student_columns()
+    _migrate_bucket_columns()
     db = SessionLocal()
     _rename_default_child(db)
     if db.query(User).count() == 0:
