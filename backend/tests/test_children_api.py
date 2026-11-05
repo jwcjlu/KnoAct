@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.database import SessionLocal
 from app.models import User
+from conftest import auth_headers
 
 
 def _client():
@@ -29,14 +30,32 @@ def test_list_children_filters_by_parent(setup_db):
 
 def test_create_child_builds_bucket(setup_db):
     parent = _add_user("金爸爸", "parent")
+    s = SessionLocal()
+    headers = auth_headers(s.get(User, parent))
+    s.close()
     resp = _client().post("/api/children", json={
         "parent_id": parent, "name": "新孩子", "grade": 2, "edition": "苏教版",
-    })
+    }, headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["grade"] == 2
     buckets = _client().get(f"/api/buckets?user_id={data['id']}").json()
     assert any(b["status"] == "active" and b["grade"] == 2 for b in buckets)
+
+
+def test_create_child_requires_own_parent_token(setup_db, client, db):
+    from conftest import auth_headers as ah
+    p1 = User(name="p1", role="parent"); p2 = User(name="p2", role="parent")
+    kid = User(name="k", role="child"); admin = User(name="a", role="admin")
+    db.add_all([p1, p2, kid, admin]); db.commit()
+    body = {"parent_id": p1.id, "name": "新孩子", "grade": 2}
+    assert client.post("/api/children", json=body).status_code == 401
+    for u in (kid, admin):
+        assert client.post("/api/children", json=body, headers=ah(u)).status_code == 403
+    # 家长不能替别的家长建孩子
+    r = client.post("/api/children", json=body, headers=ah(p2))
+    assert r.status_code == 403 and r.json()["detail"] == {"error": "forbidden"}
+    assert client.post("/api/children", json=body, headers=ah(p1)).status_code == 200
 
 
 def test_promote_grade_endpoint(setup_db):

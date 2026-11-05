@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from ..core.deps import require_role
 from ..database import get_db
 from ..models import ModelConfig
 from ..models import ModelConnection, ModelProfile, RoleBinding
@@ -33,7 +34,7 @@ class ProbeReq(BaseModel):
     connection_id: int | None = None
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_role("parent", "admin"))])
 def set_config(req: ConfigReq, db: Session = Depends(get_db)):
     row = db.query(ModelConfig).filter_by(key=req.key).first()
     if row:

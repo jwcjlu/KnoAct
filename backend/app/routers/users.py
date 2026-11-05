@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from ..core.deps import require_role
 from ..database import get_db
 from ..models import User
 
@@ -33,8 +34,11 @@ class CreateChildReq(BaseModel):
 
 
 @children_router.post("")
-def create_child(req: CreateChildReq, db: Session = Depends(get_db)):
+def create_child(req: CreateChildReq, user: User = Depends(require_role("parent")),
+                 db: Session = Depends(get_db)):
     from ..services.bucket_service import ensure_bucket
+    if req.parent_id != user.id:
+        raise HTTPException(status_code=403, detail={"error": "forbidden"})
     child = User(name=req.name, role="child", grade=req.grade,
                  edition=req.edition, parent_id=req.parent_id)
     db.add(child); db.commit(); db.refresh(child)
