@@ -1,13 +1,16 @@
 import 'package:dio/dio.dart';
 
 class ApiException implements Exception {
-  ApiException(this.message, {this.statusCode});
+  ApiException(this.message, {this.statusCode, this.code});
 
   final String message;
   final int? statusCode;
 
+  /// 后端 `detail.error` 业务错误码（如 `invalid_credentials`、`login_name_taken`）
+  final String? code;
+
   @override
-  String toString() => 'ApiException($statusCode): $message';
+  String toString() => 'ApiException($statusCode${code == null ? '' : ', $code'}): $message';
 }
 
 Map<String, dynamic> asMap(Object? data) {
@@ -20,15 +23,45 @@ List<dynamic> asList(Object? data) {
   throw ApiException('响应格式错误');
 }
 
+/// 登录/注册/OTP 等「换取令牌」端点：401/4xx 是业务失败，不代表已有会话失效
+bool _isCredentialEndpoint(String path) =>
+    path.startsWith('/api/auth/login') ||
+    path.startsWith('/api/auth/register') ||
+    path.startsWith('/api/auth/otp/') ||
+    path.startsWith('/api/auth/refresh') ||
+    path.startsWith('/api/auth/password/');
+
 class ApiClient {
-  ApiClient(String baseUrl, {Dio? dio})
-      : _dio = dio ??
+  /// [accessToken] 在每次请求前读取，非空则附带 `Authorization: Bearer`；
+  /// 非凭证端点返回 401 时调用 [onUnauthorized]（用于清除会话）。
+  ApiClient(
+    String baseUrl, {
+    Dio? dio,
+    Future<String?> Function()? accessToken,
+    Future<void> Function()? onUnauthorized,
+  }) : _dio = dio ??
             Dio(BaseOptions(
               baseUrl: baseUrl,
               connectTimeout: const Duration(seconds: 10),
               // 听力/阅读材料与 TTS 可能当场调用大模型生成
               receiveTimeout: const Duration(seconds: 120),
-            ));
+            )) {
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        if (accessToken != null && !options.headers.containsKey('Authorization')) {
+          final token = await accessToken();
+          if (token != null && token.isNotEmpty) options.headers['Authorization'] = 'Bearer $token';
+        }
+        handler.next(options);
+      },
+      onError: (e, handler) async {
+        if (e.response?.statusCode == 401 && onUnauthorized != null && !_isCredentialEndpoint(e.requestOptions.path)) {
+          await onUnauthorized();
+        }
+        handler.next(e);
+      },
+    ));
+  }
 
   final Dio _dio;
 
@@ -36,6 +69,8 @@ class ApiClient {
       _send(() => _dio.get<dynamic>(path, queryParameters: query));
 
   Future<dynamic> post(String path, {Object? body}) => _send(() => _dio.post<dynamic>(path, data: body));
+
+  Future<dynamic> patch(String path, {Object? body}) => _send(() => _dio.patch<dynamic>(path, data: body));
 
   Future<({List<int> bytes, String contentType})> getBytes(String path, {Map<String, dynamic>? query}) async {
     try {
@@ -72,6 +107,18 @@ class ApiClient {
     }
   }
 
-  ApiException _wrap(DioException e) =>
-      ApiException(e.message ?? e.type.name, statusCode: e.response?.statusCode);
+  ApiException _wrap(DioException e) => ApiException(
+        e.message ?? e.type.name,
+        statusCode: e.response?.statusCode,
+        code: _errorCode(e.response?.data),
+      );
+
+  static String? _errorCode(Object? data) {
+    if (data is Map) {
+      final detail = data['detail'];
+      if (detail is Map && detail['error'] is String) return detail['error'] as String;
+      if (detail is String) return detail;
+    }
+    return null;
+  }
 }

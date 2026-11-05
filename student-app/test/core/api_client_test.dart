@@ -53,6 +53,55 @@ void main() {
     expect(r.contentType, 'audio/mpeg');
   });
 
+  ApiClient authed(_FakeAdapter a, {String? token, void Function()? onExpire}) {
+    final dio = Dio(BaseOptions(baseUrl: 'http://api.test'));
+    dio.httpClientAdapter = a;
+    return ApiClient('http://api.test',
+        dio: dio, accessToken: () async => token, onUnauthorized: () async => onExpire?.call());
+  }
+
+  test('有令牌时附带 Authorization Bearer，无令牌不带', () async {
+    final a = _FakeAdapter(200, utf8.encode('{}'), 'application/json');
+    await authed(a, token: 'abc').get('/api/auth/me');
+    expect(a.last!.headers['Authorization'], 'Bearer abc');
+    await authed(a).get('/api/auth/me');
+    expect(a.last!.headers.containsKey('Authorization'), isFalse);
+  });
+
+  test('patch 发送 PATCH 请求体', () async {
+    final a = _FakeAdapter(200, utf8.encode('{"ok":true}'), 'application/json');
+    await authed(a, token: 't').patch('/api/auth/me/profile', body: {'display_name': 'x'});
+    expect(a.last!.method, 'PATCH');
+    expect(a.last!.data, {'display_name': 'x'});
+  });
+
+  test('受保护接口 401 触发 onUnauthorized 并带出错误码', () async {
+    var expired = 0;
+    final a = _FakeAdapter(401, utf8.encode('{"detail":{"error":"token_expired"}}'), 'application/json');
+    await expectLater(
+      authed(a, token: 'old', onExpire: () => expired++).get('/api/home/snapshot'),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 401).having((e) => e.code, 'code', 'token_expired')),
+    );
+    expect(expired, 1);
+  });
+
+  test('登录接口的 401 是凭证错误，不清除会话', () async {
+    var expired = 0;
+    final a = _FakeAdapter(401, utf8.encode('{"detail":{"error":"invalid_credentials"}}'), 'application/json');
+    await expectLater(
+      authed(a, onExpire: () => expired++).post('/api/auth/login', body: {'login_name': 'a', 'password': 'b'}),
+      throwsA(isA<ApiException>().having((e) => e.code, 'code', 'invalid_credentials')),
+    );
+    expect(expired, 0);
+  });
+
+  test('非 401 错误不清除会话', () async {
+    var expired = 0;
+    final a = _FakeAdapter(403, utf8.encode('{"detail":{"error":"parent_required"}}'), 'application/json');
+    await expectLater(authed(a, token: 't', onExpire: () => expired++).get('/api/x'), throwsA(isA<ApiException>()));
+    expect(expired, 0);
+  });
+
   test('asMap / asList 对非预期结构抛 ApiException', () {
     expect(asMap({'a': 1}), {'a': 1});
     expect(asList([1]), [1]);

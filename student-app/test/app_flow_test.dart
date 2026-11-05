@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_app/app.dart';
 import 'package:student_app/core/router.dart';
 import 'package:student_app/features/auth/data/auth_repository.dart';
+import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/center/data/center_models.dart';
 import 'package:student_app/features/center/data/center_repository.dart';
 import 'package:student_app/features/center/speech_player.dart';
@@ -18,8 +19,25 @@ const _a = Child(4, '金同学');
 const _b = Child(5, '李同学');
 
 class FlowAuthRepository implements AuthRepository {
+  /// 在此集合里的登录名登录后 parent_bound=false
+  final unbound = <String>{};
+  Child? meResult;
+
   @override
-  Future<Child> login(String name) async => name == _a.name ? _a : _b;
+  Future<AuthSession> login(String loginName, String password) async {
+    final c = loginName == _a.name ? _a : _b;
+    return AuthSession(unbound.contains(loginName) ? c.copyWith(parentBound: false) : c,
+        accessToken: 'tok', refreshToken: 'ref');
+  }
+
+  @override
+  Future<Child> me() async => meResult!;
+
+  @override
+  Future<void> bindByCode(String code) async {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 /// 按孩子 id 返回不同数据；[gates] 中有该孩子时首页请求挂起
@@ -80,7 +98,7 @@ class SilentSpeechPlayer implements SpeechPlayer {
   Future<void> dispose() async {}
 }
 
-Future<(ProviderContainer, FlowHomeRepository)> pumpApp(WidgetTester tester, {Map<String, Object> prefs = const {}}) async {
+Future<(ProviderContainer, FlowHomeRepository)> pumpApp(WidgetTester tester, {Map<String, Object> prefs = const {}, FlowAuthRepository? auth}) async {
   SharedPreferences.setMockInitialValues(prefs);
   tester.view.physicalSize = const Size(600, 2400);
   tester.view.devicePixelRatio = 1;
@@ -88,7 +106,7 @@ Future<(ProviderContainer, FlowHomeRepository)> pumpApp(WidgetTester tester, {Ma
   final home = FlowHomeRepository();
   final container = ProviderContainer(
     overrides: [
-      authRepositoryProvider.overrideWithValue(FlowAuthRepository()),
+      authRepositoryProvider.overrideWithValue(auth ?? FlowAuthRepository()),
       homeRepositoryProvider.overrideWithValue(home),
       centerRepositoryProvider.overrideWithValue(FlowCenterRepository()),
       speechPlayerProvider.overrideWithValue(SilentSpeechPlayer()),
@@ -102,9 +120,10 @@ Future<(ProviderContainer, FlowHomeRepository)> pumpApp(WidgetTester tester, {Ma
 }
 
 Future<void> login(WidgetTester tester, String name, {bool settle = true}) async {
-  await tester.enterText(find.byType(TextField), name);
+  await tester.enterText(find.byKey(const Key('loginName')), name);
+  await tester.enterText(find.byKey(const Key('password')), 'pw123456');
   await tester.pump();
-  await tester.tap(find.widgetWithText(FilledButton, '开始学习'));
+  await tester.tap(find.widgetWithText(FilledButton, '登录'));
   if (settle) await tester.pumpAndSettle();
 }
 
@@ -137,7 +156,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await logout(tester, checkErrors: true);
-    expect(find.widgetWithText(FilledButton, '开始学习'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '登录'), findsOneWidget);
     expect(find.text('刷新失败，请稍后重试'), findsNothing);
     expect(find.text('积分加载失败'), findsNothing);
   });
@@ -169,12 +188,68 @@ void main() {
   testWidgets('未登录访问任意页面都跳到登录页', (tester) async {
     final (c, _) = await pumpApp(tester);
     expect(location(c), '/login');
-    expect(find.widgetWithText(FilledButton, '开始学习'), findsOneWidget);
-    for (final path in ['/home', '/center', '/profile', '/nope']) {
+    expect(find.widgetWithText(FilledButton, '登录'), findsOneWidget);
+    for (final path in ['/home', '/center', '/profile', '/bind-parent', '/nope']) {
       c.read(routerProvider).go(path);
       await tester.pumpAndSettle();
       expect(location(c), '/login', reason: path);
     }
+  });
+
+  testWidgets('未登录可打开注册页', (tester) async {
+    final (c, _) = await pumpApp(tester);
+    c.read(routerProvider).go('/register');
+    await tester.pumpAndSettle();
+    expect(location(c), '/register');
+    expect(find.text('注册账号'), findsOneWidget);
+  });
+
+  testWidgets('未绑定家长：登录后进入绑定页，其他页面都被拦回；绑定后进主界面', (tester) async {
+    final auth = FlowAuthRepository()..unbound.add(_a.name);
+    final (c, _) = await pumpApp(tester, auth: auth);
+    await login(tester, _a.name);
+    expect(location(c), '/bind-parent');
+    expect(find.text('绑定家长'), findsWidgets);
+    for (final path in ['/home', '/profile', '/login', '/register']) {
+      c.read(routerProvider).go(path);
+      await tester.pumpAndSettle();
+      expect(location(c), '/bind-parent', reason: path);
+    }
+
+    auth.meResult = _a; // 绑定后 /me 返回 parent_bound=true
+    await tester.enterText(find.byKey(const Key('inviteCode')), 'ABCD2345');
+    await tester.pump();
+    await tester.tap(find.text('用邀请码绑定'));
+    await tester.pumpAndSettle();
+    expect(location(c), '/home');
+    expect(find.text('金同学的阅读任务'), findsOneWidget);
+  });
+
+  testWidgets('已登录访问登录/注册/绑定页回到首页', (tester) async {
+    final (c, _) = await pumpApp(tester, prefs: {'knoact_child_id': _a.id, 'knoact_child_name': _a.name});
+    for (final path in ['/login', '/register', '/bind-parent']) {
+      c.read(routerProvider).go(path);
+      await tester.pumpAndSettle();
+      expect(location(c), '/home', reason: path);
+    }
+  });
+
+  testWidgets('启动时缓存 parent_bound=false 直接进入绑定页', (tester) async {
+    final (c, _) = await pumpApp(tester, prefs: {
+      'knoact_child_id': _a.id,
+      'knoact_child_name': _a.name,
+      'knoact_parent_bound': false,
+    });
+    expect(location(c), '/bind-parent');
+  });
+
+  testWidgets('会话失效（401）后回到登录页', (tester) async {
+    final (c, _) = await pumpApp(tester);
+    await login(tester, _a.name);
+    expect(location(c), '/home');
+    await c.read(sessionProvider.notifier).expire();
+    await tester.pumpAndSettle();
+    expect(location(c), '/login');
   });
 
   testWidgets('已登录访问未知路径跳到首页', (tester) async {

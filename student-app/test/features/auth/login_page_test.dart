@@ -3,11 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_app/core/api_client.dart';
+import 'package:student_app/core/router.dart';
 import 'package:student_app/features/auth/data/auth_repository.dart';
 import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/auth/ui/login_page.dart';
 
-import 'session_test.dart' show FakeAuthRepository;
+import 'session_test.dart' show FakeAuthRepository, kChild;
 
 Future<ProviderContainer> pumpLogin(WidgetTester tester, AuthRepository repo) async {
   final container = ProviderContainer(
@@ -23,41 +24,90 @@ Future<ProviderContainer> pumpLogin(WidgetTester tester, AuthRepository repo) as
   return container;
 }
 
+Future<void> fill(WidgetTester tester, {String name = 'jin', String password = 'pw123456'}) async {
+  await tester.enterText(find.byKey(const Key('loginName')), name);
+  await tester.enterText(find.byKey(const Key('password')), password);
+  await tester.pump();
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('名字为空时登录按钮不可用', (tester) async {
-    await pumpLogin(tester, FakeAuthRepository(const Child(4, '金同学')));
-    final button = tester.widget<FilledButton>(find.widgetWithText(FilledButton, '开始学习'));
-    expect(button.onPressed, isNull);
-    expect(find.text('首次使用会自动创建账号，请确认名字无误'), findsOneWidget);
-  });
-
-  testWidgets('输入名字登录成功后会话有值', (tester) async {
-    final c = await pumpLogin(tester, FakeAuthRepository(const Child(4, '金同学')));
-    await tester.enterText(find.byType(TextField), '金同学');
+  testWidgets('登录名或密码为空时登录按钮不可用', (tester) async {
+    await pumpLogin(tester, FakeAuthRepository(kChild));
+    FilledButton button() => tester.widget<FilledButton>(find.widgetWithText(FilledButton, '登录'));
+    expect(button().onPressed, isNull);
+    await tester.enterText(find.byKey(const Key('loginName')), 'jin');
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '开始学习'));
-    await tester.pumpAndSettle();
-    expect(c.read(sessionProvider).value, const Child(4, '金同学'));
+    expect(button().onPressed, isNull);
+    await tester.enterText(find.byKey(const Key('password')), 'pw123456');
+    await tester.pump();
+    expect(button().onPressed, isNotNull);
   });
 
-  testWidgets('家长名字提示不是孩子账号', (tester) async {
+  testWidgets('输入登录名和密码登录成功后会话有值', (tester) async {
+    final repo = FakeAuthRepository(kChild);
+    final c = await pumpLogin(tester, repo);
+    await fill(tester);
+    await tester.tap(find.widgetWithText(FilledButton, '登录'));
+    await tester.pumpAndSettle();
+    expect(repo.lastLoginName, 'jin');
+    expect(repo.lastPassword, 'pw123456');
+    expect(c.read(sessionProvider).value, kChild);
+  });
+
+  testWidgets('账号密码错误提示', (tester) async {
+    await pumpLogin(tester, FakeAuthRepository(ApiException('401', statusCode: 401, code: 'invalid_credentials')));
+    await fill(tester);
+    await tester.tap(find.widgetWithText(FilledButton, '登录'));
+    await tester.pumpAndSettle();
+    expect(find.text('登录名或密码不正确'), findsOneWidget);
+  });
+
+  testWidgets('家长账号提示不是孩子账号', (tester) async {
     await pumpLogin(tester, FakeAuthRepository(NotAChildException()));
-    await tester.enterText(find.byType(TextField), '金爸爸');
-    await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '开始学习'));
+    await fill(tester, name: 'dad');
+    await tester.tap(find.widgetWithText(FilledButton, '登录'));
     await tester.pumpAndSettle();
-    expect(find.text('这个名字不是孩子账号，请输入孩子的名字'), findsOneWidget);
+    expect(find.text('这个账号不是孩子账号，请使用孩子的登录名'), findsOneWidget);
   });
 
   testWidgets('接口失败提示检查网络', (tester) async {
     await pumpLogin(tester, FakeAuthRepository(ApiException('boom')));
-    await tester.enterText(find.byType(TextField), '金同学');
-    await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '开始学习'));
+    await fill(tester);
+    await tester.tap(find.widgetWithText(FilledButton, '登录'));
     await tester.pumpAndSettle();
     expect(find.text('登录失败，请检查网络或后端服务'), findsOneWidget);
+  });
+
+  testWidgets('切换到验证码登录：发送验证码并登录', (tester) async {
+    final repo = FakeAuthRepository(kChild);
+    final c = await pumpLogin(tester, repo);
+    await tester.tap(find.text('使用验证码登录'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('password')), findsNothing);
+    await tester.enterText(find.byKey(const Key('loginName')), 'jin');
+    await tester.pump();
+    await tester.tap(find.text('发送验证码'));
+    await tester.pumpAndSettle();
+    expect(repo.otpSent, isTrue);
+    expect(find.text('重新发送'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('otpCode')), '123456');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '登录'));
+    await tester.pumpAndSettle();
+    expect(repo.lastCode, '123456');
+    expect(c.read(sessionProvider).value, kChild);
+    // 可切回密码登录
+  });
+
+  testWidgets('验证码模式可切回密码登录', (tester) async {
+    await pumpLogin(tester, FakeAuthRepository(kChild));
+    await tester.tap(find.text('使用验证码登录'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('使用密码登录'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('password')), findsOneWidget);
   });
 
   testWidgets('小屏弹出键盘且显示错误时不溢出', (tester) async {
@@ -66,13 +116,30 @@ void main() {
     tester.view.viewInsets = const FakeViewPadding(bottom: 300);
     addTearDown(tester.view.reset);
     await pumpLogin(tester, FakeAuthRepository(ApiException('boom')));
-    await tester.enterText(find.byType(TextField), '金同学');
-    await tester.pump();
-    final button = find.widgetWithText(FilledButton, '开始学习');
+    await fill(tester);
+    final button = find.widgetWithText(FilledButton, '登录');
     await tester.ensureVisible(button);
     await tester.tap(button);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('登录失败，请检查网络或后端服务'), findsOneWidget);
+  });
+
+  testWidgets('登录页有去注册入口，可跳到注册页', (tester) async {
+    final container = ProviderContainer(
+      overrides: [authRepositoryProvider.overrideWithValue(FakeAuthRepository(kChild))],
+      retry: (_, _) => null,
+    );
+    addTearDown(container.dispose);
+    await container.read(sessionProvider.future);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: Consumer(builder: (_, ref, _) => MaterialApp.router(routerConfig: ref.watch(routerProvider))),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('还没有账号？去注册'));
+    await tester.pumpAndSettle();
+    expect(find.text('注册账号'), findsOneWidget);
+    expect(container.read(routerProvider).routerDelegate.currentConfiguration.uri.path, '/register');
   });
 }

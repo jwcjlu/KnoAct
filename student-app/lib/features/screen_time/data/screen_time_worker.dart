@@ -38,7 +38,12 @@ void callbackDispatcher() {
       final names = await api.readLocalNames(date);
       // 真机上后台 isolate 拿不到编译期 API_BASE；优先用登录时持久化的地址。
       final baseUrl = await SessionStore().readApiBase() ?? resolveApiBase();
-      final dio = Dio(BaseOptions(baseUrl: baseUrl));
+      // 后台 isolate 没有 Riverpod 会话：直接从本地存储取登录时保存的 access_token
+      final token = await SessionStore().readAccessToken();
+      final dio = Dio(BaseOptions(
+        baseUrl: baseUrl,
+        headers: {if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token'},
+      ));
       await ScreenTimeSync(api, dio).reportDay(childId, date, day, names: names);
       await _maybeNotify(childId, date, dio, api);
     }

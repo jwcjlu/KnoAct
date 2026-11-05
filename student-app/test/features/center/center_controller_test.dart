@@ -306,7 +306,7 @@ void main() {
 
   Future<void> switchChild(ProviderContainer c) async {
     await c.read(sessionProvider.notifier).logout();
-    await c.read(sessionProvider.notifier).login('李同学');
+    await c.read(sessionProvider.notifier).login('li', 'pw123456');
   }
 
   test('切换孩子：状态重置并停止朗读，上一个孩子的在途材料不写入', () async {

@@ -3,6 +3,9 @@ import 'package:student_app/core/api_client.dart';
 import 'package:student_app/features/wrongbook/data/wrongbook_repository.dart';
 
 class FakeApi implements ApiClient {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+
   final calls = <String>[];
   Object? Function(String path, Map<String, dynamic>? query)? onGet;
 
