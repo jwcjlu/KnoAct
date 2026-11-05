@@ -44,7 +44,8 @@ function icon(name, size=18){
 // ===== 通用状态 =====
 const PARENT_TABS = [
   ['教材','book'],['知识点','brain'],['题目审核台','list'],['目标','star'],['报告','chart'],
-  ['任务','pen'],['规则','gift'],['学习配置','grid'],['屏幕时间','clock'],['设置','menu']
+  ['任务','pen'],['规则','gift'],['学习配置','grid'],['屏幕时间','clock'],['设置','menu'],
+  ['孩子管理','star']
 ];
 const CHILD_TABS = ['目标','报告','任务','屏幕时间'];   // 依赖当前孩子（uid）的 Tab
 const CHILD_KEY = 'knoact_parent_child_id';
@@ -64,6 +65,9 @@ let pdfTab = null; // null | 'upload' | 'confirm'
 let confirmDocId = null;
 let boundUsers = [];   // 当前打开绑定弹窗的教材已绑定的孩子 id 列表
 let bindDocId = null;  // 正在绑定管理的教材 id
+let archivedChildren = [];  // 已归档的孩子（include_archived 拉取后过滤）
+let showArchived = false;   // 孩子管理页是否显示已归档孩子
+let childDocs = null;       // {child_id, documents:[...]} 当前打开"看教材"的孩子
 let knowledgeRows = [];
 let goalRows = [];
 let reportRows = [];
@@ -241,6 +245,104 @@ async function addChild(name, grade, edition){
   await loadChildren();
   render();
 }
+
+// ---- 孩子管理 ----
+async function loadArchivedChildren(){
+  const q = parentId ? `&parent_id=${parentId}` : '';
+  const list = await api(`/api/users?role=child&include_archived=1${q}`);
+  const all = Array.isArray(list) ? list : [];
+  // 接口不返回 status，用「全部（含归档）− 活跃」求差集得出已归档孩子
+  const activeIds = new Set(children.map(c => c.id));
+  archivedChildren = all.filter(c => !activeIds.has(c.id));
+}
+
+function renderChildMgmt(){
+  const archivedIds = new Set(archivedChildren.map(c => c.id));
+  const visible = showArchived ? [...children, ...archivedChildren] : children;
+  const rows = visible.map(c=>{
+    const isArchived = archivedIds.has(c.id);
+    return `<div class="pdf-row">
+      <div><div class="nm">${escapeAttr(c.name)}${isArchived?' <span style="color:#c05b4a">（已归档）</span>':''}</div>
+        <div class="meta">${c.grade?c.grade+'年级':''}${c.edition?' · '+c.edition:''}</div></div>
+      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+        <button class="btn-ghost" onclick="editChild(${c.id})">编辑</button>
+        <button class="btn-ghost" onclick="openChildDocs(${c.id})">看教材</button>
+        ${isArchived
+          ? `<button class="btn-ghost" style="color:#2e8b5a" onclick="unarchiveChild(${c.id})">恢复</button>`
+          : `<button class="btn-ghost" style="color:#c05b4a" onclick="archiveChild(${c.id})">归档</button>`}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="parent-grid">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('star',20)}</div><div><h3>孩子管理</h3><div class="sub">新建、编辑、归档孩子；查看孩子绑定的教材</div></div>
+        <button class="btn-ghost" style="margin-left:auto" onclick="showArchived=!showArchived;loadArchivedChildren().then(render)">${showArchived?'只看活跃':'显示已归档'}</button></div>
+      <div class="bd">${rows || '<div style="color:#8e9691;padding:8px 0">暂无孩子</div>'}
+        <button class="next-lesson-btn" style="margin-top:16px" onclick="showAddChild()">${icon('check',16)} 新建孩子</button>
+      </div>
+    </div>
+    ${renderChildDocs()}
+  </div>`;
+}
+
+function renderChildDocs(){
+  if(!childDocs) return '';
+  const rows = childDocs.documents.map(d=>`
+    <div class="pdf-row"><div><div class="nm">${escapeAttr(d.filename)}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''}</div></div>
+      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+        <button class="btn-ghost" style="color:#c05b4a" onclick="unbindFromChild(${childDocs.child_id}, ${d.id})">解除绑定</button>
+      </div></div>`).join('');
+  return `<div class="parent-panel" style="grid-column:1/-1">
+    <div class="head"><div class="ic blue">${icon('book',20)}</div><div><h3>孩子绑定的教材</h3><div class="sub">该孩子当前可见的教材</div></div>
+      <button class="btn-ghost" style="margin-left:auto" onclick="childDocs=null;render()">关闭</button></div>
+    <div class="bd">${rows || '<div style="color:#8e9691;padding:8px 0">尚未绑定教材，请到「教材」页勾选</div>'}</div>
+  </div>`;
+}
+
+async function editChild(id){
+  const c = children.find(x=>x.id===id) || archivedChildren.find(x=>x.id===id);
+  if(!c) return;
+  const name = prompt('姓名', c.name || '');
+  if(name === null) return;
+  const grade = prompt('年级（1-6）', String(c.grade || '1'));
+  if(grade === null) return;
+  if(!grade || isNaN(Number(grade))){ toast('年级需为数字'); return; }
+  const edition = prompt('教材版本（可留空）', c.edition || '') || '';
+  await api(`/api/children/${id}`, {method:'PUT', body:{name:name.trim(), grade:Number(grade), edition}});
+  toast('已保存');
+  await loadChildren(); await loadArchivedChildren();
+  render();
+}
+
+async function archiveChild(id){
+  if(!confirm('归档后该孩子将无法登录，数据会保留。确定吗？')) return;
+  await api(`/api/children/${id}/archive`, {method:'POST'});
+  toast('已归档');
+  await loadChildren(); await loadArchivedChildren();
+  render();
+}
+
+async function unarchiveChild(id){
+  await api(`/api/children/${id}/unarchive`, {method:'POST'});
+  toast('已恢复');
+  await loadChildren(); await loadArchivedChildren();
+  render();
+}
+
+async function openChildDocs(id){
+  const r = await api(`/api/children/${id}/documents`);
+  childDocs = { child_id: id, documents: (r && r.documents) || [] };
+  render();
+}
+
+async function unbindFromChild(childId, documentId){
+  await api(`/api/pdf/documents/${documentId}/bind?user_id=${childId}`, {method:'DELETE'});
+  toast('已解除绑定');
+  const r = await api(`/api/children/${childId}/documents`);
+  childDocs = { child_id: childId, documents: (r && r.documents) || [] };
+  render();
+}
+
 function setParentTab(t){
   parentTab=t;
   renderNav();
@@ -253,6 +355,7 @@ function setParentTab(t){
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
   if(t==='学习配置'){ loadConfig().then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
+  if(t==='孩子管理'){ loadChildren().then(()=>loadArchivedChildren()).then(()=>render()); return; }
   render();
 }
 async function loadParentData(){ await loadPdfDocs(); }
@@ -587,6 +690,7 @@ function renderParent(){
   else if(parentTab==='学习配置') body = renderLearningConfigTab();
   else if(parentTab==='屏幕时间') body = renderScreenTab();
   else if(parentTab==='设置') body = renderSettingsTab();
+  else if(parentTab==='孩子管理') body = renderChildMgmt();
 
   if(CHILD_TABS.includes(parentTab) && !uid){
     body = `<div class="parent-panel"><div class="bd" style="text-align:center;padding:48px 0;color:#8e9691">暂无孩子：点击右上角「新建孩子」添加，或等孩子首次登录学生端后自动出现</div></div>`;
