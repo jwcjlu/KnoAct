@@ -68,6 +68,22 @@ def _migrate_multi_student_columns():
                 conn.execute(text("ALTER TABLE pdf_documents ADD COLUMN grade INTEGER"))
 
 
+def _migrate_user_status():
+    """SQLite 加列迁移：给 users 补 status 列（active | archived）。
+
+    create_all 不会改已有表，这里幂等补齐；已有行默认 active。
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    if "users" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("users")}
+    if "status" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR(16) DEFAULT 'active'"))
+
+
 def _migrate_bucket_columns():
     """SQLite 加列迁移：学年桶功能给业务表补 bucket_id（可空，历史数据不挂桶），
     questions 额外补 user_id。create_all 不会改已有表，这里幂等补齐。
@@ -160,6 +176,7 @@ def seed():
     _migrate_pdf_document_created_at()
     _migrate_multi_student_columns()
     _migrate_bucket_columns()
+    _migrate_user_status()
     db = SessionLocal()
     _rename_default_child(db)
     if db.query(User).count() == 0:

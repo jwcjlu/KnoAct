@@ -52,3 +52,29 @@ def test_promote_grade_endpoint(setup_db):
     buckets = _client().get(f"/api/buckets?user_id={child}").json()
     assert any(b["status"] == "archived" and b["grade"] == 3 for b in buckets)
     assert any(b["status"] == "active" and b["grade"] == 4 for b in buckets)
+
+
+def test_archived_child_login_rejected(setup_db, client, db):
+    c = User(name="晨晨", role="child", status="archived")
+    db.add(c); db.commit()
+    r = client.post("/api/auth/login", json={"name": "晨晨"})
+    assert r.status_code == 403
+
+
+def test_archived_child_excluded_from_daily_tasks(setup_db, db):
+    from app.models import PdfDocument, Lesson, UserDocument, WordBank, KnowledgePoint, Text, Task
+    from app.services.task_gen import generate_daily_tasks
+    from datetime import date
+    c = User(name="归档孩子", role="child", status="archived")
+    db.add(c); db.flush()
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="")
+    db.add(doc); db.flush()
+    l = Lesson(document_id=doc.id, subject="语文", title="第1课", start_page=1, end_page=1, extract_status="done", audit_status="approved")
+    db.add(l); db.flush()
+    db.add(WordBank(lesson_id=l.id, subject="语文", word="白鹭", extra="x"))
+    db.add(KnowledgePoint(subject="语文", category="字词", content="形近字", lesson_id=l.id))
+    db.add(Text(lesson_id=l.id, content="白鹭是一首精巧的诗。"))
+    db.add(UserDocument(user_id=c.id, document_id=doc.id))
+    db.commit()
+    generate_daily_tasks(db, date.today())
+    assert db.query(Task).filter_by(user_id=c.id, date=date.today()).count() == 0

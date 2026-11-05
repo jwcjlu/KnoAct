@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
@@ -13,6 +13,8 @@ class LoginReq(BaseModel):
 @router.post("/login")
 def login(req: LoginReq, db: Session = Depends(get_db)):
     user = db.query(User).filter_by(name=req.name).first()
+    if user and user.status == "archived":
+        raise HTTPException(status_code=403, detail={"error": "archived"})
     if not user:
         user = User(name=req.name, role=req.role)
         db.add(user); db.commit(); db.refresh(user)

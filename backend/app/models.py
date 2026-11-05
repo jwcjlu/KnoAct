@@ -15,6 +15,7 @@ class User(Base):
     grade: Mapped[int] = mapped_column(Integer, nullable=True)  # 当前年级 1~6
     edition: Mapped[str] = mapped_column(String(64), default="")  # 教材版本（人教版/苏教版…）
     parent_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)  # 所属家长
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | archived
 
 class PdfDocument(Base):
     __tablename__ = "pdf_documents"

@@ -213,6 +213,6 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
 def generate_daily_tasks(db: Session, day: date, force: bool = False):
     """定时任务入口：为所有孩子生成当天任务。force=True 时覆盖重生成。"""
     from .bucket_service import ensure_bucket
-    for (uid,) in db.query(User.id).filter_by(role="child").all():
+    for (uid,) in db.query(User.id).filter_by(role="child", status="active").all():
         ensure_bucket(db, uid)
         generate_tasks_for_user(db, uid, day, force=force)
