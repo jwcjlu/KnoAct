@@ -8,6 +8,7 @@ from app.models import (
     SchoolYearBucket, UserDocument,
 )
 from app.services.task_gen import generate_tasks_for_user
+from conftest import auth_headers
 
 client = TestClient(app)
 
@@ -19,7 +20,10 @@ def _seed():
                   PdfDocument, User):
         db.query(model).delete()
     db.commit()
-    u = User(name="金同学", role="child")
+    parent = User(name="金爸爸", role="parent")
+    db.add(parent)
+    db.flush()
+    u = User(name="金同学", role="child", parent_id=parent.id)
     db.add(u)
     db.flush()
     doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="")
@@ -36,10 +40,18 @@ def _seed():
     return u.id
 
 
+def _h(uid):
+    db = SessionLocal()
+    try:
+        return auth_headers(db.get(User, uid))
+    finally:
+        db.close()
+
+
 def test_list_tasks_published_only_for_child():
     uid = _seed()
     generate_tasks_for_user(SessionLocal(), uid, date.today())
-    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=child")
+    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=child", headers=_h(uid))
     assert r.status_code == 200
     assert r.json() == []  # pending_review, child shouldn't see
 
@@ -52,7 +64,7 @@ def test_approve_then_child_sees_task():
     tid = task.id
     db.close()
     assert client.post(f"/api/tasks/{tid}/approve").json() == {"ok": True}
-    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=child")
+    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=child", headers=_h(uid))
     assert len(r.json()) >= 1
 
 
@@ -73,11 +85,11 @@ def test_list_tasks_filters_by_bucket_id():
     db.close()
 
     # 按历史桶过滤只返回该桶任务
-    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b1id}")
+    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b1id}", headers=_h(uid))
     titles = [t["title"] for t in r.json()]
     assert titles == ["历史桶任务"]
 
-    r2 = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b2id}")
+    r2 = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b2id}", headers=_h(uid))
     titles2 = [t["title"] for t in r2.json()]
     assert titles2 == ["当前桶任务"]
 
@@ -90,7 +102,7 @@ def test_add_custom_task_and_confirm_awards_points():
     })
     assert r.status_code == 200
     tid = r.json()["id"]
-    assert client.post(f"/api/tasks/{tid}/submit").json() == {"ok": True}
+    assert client.post(f"/api/tasks/{tid}/submit", headers=_h(uid)).json() == {"ok": True}
     assert client.post(f"/api/tasks/{tid}/confirm").json()["ok"] is True
     db = SessionLocal()
     pts = db.query(Point).filter_by(user_id=uid).all()
@@ -106,7 +118,7 @@ def test_double_confirm_awards_only_one_point():
         "title": "读一页书", "points": 30,
     })
     tid = r.json()["id"]
-    client.post(f"/api/tasks/{tid}/submit")
+    client.post(f"/api/tasks/{tid}/submit", headers=_h(uid))
     first = client.post(f"/api/tasks/{tid}/confirm").json()
     second = client.post(f"/api/tasks/{tid}/confirm").json()
     assert first["ok"] is True
@@ -126,10 +138,10 @@ def test_submit_after_confirm_does_not_downgrade():
         "title": "读一页书", "points": 30,
     })
     tid = r.json()["id"]
-    client.post(f"/api/tasks/{tid}/submit")
+    client.post(f"/api/tasks/{tid}/submit", headers=_h(uid))
     client.post(f"/api/tasks/{tid}/confirm")
     # 已 approved，再 submit 不应降级回 submitted
-    assert client.post(f"/api/tasks/{tid}/submit").json() == {"ok": True}
+    assert client.post(f"/api/tasks/{tid}/submit", headers=_h(uid)).json() == {"ok": True}
     db = SessionLocal()
     t = db.get(Task, tid)
     assert t.submit_status == "approved"

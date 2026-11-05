@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from ..core.access import require_learning_user, resolve_target_user_id
 from ..database import get_db
 from ..models import User, Lesson, WordBank, WordMastery, Point, LearningProgress
 
@@ -41,7 +42,10 @@ def _pending_review(db: Session) -> dict:
 
 
 @router.get("/snapshot")
-def snapshot(user_id: int, subject: str = "语文", db: Session = Depends(get_db)):
+def snapshot(subject: str = "语文",
+             _auth: User = Depends(require_learning_user),
+             user_id: int = Depends(resolve_target_user_id),
+             db: Session = Depends(get_db)):
     user = db.get(User, user_id)
     points = sum(p.delta for p in db.query(Point).filter_by(user_id=user_id).all())
     prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()

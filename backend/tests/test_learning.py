@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.routers.learning import router as learning_router
-from conftest import make_user, make_lesson
+from conftest import make_user, make_lesson, bound_child_headers
 
 
 def _client():
@@ -39,7 +39,7 @@ def test_dictation_pick_words(setup_db):
     s.add(WordBank(lesson_id=lid, subject="语文", word="徘徊", extra="pái huái"))
     s.add(WordBank(lesson_id=lid, subject="语文", word="矗立", extra="chù lì"))
     s.commit(); s.close()
-    resp = _client().get(f"/api/dictation/words?user_id={uid}")
+    resp = _client().get(f"/api/dictation/words?user_id={uid}", headers=bound_child_headers(uid))
     assert resp.status_code == 200
     assert len(resp.json()) == 2
 
@@ -109,7 +109,7 @@ def test_review_wrong_to_mistake_scoped_to_bucket(setup_db):
 
 def test_listening_material(setup_db):
     uid = _seed_user()
-    resp = _client().get(f"/api/listening/material?user_id={uid}")
+    resp = _client().get(f"/api/listening/material?user_id={uid}", headers=bound_child_headers(uid))
     assert resp.status_code == 200
     data = resp.json()
     assert "text" in data and "questions" in data
@@ -129,7 +129,7 @@ def test_listening_material_updates_empty_pregenerated_task(setup_db):
     ))
     s.commit(); s.close()
 
-    resp = _client().get(f"/api/listening/material?user_id={uid}")
+    resp = _client().get(f"/api/listening/material?user_id={uid}", headers=bound_child_headers(uid))
     assert resp.status_code == 200
     data = resp.json()
     assert "text" in data and "questions" in data
@@ -156,7 +156,7 @@ def test_listening_material_reads_pregenerated_task(setup_db):
     ))
     s.commit(); s.close()
 
-    resp = _client().get(f"/api/listening/material?user_id={uid}")
+    resp = _client().get(f"/api/listening/material?user_id={uid}", headers=bound_child_headers(uid))
     data = resp.json()
     assert data["text"] == "A: Hi B: Hello"
     assert data["questions"][0]["answer"] == "Hello"

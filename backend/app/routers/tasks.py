@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from ..core.access import require_learning_user
 from ..database import get_db
-from ..models import Task, Point
+from ..models import Task, Point, User
 from ..services.task_gen import generate_tasks_for_user
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -60,7 +61,8 @@ def _to_dict(t: Task) -> dict:
 
 
 @router.get("")
-def list_tasks(user_id: int, date: date, role: str = "child", bucket_id: int | None = None, db: Session = Depends(get_db)):
+def list_tasks(user_id: int, date: date, role: str = "child", bucket_id: int | None = None,
+               _user: User = Depends(require_learning_user), db: Session = Depends(get_db)):
     from ..services.bucket_guard import resolve_bucket_id
     bid = resolve_bucket_id(db, user_id, bucket_id)
     q = db.query(Task).filter_by(user_id=user_id, date=date)
@@ -144,7 +146,8 @@ def add_task(req: AddReq, db: Session = Depends(get_db)):
 
 
 @router.post("/{task_id}/submit")
-def submit(task_id: int, db: Session = Depends(get_db)):
+def submit(task_id: int, _user: User = Depends(require_learning_user),
+           db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}

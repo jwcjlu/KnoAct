@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime
+from ..core.access import require_learning_user
 from ..database import get_db
-from ..models import Lesson, WordBank, Point
+from ..models import Lesson, WordBank, Point, User
 from ..models import KnowledgePoint, Mistake, WordMastery, LearningProgress
 from ..services.scheduler import select_words, next_review_after
 from ..services.ai import get_provider
@@ -38,7 +39,9 @@ def _cfg_str(db, key, fallback, child_id=None):
 
 
 @router.get("/api/dictation/words")
-def dictation_words(user_id: int, subject: str = "语文", db: Session = Depends(get_db)):
+def dictation_words(user_id: int, subject: str = "语文",
+                    _user: User = Depends(require_learning_user),
+                    db: Session = Depends(get_db)):
     # 只取当前课的生词（与 task_gen._current_lesson 口径一致），而非全库所有已审核课
     prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
     lessons = db.query(Lesson).filter_by(subject=subject).order_by(Lesson.id).all()
@@ -155,7 +158,8 @@ def review_submit(req: ReviewSubmitReq, db: Session = Depends(get_db)):
     return {"ok": True}
 
 @router.get("/api/listening/material")
-def listening_material(user_id: int, db: Session = Depends(get_db)):
+def listening_material(user_id: int, _user: User = Depends(require_learning_user),
+                       db: Session = Depends(get_db)):
     import json as _json
     from datetime import date as _date
     from ..models import Task

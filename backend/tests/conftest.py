@@ -84,3 +84,18 @@ def make_account(session, login_name, role="child", parent=None):
              parent_id=parent.id if parent else None)
     session.add(u); session.commit()
     return u
+
+
+def bound_child_headers(user_id):
+    """给已存在的孩子建一个家长并绑定，返回孩子的 Bearer 头（通过 parent_required 校验）。"""
+    from app.models import User
+    s = SessionLocal()
+    try:
+        child = s.get(User, user_id)
+        parent = User(name=f"parent_of_{user_id}", role="parent")
+        s.add(parent); s.flush()
+        child.parent_id = parent.id
+        s.commit()
+        return auth_headers(child)
+    finally:
+        s.close()
