@@ -1,12 +1,13 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from ..core.access import ensure_lesson_document_access, ensure_user_access, require_learning_user
 from ..database import get_db
-from ..models import Note
+from ..models import Note, User
 from ..core.context import UnifiedContext
 from ..runtime.orchestrator import route_to_capability
 
@@ -18,6 +19,7 @@ class NoteReq(BaseModel):
     content: str
     anchor_text: str = ""
     page_number: int | None = None
+    user_id: int | None = None
 
 class AskReq(BaseModel):
     lesson_id: int
@@ -28,23 +30,33 @@ class AskReq(BaseModel):
     sentences: list[str] = []
 
 @router.post("/api/notes")
-def add_note(req: NoteReq, db: Session = Depends(get_db)):
-    note = Note(**req.model_dump())
+def add_note(req: NoteReq, user: User = Depends(require_learning_user),
+             db: Session = Depends(get_db)):
+    subject_id = req.user_id if req.user_id is not None else user.id
+    ensure_user_access(user, subject_id, db)
+    ensure_lesson_document_access(db.get(User, subject_id), req.lesson_id, db)
+    note = Note(**req.model_dump(exclude={"user_id"}))
     db.add(note); db.commit(); db.refresh(note)
     return {"id": note.id, "content": note.content}
 
 @router.get("/api/notes")
-def list_notes(lesson_id: int, db: Session = Depends(get_db)):
+def list_notes(lesson_id: int, user_id: int | None = None,
+               user: User = Depends(require_learning_user),
+               db: Session = Depends(get_db)):
+    subject_id = user_id if user_id is not None else user.id
+    ensure_user_access(user, subject_id, db)
+    viewer = db.get(User, subject_id)
+    if viewer is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    ensure_lesson_document_access(viewer, lesson_id, db)
     return db.query(Note).filter_by(lesson_id=lesson_id).order_by(Note.created_at.desc()).all()
 
 @router.post("/api/ask")
-async def ask_ai(req: AskReq, db: Session = Depends(get_db)):
-    # TODO: wire real auth/user context (no session/auth yet — resolve first child as placeholder)
-    from ..models import User
-    child = db.query(User).filter_by(role="child").first()
-    user_id = child.id if child else 0
+async def ask_ai(req: AskReq, user: User = Depends(require_learning_user),
+                 db: Session = Depends(get_db)):
+    ensure_lesson_document_access(user, req.lesson_id, db)
     ctx = UnifiedContext(
-        user_id=user_id, lesson_id=req.lesson_id, question=req.question,
+        user_id=user.id, lesson_id=req.lesson_id, question=req.question,
         text=req.context, mode=req.mode, model=req.model,
         sentences=req.sentences,
     )
@@ -52,12 +64,11 @@ async def ask_ai(req: AskReq, db: Session = Depends(get_db)):
 
 
 @router.post("/api/ask/stream")
-async def ask_stream(req: AskReq, db: Session = Depends(get_db)):
-    from ..models import User
-    child = db.query(User).filter_by(role="child").first()
-    user_id = child.id if child else 0
+async def ask_stream(req: AskReq, user: User = Depends(require_learning_user),
+                     db: Session = Depends(get_db)):
+    ensure_lesson_document_access(user, req.lesson_id, db)
     ctx = UnifiedContext(
-        user_id=user_id, lesson_id=req.lesson_id, question=req.question,
+        user_id=user.id, lesson_id=req.lesson_id, question=req.question,
         text=req.context, mode=req.mode, model=req.model, sentences=req.sentences,
     )
     return StreamingResponse(_event_stream(ctx), media_type="text/event-stream")

@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from datetime import datetime
 from sqlalchemy.orm import Session
+from ..core.access import ensure_user_access, require_learning_user, resolve_target_user_id
 from ..database import get_db
-from ..models import Goal
+from ..models import Goal, User
 from ..services.bucket_guard import resolve_bucket_id, assert_writable
 
 router = APIRouter(prefix="/api/goals", tags=["goals"])
@@ -17,14 +18,18 @@ class AssessReq(BaseModel):
     total: int
 
 @router.post("")
-def create_goal(req: GoalReq, bucket_id: int | None = None, db: Session = Depends(get_db)):
+def create_goal(req: GoalReq, user: User = Depends(require_learning_user),
+                bucket_id: int | None = None, db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     bid = resolve_bucket_id(db, req.user_id, bucket_id)
     g = Goal(user_id=req.user_id, bucket_id=bid, content=req.content, status="pending")
     db.add(g); db.commit(); db.refresh(g)
     return {"id": g.id, "content": g.content, "status": g.status}
 
 @router.get("")
-def list_goals(user_id: int, bucket_id: int | None = None, db: Session = Depends(get_db)):
+def list_goals(user_id: int = Depends(resolve_target_user_id),
+               _auth: User = Depends(require_learning_user),
+               bucket_id: int | None = None, db: Session = Depends(get_db)):
     q = db.query(Goal).filter_by(user_id=user_id)
     bid = resolve_bucket_id(db, user_id, bucket_id)
     if bid is not None:
@@ -36,10 +41,13 @@ def list_goals(user_id: int, bucket_id: int | None = None, db: Session = Depends
     ]
 
 @router.post("/{goal_id}/assess")
-def assess(goal_id: int, req: AssessReq, db: Session = Depends(get_db)):
+def assess(goal_id: int, req: AssessReq, user: User = Depends(require_learning_user),
+           db: Session = Depends(get_db)):
     rate = req.correct / req.total if req.total else 0
     achieved = rate >= 0.6
     g = db.get(Goal, goal_id)
+    if g:
+        ensure_user_access(user, g.user_id, db)
     if g and achieved:
         try:
             assert_writable(db, g.user_id, g.bucket_id)

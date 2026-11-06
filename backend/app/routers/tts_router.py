@@ -2,7 +2,9 @@
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
+from ..core.deps import get_current_user
 from ..database import get_db
+from ..models import User
 from ..services.tts import get_tts
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])
@@ -14,6 +16,7 @@ def synthesize(
     voice: str = Query(""),
     speed: float = Query(1.0),
     db: Session = Depends(get_db),
+    _auth: User = Depends(get_current_user),
 ):
     tts = get_tts(db)
     if tts.name == "fake":

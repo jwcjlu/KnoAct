@@ -2,7 +2,10 @@ import os
 from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from ..core.access import ensure_user_access, resolve_target_user_id
+from ..core.deps import get_current_user, require_role
 from ..database import get_db, SessionLocal
+from ..models import User
 from ..models import PdfDocument, PdfPage, Lesson, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
 from ..services.cleanup import purge_lesson_content, purge_lessons
 from ..services.pdf_split import render_pages, detect_lessons_from_pdf
@@ -18,6 +21,7 @@ _EXTRACT_PROGRESS = {}
 @router.post("/upload")
 async def upload_pdf(subject: str = Form(...), grade: int = Form(None),
                      edition: str = Form(""), file: UploadFile = File(...),
+                     _auth: User = Depends(require_role("parent", "admin")),
                      db: Session = Depends(get_db)):
     os.makedirs("uploads", exist_ok=True)
 
@@ -51,7 +55,11 @@ async def upload_pdf(subject: str = Form(...), grade: int = Form(None),
 
 
 @router.get("/documents")
-def list_documents(user_id: int = None, db: Session = Depends(get_db)):
+def list_documents(user_id: int | None = None,
+                   user: User = Depends(require_role("parent", "admin")),
+                   db: Session = Depends(get_db)):
+    if user_id is not None:
+        ensure_user_access(user, user_id, db)
     q = db.query(PdfDocument)
     if user_id is not None:
         bound = db.query(UserDocument.document_id).filter_by(user_id=user_id)
@@ -71,7 +79,8 @@ def list_documents(user_id: int = None, db: Session = Depends(get_db)):
 
 
 @router.get("/documents/{document_id}/lessons")
-def list_document_lessons(document_id: int, db: Session = Depends(get_db)):
+def list_document_lessons(document_id: int, _auth: User = Depends(require_role("parent", "admin")),
+                          db: Session = Depends(get_db)):
     doc = db.get(PdfDocument, document_id)
     # 页图缓存版本：document 创建时间戳（毫秒），前端拼 ?v= 使教材重渲染后缓存自然失效
     doc_version = int(doc.created_at.timestamp() * 1000) if (doc and doc.created_at) else 0
@@ -102,7 +111,9 @@ class BindReq(BaseModel):
 
 
 @router.post("/documents/{document_id}/bind")
-def bind_document(document_id: int, req: BindReq, db: Session = Depends(get_db)):
+def bind_document(document_id: int, req: BindReq, user: User = Depends(require_role("parent", "admin")),
+                  db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     exists = db.query(UserDocument).filter_by(user_id=req.user_id, document_id=document_id).first()
     if not exists:
         db.add(UserDocument(user_id=req.user_id, document_id=document_id))
@@ -111,20 +122,25 @@ def bind_document(document_id: int, req: BindReq, db: Session = Depends(get_db))
 
 
 @router.delete("/documents/{document_id}/bind")
-def unbind_document(document_id: int, user_id: int, db: Session = Depends(get_db)):
+def unbind_document(document_id: int, user_id: int, user: User = Depends(require_role("parent", "admin")),
+                    db: Session = Depends(get_db)):
+    ensure_user_access(user, user_id, db)
     db.query(UserDocument).filter_by(user_id=user_id, document_id=document_id).delete(synchronize_session=False)
     db.commit()
     return {"ok": True}
 
 
 @router.get("/documents/{document_id}/bound-users")
-def bound_users(document_id: int, db: Session = Depends(get_db)):
+def bound_users(document_id: int, _auth: User = Depends(require_role("parent", "admin")),
+                db: Session = Depends(get_db)):
     ids = [r[0] for r in db.query(UserDocument.user_id).filter_by(document_id=document_id).all()]
     return {"user_ids": ids}
 
 
 @router.post("/documents/{document_id}/extract")
-def extract_document(document_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def extract_document(document_id: int, background_tasks: BackgroundTasks,
+                     _auth: User = Depends(require_role("parent", "admin")),
+                     db: Session = Depends(get_db)):
     """对文档下所有 pending 课程执行内容提取（生词/知识点/课文）。
 
     提取走后台任务（每课一次 AI 调用，25 课约 10~15 分钟），本接口立即返回；
@@ -190,7 +206,7 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
 
 
 @router.get("/documents/{document_id}/extract/progress")
-def extract_progress(document_id: int):
+def extract_progress(document_id: int, _auth: User = Depends(require_role("parent", "admin"))):
     prog = _EXTRACT_PROGRESS.get(document_id)
     if not prog:
         return {"finished": True, "done": 0, "total": 0}
@@ -198,7 +214,9 @@ def extract_progress(document_id: int):
 
 
 @router.post("/lessons/{lesson_id}/audit")
-def audit_lesson(lesson_id: int, action: str = Form(...), db: Session = Depends(get_db)):
+def audit_lesson(lesson_id: int, action: str = Form(...),
+                  _auth: User = Depends(require_role("parent", "admin")),
+                  db: Session = Depends(get_db)):
     lesson = db.get(Lesson, lesson_id)
     if not lesson:
         return {"error": "not found"}
@@ -208,7 +226,8 @@ def audit_lesson(lesson_id: int, action: str = Form(...), db: Session = Depends(
 
 
 @router.post("/documents/{document_id}/resplit")
-def resplit_document(document_id: int, db: Session = Depends(get_db)):
+def resplit_document(document_id: int, _auth: User = Depends(require_role("parent", "admin")),
+                     db: Session = Depends(get_db)):
     """重新拆分教材：删除该文档下的旧课程（连同其生词/知识点/课文/掌握记录），
     按锚点重新切分，生成新的待审核课程。"""
     doc = db.get(PdfDocument, document_id)
@@ -234,7 +253,8 @@ def resplit_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/documents/{document_id}")
-def delete_document(document_id: int, db: Session = Depends(get_db)):
+def delete_document(document_id: int, _auth: User = Depends(require_role("parent", "admin")),
+                    db: Session = Depends(get_db)):
     """移除教材：删除文档、页面、课程及其生词/知识点/课文/掌握记录，并清理磁盘文件。"""
     doc = db.get(PdfDocument, document_id)
     if not doc:

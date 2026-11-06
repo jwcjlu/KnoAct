@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from ..core.access import ensure_lesson_document_access, ensure_user_access, require_learning_user
 from ..database import get_db
-from ..models import Text, Question, Mistake, Task
+from ..models import Text, Question, Mistake, Task, User
 
 router = APIRouter(prefix="/api/math", tags=["math"])
 
@@ -29,7 +30,9 @@ def _record_mistake(db: Session, user_id: int, question: str, user_ans: str, cor
 
 
 @router.get("/material")
-def math_material(lesson_id: int, db: Session = Depends(get_db)):
+def math_material(lesson_id: int, user: User = Depends(require_learning_user),
+                  db: Session = Depends(get_db)):
+    ensure_lesson_document_access(user, lesson_id, db)
     from ..services.math_gen import generate_math_questions
     from ..models import Lesson
     lesson = db.get(Lesson, lesson_id)
@@ -55,7 +58,9 @@ class GradeReq(BaseModel):
 
 
 @router.post("/grade")
-def math_grade(req: GradeReq, db: Session = Depends(get_db)):
+def math_grade(req: GradeReq, user: User = Depends(require_learning_user),
+               db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     from ..services.math_gen import grade_math_answer
     from ..services.bucket_guard import resolve_bucket_id
     bid = resolve_bucket_id(db, req.user_id, None)
@@ -83,14 +88,17 @@ class TaskGradeReq(BaseModel):
 
 
 @router.post("/task/{task_id}/grade")
-def math_task_grade(task_id: int, req: TaskGradeReq, db: Session = Depends(get_db)):
+def math_task_grade(task_id: int, req: TaskGradeReq, user: User = Depends(require_learning_user),
+                    db: Session = Depends(get_db)):
     """首页「数学练习」任务判分：题目来自 Task.content（[{question, answer}]）。"""
     from ..services.math_gen import grade_math_answer
     from ..services.bucket_guard import resolve_bucket_id
+    ensure_user_access(user, req.user_id, db)
     bid = resolve_bucket_id(db, req.user_id, None)
     task = db.get(Task, task_id)
     if not task or task.task_type != "math":
         return {"ok": False, "error": "任务不存在"}
+    ensure_user_access(user, task.user_id, db)
     if task.submit_status == "approved":
         return {"ok": False, "error": "家长已确认，不能再修改"}
     try:

@@ -3,6 +3,7 @@ from app.main import app
 from app.database import SessionLocal
 from app.models import User, KnowledgePoint, Lesson, PdfDocument, WordBank, KnowledgeMastery, WordMastery
 from app.services.mastery import record_attempt
+from conftest import make_account, bound_child_headers
 
 client = TestClient(app)
 
@@ -12,8 +13,8 @@ def _seed():
     for m in (KnowledgeMastery, WordMastery, WordBank, KnowledgePoint, Lesson, PdfDocument, User):
         db.query(m).delete()
     db.commit()
-    u = User(name="孩子", role="child")
-    db.add(u); db.flush()
+    parent = make_account(db, "p_ma", "parent")
+    u = make_account(db, "k_ma", "child", parent=parent)
     doc = PdfDocument(filename="y.pdf", subject="语文", storage_path="")
     db.add(doc); db.flush()
     l = Lesson(document_id=doc.id, subject="语文", title="第1课",
@@ -30,7 +31,8 @@ def test_mastery_overview_by_subject(setup_db):
     db = SessionLocal()
     record_attempt(db, uid, "knowledge", kpid, True)
     db.close()
-    r = client.get(f"/api/mastery/overview?user_id={uid}&subject=语文")
+    h = bound_child_headers(uid)
+    r = client.get(f"/api/mastery/overview?user_id={uid}&subject=语文", headers=h)
     assert r.status_code == 200
     data = r.json()
     assert len(data) == 1
@@ -40,9 +42,10 @@ def test_mastery_overview_by_subject(setup_db):
 
 def test_mastery_record_endpoint(setup_db):
     uid, kpid = _seed()
+    h = bound_child_headers(uid)
     r = client.post("/api/mastery/record", json={
         "user_id": uid, "target_type": "knowledge", "target_id": kpid, "is_correct": True,
-    })
+    }, headers=h)
     assert r.status_code == 200
     assert r.json()["mastery"] == 0.5
 
@@ -52,7 +55,8 @@ def test_mastery_report_counts(setup_db):
     db = SessionLocal()
     record_attempt(db, uid, "knowledge", kpid, True)
     db.close()
-    r = client.get(f"/api/mastery/report?user_id={uid}&subject=语文")
+    h = bound_child_headers(uid)
+    r = client.get(f"/api/mastery/report?user_id={uid}&subject=语文", headers=h)
     assert r.status_code == 200
     data = r.json()
     assert data["total"] >= 1
@@ -62,7 +66,7 @@ def test_mastery_report_counts(setup_db):
 
 def test_mastery_record_scoped_to_bucket(setup_db, db):
     from app.services.bucket_service import ensure_bucket
-    from app.models import User, KnowledgeMastery, KnowledgePoint, Lesson, PdfDocument
+    from app.models import KnowledgeMastery, KnowledgePoint, Lesson, PdfDocument
     doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="")
     db.add(doc); db.flush()
     lesson = Lesson(document_id=doc.id, subject="语文", title="课", start_page=1, end_page=1)
@@ -89,8 +93,9 @@ def test_mastery_overview_sees_bucketed_record_only(setup_db):
     db.add(lesson); db.flush()
     kp = KnowledgePoint(lesson_id=lesson.id, subject="语文", category="字词", content="苹果")
     db.add(kp); db.flush()
-    u = User(name="晨晨", role="child", grade=3)
-    db.add(u); db.commit()
+    p = make_account(db, "p_mo", "parent")
+    u = make_account(db, "k_mo", "child", parent=p)
+    db.commit()
     b = ensure_bucket(db, u.id)
     uid, kpid, b_id = u.id, kp.id, b.id
     # 旧记录落在 NULL 命名空间（不带 bucket）
@@ -99,14 +104,15 @@ def test_mastery_overview_sees_bucketed_record_only(setup_db):
     record_attempt(db, uid, "knowledge", kpid, True, bucket_id=b_id)
     db.close()
 
-    r = client.get(f"/api/mastery/overview?user_id={uid}&subject=语文")
+    h = bound_child_headers(uid)
+    r = client.get(f"/api/mastery/overview?user_id={uid}&subject=语文", headers=h)
     assert r.status_code == 200
     rows = r.json()
     # active 桶过滤后，只应看到桶内的那一条（NULL 命名空间的旧行被过滤）
     assert len(rows) == 1
     assert rows[0]["knowledge_point_id"] == kpid
 
-    rep = client.get(f"/api/mastery/report?user_id={uid}&subject=语文").json()
+    rep = client.get(f"/api/mastery/report?user_id={uid}&subject=语文", headers=h).json()
     assert rep["mastered"] + rep["weak"] == 1
     assert len(rep["rows"]) == 1
     assert rep["rows"][0]["knowledge_point_id"] == kpid

@@ -1,10 +1,19 @@
 from app.database import SessionLocal
-from conftest import make_user, make_lesson
+from conftest import make_account, make_lesson, bound_child_headers
+
+
+def _h(uid):
+    return bound_child_headers(uid)
 
 
 def _seed_user_lesson():
+    from app.models import UserDocument
     db = SessionLocal()
-    uid, lid = make_user(db).id, make_lesson(db).id
+    p = make_account(db, "p_ask", "parent")
+    uid = make_account(db, "k_ask", "child", parent=p).id
+    lesson = make_lesson(db)
+    lid = lesson.id
+    db.add(UserDocument(user_id=uid, document_id=lesson.document_id))
     db.commit(); db.close()
     return uid, lid
 
@@ -42,7 +51,9 @@ def test_ask_api_end_to_end(setup_db):
     db = SessionLocal()
     db.add(ModelConfig(key="ai_provider", value="fake"))
     db.commit(); db.close()
-    r = client.post("/api/ask", json={"lesson_id": 1, "question": "你好", "context": "白鹭是一首精巧的诗"})
+    uid, lid = _seed_user_lesson()
+    r = client.post("/api/ask", json={"lesson_id": lid, "question": "你好", "context": "白鹭是一首精巧的诗"},
+                    headers=_h(uid))
     assert r.status_code == 200
     body = r.json()
     assert "answer" in body
@@ -56,7 +67,8 @@ def test_ask_api_persists_turn(setup_db):
     db.add(ModelConfig(key="ai_provider", value="fake"))
     db.commit(); db.close()
     uid, lid = _seed_user_lesson()
-    r = client.post("/api/ask", json={"lesson_id": lid, "question": "唯一标记问题", "context": ""})
+    r = client.post("/api/ask", json={"lesson_id": lid, "question": "唯一标记问题", "context": ""},
+                    headers=_h(uid))
     assert r.status_code == 200
     db = SessionLocal()
     turn = db.query(Turn).filter_by(question="唯一标记问题").order_by(Turn.id.desc()).first()
@@ -93,7 +105,9 @@ def test_ask_stream_endpoint(setup_db):
     db = SessionLocal()
     db.add(ModelConfig(key="ai_provider", value="fake"))
     db.commit(); db.close()
-    r = client.post("/api/ask/stream", json={"lesson_id": 1, "question": "你好", "context": ""})
+    uid, lid = _seed_user_lesson()
+    r = client.post("/api/ask/stream", json={"lesson_id": lid, "question": "你好", "context": ""},
+                    headers=_h(uid))
     assert r.status_code == 200
     body = r.text
     assert "data: " in body
@@ -107,7 +121,8 @@ def test_ask_stream_persists_turn(setup_db):
     db.add(ModelConfig(key="ai_provider", value="fake"))
     db.commit(); db.close()
     uid, lid = _seed_user_lesson()
-    r = client.post("/api/ask/stream", json={"lesson_id": lid, "question": "流式问题", "context": ""})
+    r = client.post("/api/ask/stream", json={"lesson_id": lid, "question": "流式问题", "context": ""},
+                    headers=_h(uid))
     assert r.status_code == 200
     db = SessionLocal()
     turn = db.query(Turn).filter_by(question="流式问题").first()
@@ -129,7 +144,7 @@ def test_persist_turn_without_lesson_stores_null(setup_db):
     db.close()
 
 
-def test_ask_stream_error_terminates(monkeypatch):
+def test_ask_stream_error_terminates(monkeypatch, setup_db):
     # 让 get_provider 返回一个 generate 会抛异常的 provider
     from app.models import ModelConfig
     db = SessionLocal()
@@ -143,7 +158,9 @@ def test_ask_stream_error_terminates(monkeypatch):
         def generate(self, prompt, system="", json_mode=False):
             raise RuntimeError("no key")
     monkeypatch.setattr(ai, "get_provider", lambda db: BoomProvider())
-    r = client.post("/api/ask/stream", json={"lesson_id": 1, "question": "会失败", "context": ""})
+    uid, lid = _seed_user_lesson()
+    r = client.post("/api/ask/stream", json={"lesson_id": lid, "question": "会失败", "context": ""},
+                    headers=_h(uid))
     assert r.status_code == 200
     # 流必须终止（不会无限阻塞），且应含 error 事件
     assert '"type": "error"' in r.text

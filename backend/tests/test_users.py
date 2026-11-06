@@ -1,4 +1,6 @@
 from fastapi.testclient import TestClient
+from app.database import SessionLocal
+from conftest import auth_headers, make_account
 
 
 def _client():
@@ -6,19 +8,15 @@ def _client():
     return TestClient(app)
 
 
-def _add_users(*users):
-    from app.models import User
-    from app.database import SessionLocal
-    s = SessionLocal()
-    for name, role in users:
-        s.add(User(name=name, role=role))
-    s.commit()
-    s.close()
-
-
 def test_list_children_filters_by_role_and_sorts_by_id(setup_db):
-    _add_users(("金同学", "child"), ("金爸爸", "parent"), ("林晨", "child"))
-    resp = _client().get("/api/users?role=child")
+    s = SessionLocal()
+    pa = make_account(s, "p_ul", "parent")
+    make_account(s, "金同学", "child", parent=pa)
+    make_account(s, "林晨", "child", parent=pa)
+    s.commit()
+    hp = auth_headers(pa)
+    s.close()
+    resp = _client().get("/api/users?role=child", headers=hp)
     assert resp.status_code == 200
     data = resp.json()
     assert [u["name"] for u in data] == ["金同学", "林晨"]
@@ -27,10 +25,22 @@ def test_list_children_filters_by_role_and_sorts_by_id(setup_db):
 
 
 def test_list_users_without_role_returns_all(setup_db):
-    _add_users(("金同学", "child"), ("金爸爸", "parent"))
-    data = _client().get("/api/users").json()
-    assert [u["role"] for u in data] == ["child", "parent"]
+    s = SessionLocal()
+    pa = make_account(s, "p_u2", "parent")
+    make_account(s, "金同学", "child", parent=pa)
+    s.commit()
+    hp = auth_headers(pa)
+    s.close()
+    data = _client().get("/api/users", headers=hp).json()
+    # 无 role 时家长默认只看名下孩子
+    assert len(data) == 1
+    assert data[0]["name"] == "金同学"
 
 
 def test_list_users_empty(setup_db):
-    assert _client().get("/api/users?role=child").json() == []
+    s = SessionLocal()
+    pa = make_account(s, "p_empty", "parent")
+    s.commit()
+    hp = auth_headers(pa)
+    s.close()
+    assert _client().get("/api/users?role=child", headers=hp).json() == []

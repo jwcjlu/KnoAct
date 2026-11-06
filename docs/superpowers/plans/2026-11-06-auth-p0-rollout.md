@@ -48,7 +48,7 @@
 - Create: `backend/tests/test_access_control.py`
 - Modify: `backend/tests/conftest.py`
 
-- [ ] **Step 1: 写失败测试 — 两孩子互访 points 403**
+- [x] **Step 1: 写失败测试 — 两孩子互访 points 403**
 
 ```python
 # test_access_control.py
@@ -61,11 +61,11 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
     assert r.json()["detail"]["error"] == "forbidden"
 ```
 
-- [ ] **Step 2: 在 access.py 增加文档字符串；确认 resolve 对 parent 代查 b 时 parent token 200（预备测试）**
+- [x] **Step 2: 在 access.py 增加文档字符串；确认 resolve 对 parent 代查 b 时 parent token 200（预备测试）**
 
-- [ ] **Step 3: conftest 增加 `bound_pair(db)` → parent, child, headers**
+- [x] **Step 3: conftest 增加 `bound_pair(db)` → parent, child, headers**
 
-- [ ] **Step 4: pytest test_access_control.py -v（FAIL）**
+- [x] **Step 4: pytest test_access_control.py -v（FAIL）**
 
 - [ ] **Step 5: commit** `test(auth): access control matrix skeleton`
 
@@ -77,10 +77,10 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 - Modify: `backend/app/routers/points.py`, `mistakes.py`, `mastery.py`, `goals.py`
 - Modify: `backend/tests/test_mistakes.py`, 等相关测试
 
-- [ ] **Step 1:** 每个 GET/POST 加 `user: require_learning_user`（或 parent 读孩子用 `get_current_user` + resolve）
-- [ ] **Step 2:** `user_id` 参数改为 `Depends(resolve_target_user_id)`
+- [x] **Step 1:** 每个 GET/POST 加 `user: require_learning_user`（或 parent 读孩子用 `get_current_user` + resolve）
+- [x] **Step 2:** `user_id` 参数改为 `Depends(resolve_target_user_id)`
 - [ ] **Step 3:** test_access_control 每 router 1 条越权 + 1 条 parent 代查 OK
-- [ ] **Step 4:** `pytest tests/test_mistakes.py tests/test_access_control.py -q`
+- [x] **Step 4:** `pytest tests/test_mistakes.py tests/test_access_control.py -q`
 - [ ] **Step 5: commit** `feat(auth): protect points mistakes mastery goals`
 
 ---
@@ -90,9 +90,9 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 **Files:**
 - Modify: `backend/app/routers/learning.py`, `math.py`, `progress.py`
 
-- [ ] **Step 1:** 已保护的 dictation/words、listening 补 `resolve_target_user_id`
-- [ ] **Step 2:** grade/complete/assignment/review 等全部 learning + math
-- [ ] **Step 3:** 更新 `test_learning.py`, `test_math*.py` 带 token
+- [x] **Step 1:** 已保护的 dictation/words、listening 补 `resolve_target_user_id`
+- [x] **Step 2:** grade/complete/assignment/review 等全部 learning + math；阅读材料与数学材料按教材绑定校验（`ensure_lesson_document_access`）
+- [x] **Step 3:** 更新 `test_learning.py`, `test_math*.py` 带 token / 绑定 `UserDocument`
 - [ ] **Step 4: commit**
 
 ---
@@ -102,9 +102,9 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 **Files:**
 - Modify: `backend/app/routers/tasks.py`
 
-- [ ] **Step 1:** list/submit 加 `resolve_target_user_id`（当前仅 learning_user）
-- [ ] **Step 2:** approve/confirm/generate/knowledge-review → parent + 孩子 `parent_id` 校验
-- [ ] **Step 3:** test_tasks_router 全绿
+- [x] **Step 1:** list/submit 加 `resolve_target_user_id`（当前仅 learning_user）
+- [x] **Step 2:** approve/confirm/generate/knowledge-review → parent + 孩子 `parent_id` 校验
+- [x] **Step 3:** test_tasks_router 全绿
 - [ ] **Step 4: commit**
 
 ---
@@ -114,9 +114,9 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 **Files:**
 - Modify: `quiz.py`, `notes.py`, `annotations.py`
 
-- [ ] **Step 1:** quiz generate/submit — learning_user + resolve
-- [ ] **Step 2:** ask/ask_stream — learning_user；context user_id 与 token 一致
-- [ ] **Step 3:** annotations CRUD — lesson 归属 child 或家长教材链（按 lesson→doc→UserDocument 校验，最小：仅 authenticated + user_id on note）
+- [x] **Step 1:** quiz generate/submit — learning_user + resolve + 教材绑定校验
+- [x] **Step 2:** ask/ask_stream — learning_user；教材课经 `UserDocument` 校验
+- [x] **Step 3:** annotations — Bearer + `ensure_user_access` + 教材绑定；notes 列表支持 `user_id` 查询
 - [ ] **Step 4: commit**
 
 ---
@@ -126,10 +126,10 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 **Files:**
 - Modify: `pdf.py`, `questions.py`, `knowledge.py`, `users.py` GET
 
-- [ ] **Step 1:** pdf upload/bind/extract → `require_role("parent","admin")`
-- [ ] **Step 2:** questions/knowledge 写操作 parent/admin；review 列表 parent
-- [ ] **Step 3:** `GET /api/users` 需 parent/admin，parent 只能查 role=child&parent_id=self
-- [ ] **Step 4:** test_pdf_router, test_users 更新
+- [x] **Step 1:** pdf upload/bind/extract → `require_role("parent","admin")`
+- [x] **Step 2:** questions/knowledge 写操作 parent/admin；knowledge 列表/删改按已绑定教材范围
+- [x] **Step 3:** `GET /api/users` 需 parent/admin，parent 只能查 role=child&parent_id=self
+- [x] **Step 4:** test_pdf_router, test_users 更新
 - [ ] **Step 5: commit**
 
 ---
@@ -139,8 +139,8 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 **Files:**
 - Modify: `screen_time.py`, `buckets.py`
 
-- [ ] **Step 1:** report — child self；groups/usage — parent 代查 resolve
-- [ ] **Step 2:** buckets GET — resolve user_id
+- [x] **Step 1:** report — child self；groups/usage — parent 代查 resolve
+- [x] **Step 2:** buckets GET — resolve user_id
 - [ ] **Step 3: commit**
 
 ---
@@ -150,8 +150,8 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 **Files:**
 - Modify: `tts_router.py`, `render.py`
 
-- [ ] **Step 1:** synthesize / render 需 `get_current_user`（任意登录）
-- [ ] **Step 2:** 匿名 401 测试
+- [x] **Step 1:** synthesize / render_status 需登录；`/render_media` 同步需 Bearer
+- [ ] **Step 2:** 匿名 401 测试（TTS 已有；render 媒体代理可选手测）
 - [ ] **Step 3: commit**
 
 ---
@@ -162,7 +162,7 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 - 所有 failing tests 补 `auth_headers`
 - Spot-check: `student-app` 已带 Bearer；`parent-web` pdf 上传带 token
 
-- [ ] **Step 1:** `cd backend && python -m pytest -q` 全绿
+- [x] **Step 1:** `cd backend && python -m pytest -q` 全绿（本批 360 passed）
 - [ ] **Step 2:** 手动：student 登录 → home/points/wrongbook 200
 - [ ] **Step 3:** 手动：parent 登录 → pdf 列表 200；无 token 401
 - [ ] **Step 4: commit** `test: fix bearer headers across suite`
@@ -182,10 +182,10 @@ def test_child_cannot_read_other_balance(setup_db, client, db):
 
 ## 验收（与审计 spec 对齐）
 
-- [ ] 两 child token 互访 `user_id` → **403 forbidden**
-- [ ] parent token 访问 `user_id=旗下孩子` → **200**
+- [x] 两 child token 互访 `user_id` → **403 forbidden**（`test_access_control`）
+- [x] parent token 访问 `user_id=旗下孩子` → **200**（`test_access_control`）
 - [ ] 无 Bearer → **401**（除 `/api/auth/*` 注册登录、/health）
-- [ ] `pytest` 全绿
+- [x] `pytest` 全绿
 - [ ] Flutter `flutter test` 无回归（API 401 时 client 行为已测）
 
 ---

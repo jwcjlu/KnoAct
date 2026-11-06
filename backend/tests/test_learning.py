@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.routers.learning import router as learning_router
-from conftest import make_user, make_lesson, bound_child_headers
+from conftest import make_account, make_user, make_lesson, bound_child_headers
 
 
 def _client():
@@ -10,21 +10,28 @@ def _client():
     return TestClient(app)
 
 
+def _h(uid):
+    return bound_child_headers(uid)
+
+
 def _seed_user():
     from app.database import SessionLocal
     s = SessionLocal()
-    uid = make_user(s).id
+    p = make_account(s, "p_lr", "parent")
+    uid = make_account(s, "k_lr", "child", parent=p).id
     s.commit(); s.close()
     return uid
 
 
 def _seed_two_lessons(s):
     """孩子 + 同一教材的两课（已审核），进度停在第 1 课。返回 (uid, l1_id, l2_id)。"""
-    from app.models import LearningProgress, PdfDocument
-    uid = make_user(s).id
+    from app.models import LearningProgress, PdfDocument, UserDocument
+    p = make_account(s, "p_2l", "parent")
+    uid = make_account(s, "k_2l", "child", parent=p).id
     l1 = make_lesson(s, audit_status="approved")
     l2 = make_lesson(s, title="第2课", start_page=4, end_page=6, audit_status="approved",
                      document=s.get(PdfDocument, l1.document_id))
+    s.add(UserDocument(user_id=uid, document_id=l1.document_id))
     s.add(LearningProgress(user_id=uid, subject="语文", current_lesson_id=l1.id))
     s.commit()
     return uid, l1.id, l2.id
@@ -34,8 +41,11 @@ def test_dictation_pick_words(setup_db):
     from app.models import Lesson, WordBank
     from app.database import SessionLocal
     s = SessionLocal()
-    uid = make_user(s).id
+    from app.models import Lesson, UserDocument
+    p = make_account(s, "p_pick", "parent")
+    uid = make_account(s, "k_pick", "child", parent=p).id
     lid = make_lesson(s, audit_status="approved").id
+    s.add(UserDocument(user_id=uid, document_id=s.get(Lesson, lid).document_id))
     s.add(WordBank(lesson_id=lid, subject="语文", word="徘徊", extra="pái huái"))
     s.add(WordBank(lesson_id=lid, subject="语文", word="矗立", extra="chù lì"))
     s.commit(); s.close()
@@ -45,19 +55,19 @@ def test_dictation_pick_words(setup_db):
 
 
 def test_dictation_grade(setup_db):
+    uid = _seed_user()
     c = _client()
-    resp = c.post("/api/dictation/grade", json={"word": "徘徊", "answer": "徘徊"})
+    h = _h(uid)
+    resp = c.post("/api/dictation/grade", json={"word": "徘徊", "answer": "徘徊"}, headers=h)
     assert resp.json()["correct"] is True
-    resp = c.post("/api/dictation/grade", json={"word": "徘徊", "answer": "排回"})
+    resp = c.post("/api/dictation/grade", json={"word": "徘徊", "answer": "排回"}, headers=h)
     assert resp.json()["correct"] is False
 
 
 def test_dictation_complete_awards_points(setup_db):
-    from app.models import User
-    from app.database import SessionLocal
-    s = SessionLocal()
-    s.add(User(name="晨晨", role="child")); s.commit(); s.close()
-    resp = _client().post("/api/dictation/complete", json={"user_id": 1, "correct": 5, "wrong": 1})
+    uid = _seed_user()
+    resp = _client().post("/api/dictation/complete", json={"user_id": uid, "correct": 5, "wrong": 1},
+                          headers=_h(uid))
     assert resp.status_code == 200
     assert resp.json()["points_awarded"] > 0
 
@@ -68,14 +78,16 @@ def test_review_generate_questions(setup_db):
     s = SessionLocal()
     s.add(KnowledgePoint(subject="英语", category="语法", content="动词第三人称单数加 s"))
     s.commit(); s.close()
-    resp = _client().get("/api/review/questions?subject=英语")
+    uid = _seed_user()
+    resp = _client().get("/api/review/questions?subject=英语", headers=_h(uid))
     assert resp.status_code == 200
     assert len(resp.json()) > 0
 
 
 def test_review_wrong_to_mistake(setup_db):
     uid = _seed_user()
-    resp = _client().post("/api/review/submit", json={"user_id": uid, "question": "go 的第三人称单数", "your_answer": "gos", "correct_answer": "goes", "source_type": "review"})
+    resp = _client().post("/api/review/submit", json={"user_id": uid, "question": "go 的第三人称单数", "your_answer": "gos", "correct_answer": "goes", "source_type": "review"},
+                          headers=_h(uid))
     assert resp.status_code == 200
     from app.models import Mistake
     from app.database import SessionLocal
@@ -89,7 +101,8 @@ def test_review_wrong_to_mistake_scoped_to_bucket(setup_db):
     from app.models import Mistake
     from app.database import SessionLocal
     s = SessionLocal()
-    uid = make_user(s).id
+    p = make_account(s, "p_rw", "parent")
+    uid = make_account(s, "k_rw", "child", parent=p).id
     s.commit()
     b = ensure_bucket(s, uid)
     b_id = b.id
@@ -98,7 +111,7 @@ def test_review_wrong_to_mistake_scoped_to_bucket(setup_db):
     resp = _client().post("/api/review/submit", json={
         "user_id": uid, "question": "go 的第三人称单数",
         "your_answer": "gos", "correct_answer": "goes", "source_type": "review",
-    })
+    }, headers=_h(uid))
     assert resp.status_code == 200
     s = SessionLocal()
     m = s.query(Mistake).filter_by(user_id=uid).first()
@@ -122,7 +135,8 @@ def test_listening_material_updates_empty_pregenerated_task(setup_db):
     from app.database import SessionLocal
     # 预生成一条 content 为空的任务（模拟损坏/空数据）
     s = SessionLocal()
-    uid = make_user(s).id
+    p = make_account(s, "p_lm_u", "parent")
+    uid = make_account(s, "k_lm_u", "child", parent=p).id
     s.add(Task(
         user_id=uid, subject="英语", date=date.today(), task_type="listening",
         title="英语听力练习", content_status="published", content="",
@@ -148,7 +162,8 @@ def test_listening_material_reads_pregenerated_task(setup_db):
     from app.models import Task
     from app.database import SessionLocal
     s = SessionLocal()
-    uid = make_user(s).id
+    p = make_account(s, "p_lm_r", "parent")
+    uid = make_account(s, "k_lm_r", "child", parent=p).id
     s.add(Task(
         user_id=uid, subject="英语", date=date.today(), task_type="listening",
         title="英语听力练习", content_status="published",
@@ -163,13 +178,17 @@ def test_listening_material_reads_pregenerated_task(setup_db):
 
 
 def test_reading_material(setup_db):
-    from app.models import Text
+    from app.models import Text, UserDocument
     from app.database import SessionLocal
     s = SessionLocal()
-    lid = make_lesson(s).id
+    lesson = make_lesson(s)
+    lid = lesson.id
     s.add(Text(lesson_id=lid, content="白鹭是一首精巧的诗。"))
+    p = make_account(s, "p_rm", "parent")
+    uid = make_account(s, "k_rm", "child", parent=p).id
+    s.add(UserDocument(user_id=uid, document_id=lesson.document_id))
     s.commit(); s.close()
-    resp = _client().get(f"/api/reading/material?lesson_id={lid}")
+    resp = _client().get(f"/api/reading/material?lesson_id={lid}&user_id={uid}", headers=_h(uid))
     assert resp.status_code == 200
     data = resp.json()
     assert "text" in data and "questions" in data
@@ -180,21 +199,26 @@ def test_dictation_grade_updates_word_mastery(setup_db):
     from app.models import Lesson, WordBank, WordMastery
     from app.database import SessionLocal
     s = SessionLocal()
+    from app.models import Lesson as Ls, UserDocument as UD
     lid = make_lesson(s, audit_status="approved").id
+    p = make_account(s, "p_wbm", "parent")
+    uid = make_account(s, "k_wbm", "child", parent=p).id
+    s.add(UD(user_id=uid, document_id=s.get(Ls, lid).document_id))
     wb = WordBank(lesson_id=lid, subject="语文", word="徘徊", extra="pái huái")
     s.add(wb); s.flush()
     wid = wb.id
     s.commit(); s.close()
 
     c = _client()
+    h = _h(uid)
     # 答错：mistake_count=1, is_weak=True
-    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "排回"})
+    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "排回"}, headers=h)
     s = SessionLocal()
     m = s.query(WordMastery).filter_by(word_bank_id=wid).first()
     assert m is not None and m.mistake_count == 1 and m.is_weak is True
     # 答对两次：correct_count 累计
-    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "徘徊"})
-    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "徘徊"})
+    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "徘徊"}, headers=h)
+    c.post("/api/dictation/grade", json={"word_id": wid, "word": "徘徊", "answer": "徘徊"}, headers=h)
     # MySQL 默认 REPEATABLE READ：结束本会话的读快照才能看到接口写入的新值（expire_all 不够）
     s.rollback()
     m = s.query(WordMastery).filter_by(word_bank_id=wid).first()
@@ -212,11 +236,14 @@ def test_learning_lessons_returns_current_flag(setup_db):
     l2 = Lesson(document_id=doc.id, subject="语文", title="第2课", start_page=4, end_page=6, audit_status="approved")
     s.add_all([l1, l2]); s.flush()
     l1_id, l2_id = l1.id, l2.id
-    uid = make_user(s).id
+    p = make_account(s, "p_ll", "parent")
+    uid = make_account(s, "k_ll", "child", parent=p).id
+    from app.models import UserDocument
+    s.add(UserDocument(user_id=uid, document_id=doc.id))
     s.add(LearningProgress(user_id=uid, subject="语文", current_lesson_id=l2_id))
     s.commit(); s.close()
 
-    resp = _client().get(f"/api/learning/lessons?user_id={uid}&subject=语文")
+    resp = _client().get(f"/api/learning/lessons?user_id={uid}&subject=语文", headers=_h(uid))
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
@@ -242,7 +269,7 @@ def test_assignment_grade_passes_advances_progress(setup_db):
                                     {"knowledge_point_id": None, "is_correct": True},
                                     {"knowledge_point_id": None, "is_correct": True},
                                     {"knowledge_point_id": None, "is_correct": False},
-                                ]})
+                                ]}, headers=_h(uid))
     assert resp.status_code == 200
     body = resp.json()
     assert body["passed"] is True
@@ -268,7 +295,7 @@ def test_assignment_grade_below_threshold_does_not_advance(setup_db):
                                     {"knowledge_point_id": None, "is_correct": False},
                                     {"knowledge_point_id": None, "is_correct": False},
                                     {"knowledge_point_id": None, "is_correct": False},
-                                ]})
+                                ]}, headers=_h(uid))
     body = resp.json()
     assert body["passed"] is False
 
@@ -283,8 +310,11 @@ def test_assignment_grade_records_knowledge_mastery(setup_db):
     from app.models import Lesson, LearningProgress, KnowledgePoint, KnowledgeMastery
     from app.database import SessionLocal
     s = SessionLocal()
-    uid = make_user(s).id
+    from app.models import Lesson, UserDocument
+    p = make_account(s, "p_km", "parent")
+    uid = make_account(s, "k_km", "child", parent=p).id
     l1_id = make_lesson(s, audit_status="approved").id
+    s.add(UserDocument(user_id=uid, document_id=s.get(Lesson, l1_id).document_id))
     kp = KnowledgePoint(lesson_id=l1_id, subject="语文", category="修辞", content="比喻")
     s.add(kp); s.flush()
     kp_id = kp.id
@@ -297,7 +327,7 @@ def test_assignment_grade_records_knowledge_mastery(setup_db):
                                     {"knowledge_point_id": kp_id, "is_correct": True},
                                     {"knowledge_point_id": kp_id, "is_correct": False},
                                     {"knowledge_point_id": None, "is_correct": False},
-                                ]})
+                                ]}, headers=_h(uid))
     body = resp.json()
     assert body["passed"] is False
 
@@ -322,7 +352,8 @@ def test_assignment_grade_with_items_returns_per_question_results(setup_db, monk
     items = [{"question": f"题{i}", "answer": f"答{i}", "student_answer": "x", "knowledge_point_id": None}
              for i in range(3)]
     body = _client().post("/api/learning/assignment/grade",
-                          json={"user_id": uid, "lesson_id": l1_id, "subject": "语文", "items": items}).json()
+                          json={"user_id": uid, "lesson_id": l1_id, "subject": "语文", "items": items},
+                          headers=_h(uid)).json()
     assert body["passed"] is False
     assert body["correct"] == 1 and body["total"] == 3
     assert body["threshold"] == 0.6
@@ -339,13 +370,17 @@ def test_assignment_returns_questions(setup_db):
     from app.models import Text
     from app.database import SessionLocal
     s = SessionLocal()
-    uid = make_user(s).id
+    from app.models import Lesson, UserDocument
+    p = make_account(s, "p_aq", "parent")
+    uid = make_account(s, "k_aq", "child", parent=p).id
     lid = make_lesson(s, audit_status="approved").id
+    s.add(UserDocument(user_id=uid, document_id=s.get(Lesson, lid).document_id))
     s.add(Text(lesson_id=lid, content="白鹭是一首精巧的诗。"))
     s.commit(); s.close()
 
     resp = _client().post("/api/learning/assignment",
-                          json={"user_id": uid, "lesson_id": lid, "subject": "语文"})
+                          json={"user_id": uid, "lesson_id": lid, "subject": "语文"},
+                          headers=_h(uid))
     assert resp.status_code == 200
     data = resp.json()
     assert "questions" in data
@@ -353,14 +388,12 @@ def test_assignment_returns_questions(setup_db):
 
 
 def test_dictation_complete_records_wrong_words(setup_db):
-    from app.models import User
     from app.database import SessionLocal
-    s = SessionLocal()
-    s.add(User(name="晨晨", role="child")); s.commit(); s.close()
+    uid = _seed_user()
     resp = _client().post("/api/dictation/complete", json={
-        "user_id": 1, "correct": 4, "wrong": 1,
+        "user_id": uid, "correct": 4, "wrong": 1,
         "wrong_words": [{"word": "矗立", "your_answer": "矗力"}],
-    })
+    }, headers=_h(uid))
     assert resp.status_code == 200
     assert resp.json()["mistakes_recorded"] == 1
     from app.models import Mistake
@@ -370,12 +403,13 @@ def test_dictation_complete_records_wrong_words(setup_db):
 
 
 def test_grade_handwriting_endpoint(setup_db):
+    uid = _seed_user()
     # 视觉模型未配置/mock 异常时，接口返回空 results 而非 500
     resp = _client().post("/api/dictation/grade-handwriting", json={
-        "user_id": 1,
+        "user_id": uid,
         "words": [{"index": 0, "word": "箩"}],
         "image_base64": "",
-    })
+    }, headers=_h(uid))
     assert resp.status_code == 200
     data = resp.json()
     assert "results" in data
@@ -386,7 +420,7 @@ def test_appeal_endpoint(setup_db):
     uid = _seed_user()
     resp = _client().post("/api/dictation/appeal", json={
         "user_id": uid, "word": "矗立", "reason": "我写的是对的",
-    })
+    }, headers=_h(uid))
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
     from app.models import Mistake

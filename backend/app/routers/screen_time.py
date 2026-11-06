@@ -2,8 +2,10 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from ..core.access import ensure_user_access, require_learning_user, resolve_target_user_id
+from ..core.deps import get_current_user, require_role
 from ..database import get_db
-from ..models import AppGroup, AppRule, ScreenUsage
+from ..models import AppGroup, AppRule, ScreenUsage, User
 from ..services.screen_time import classify_package, compute_group_totals
 
 router = APIRouter(prefix="/api/screen-time", tags=["screen-time"])
@@ -41,7 +43,9 @@ class GroupsReq(BaseModel):
 
 
 @router.post("/report")
-def report(req: ReportReq, db: Session = Depends(get_db)):
+def report(req: ReportReq, user: User = Depends(require_learning_user),
+           db: Session = Depends(get_db)):
+    ensure_user_access(user, req.child_id, db)
     for it in req.items:
         row = (db.query(ScreenUsage)
                .filter_by(child_id=req.child_id, date=req.date, app_package=it.app_package)
@@ -60,7 +64,9 @@ def report(req: ReportReq, db: Session = Depends(get_db)):
 
 
 @router.get("/groups")
-def get_groups(user_id: int, db: Session = Depends(get_db)):
+def get_groups(user_id: int = Depends(resolve_target_user_id),
+               _auth: User = Depends(get_current_user),
+               db: Session = Depends(get_db)):
     groups = [{"id": g.id, "name": g.name, "kind": g.kind,
                "daily_limit_seconds": g.daily_limit_seconds}
               for g in db.query(AppGroup).filter_by(user_id=user_id).all()]
@@ -70,7 +76,9 @@ def get_groups(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/groups")
-def put_groups(req: GroupsReq, db: Session = Depends(get_db)):
+def put_groups(req: GroupsReq, user: User = Depends(require_role("parent", "admin")),
+               db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     # 按名字 upsert 分组，记录 name -> id 映射
     name_to_id = {}
     for g in req.groups:
@@ -101,7 +109,9 @@ def put_groups(req: GroupsReq, db: Session = Depends(get_db)):
 
 
 @router.get("/usage")
-def usage(child_id: int, date: str, db: Session = Depends(get_db)):
+def usage(child_id: int, date: str, user: User = Depends(get_current_user),
+          db: Session = Depends(get_db)):
+    ensure_user_access(user, child_id, db)
     totals = compute_group_totals(db, child_id, date)
     groups = db.query(AppGroup).filter_by(user_id=child_id).all()
     out = []

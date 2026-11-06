@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from ..core.access import ensure_lesson_document_access, ensure_user_access, require_learning_user
 from ..database import get_db
-from ..models import Quiz, Text, KnowledgePoint, Lesson
+from ..models import Quiz, Text, KnowledgePoint, Lesson, User
 from ..services.quiz import grade_answers, strip_key
 from ..services.bucket_guard import resolve_bucket_id
 
@@ -40,7 +41,15 @@ def _lesson_text(db: Session, lesson_id: int) -> str:
 
 
 @router.post("/quiz/generate")
-def quiz_generate(req: QuizGenerateReq, db: Session = Depends(get_db)):
+def quiz_generate(req: QuizGenerateReq, user: User = Depends(require_learning_user),
+                  db: Session = Depends(get_db)):
+    uid = req.user_id or user.id
+    if req.user_id:
+        ensure_user_access(user, req.user_id, db)
+    viewer = db.get(User, uid)
+    if viewer is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    ensure_lesson_document_access(viewer, req.lesson_id, db)
     from ..tools.generation import generate_quiz_questions
     from ..core.context import UnifiedContext
     text = _lesson_text(db, req.lesson_id)
@@ -50,7 +59,7 @@ def quiz_generate(req: QuizGenerateReq, db: Session = Depends(get_db)):
            for k in db.query(KnowledgePoint).filter_by(lesson_id=req.lesson_id).all()]
     lesson = db.get(Lesson, req.lesson_id)
     subject = (lesson.subject if lesson else "语文") or "语文"
-    ctx = UnifiedContext(user_id=req.user_id, lesson_id=req.lesson_id, question="")
+    ctx = UnifiedContext(user_id=uid, lesson_id=req.lesson_id, question="")
     result = generate_quiz_questions.run(
         {
             "text": text,
@@ -62,8 +71,8 @@ def quiz_generate(req: QuizGenerateReq, db: Session = Depends(get_db)):
     )
     if not result.get("questions"):
         raise HTTPException(status_code=503, detail=result.get("error", "AI 未配置"))
-    quiz = Quiz(lesson_id=req.lesson_id, user_id=req.user_id,
-                bucket_id=resolve_bucket_id(db, req.user_id, None),
+    quiz = Quiz(lesson_id=req.lesson_id, user_id=uid,
+                bucket_id=resolve_bucket_id(db, uid, None),
                 questions=json.dumps(result["questions"], ensure_ascii=False))
     db.add(quiz)
     db.commit()
@@ -72,10 +81,18 @@ def quiz_generate(req: QuizGenerateReq, db: Session = Depends(get_db)):
 
 
 @router.post("/quiz/submit")
-def quiz_submit(req: QuizSubmitReq, db: Session = Depends(get_db)):
+def quiz_submit(req: QuizSubmitReq, user: User = Depends(require_learning_user),
+                db: Session = Depends(get_db)):
     quiz = db.get(Quiz, req.quiz_id)
     if not quiz:
         raise HTTPException(status_code=409, detail="测验已过期")
+    if quiz.user_id:
+        ensure_user_access(user, quiz.user_id, db)
+        sub = db.get(User, quiz.user_id)
+        if sub:
+            ensure_lesson_document_access(sub, quiz.lesson_id, db)
+    else:
+        ensure_lesson_document_access(user, quiz.lesson_id, db)
     questions = json.loads(quiz.questions)
     valid_ids = {q["id"] for q in questions}
     for a in req.answers:
@@ -117,7 +134,9 @@ def quiz_submit(req: QuizSubmitReq, db: Session = Depends(get_db)):
 
 
 @router.post("/ask/questions")
-def ask_questions(req: AskQuestionsReq, db: Session = Depends(get_db)):
+def ask_questions(req: AskQuestionsReq, user: User = Depends(require_learning_user),
+                  db: Session = Depends(get_db)):
+    ensure_lesson_document_access(user, req.lesson_id, db)
     from ..tools.generation import generate_diagnostic_questions
     from ..core.context import UnifiedContext
     ctx_text = req.context or _lesson_text(db, req.lesson_id)
@@ -125,7 +144,7 @@ def ask_questions(req: AskQuestionsReq, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="该课文暂无内容")
     lesson = db.get(Lesson, req.lesson_id)
     subject = (lesson.subject if lesson else "语文") or "语文"
-    ctx = UnifiedContext(user_id=0, lesson_id=req.lesson_id, question="")
+    ctx = UnifiedContext(user_id=user.id, lesson_id=req.lesson_id, question="")
     result = generate_diagnostic_questions.run({"context": ctx_text, "subject": subject}, ctx)
     if not result["questions"]:
         raise HTTPException(status_code=503, detail="AI 未配置")
@@ -133,16 +152,15 @@ def ask_questions(req: AskQuestionsReq, db: Session = Depends(get_db)):
 
 
 @router.post("/ask/reply")
-async def ask_reply(req: AskReplyReq, db: Session = Depends(get_db)):
+async def ask_reply(req: AskReplyReq, user: User = Depends(require_learning_user),
+                    db: Session = Depends(get_db)):
+    ensure_lesson_document_access(user, req.lesson_id, db)
     from ..core.context import UnifiedContext
     from ..runtime.orchestrator import route_to_capability
-    from ..models import User
     ctx_text = req.context or _lesson_text(db, req.lesson_id)
     replies_text = json.dumps(req.replies, ensure_ascii=False)
-    # 与 /api/ask 一致：尚无鉴权，先取第一个孩子作占位用户
-    child = db.query(User).filter_by(role="child").first()
     ctx = UnifiedContext(
-        user_id=child.id if child else 0, lesson_id=req.lesson_id,
+        user_id=user.id, lesson_id=req.lesson_id,
         question=f"学生对这些诊断性问题的回答：{replies_text}，请基于回答继续用小学生能懂的话讲解课文，涉及原文某句时在那句后标 [第N句]。",
         text=ctx_text,
         mode="chat",

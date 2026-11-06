@@ -52,7 +52,8 @@ import json
 from fastapi.testclient import TestClient
 from app.main import app
 from app.database import SessionLocal
-from app.models import User, PdfDocument, Lesson, Text, Quiz, ModelConfig
+from app.models import User, PdfDocument, Lesson, Text, Quiz, ModelConfig, UserDocument
+from conftest import make_account, bound_child_headers
 
 client = TestClient(app)
 
@@ -62,43 +63,48 @@ def _seed_lesson():
     for m in (Quiz, Text, Lesson, PdfDocument, User, ModelConfig):
         db.query(m).delete()
     db.commit()
-    u = User(name="孩子", role="child")
-    db.add(u); db.flush()
+    p = make_account(db, "p_qz", "parent")
+    u = make_account(db, "孩子", "child", parent=p)
     doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="")
     db.add(doc); db.flush()
     l = Lesson(document_id=doc.id, subject="语文", title="第1课",
                start_page=1, end_page=2, extract_status="done", audit_status="approved")
     db.add(l); db.flush()
     db.add(Text(lesson_id=l.id, content="白鹭是一首精巧的诗。色素的配合，身段的大小，一切都很适宜。"))
+    db.add(UserDocument(user_id=u.id, document_id=doc.id))
     db.add(ModelConfig(key="ai_provider", value="fake"))
     db.commit()
-    return l.id
+    return l.id, u.id
 
 
 def test_generate_quiz_returns_503_when_ai_unconfigured(setup_db):
-    lid = _seed_lesson()
-    r = client.post("/api/quiz/generate", json={"lesson_id": lid})
+    lid, uid = _seed_lesson()
+    h = bound_child_headers(uid)
+    r = client.post("/api/quiz/generate", json={"lesson_id": lid}, headers=h)
     assert r.status_code == 503
 
 
 def test_submit_quiz_expired_returns_409(setup_db):
-    r = client.post("/api/quiz/submit", json={"quiz_id": 999999, "answers": []})
+    _, uid = _seed_lesson()
+    h = bound_child_headers(uid)
+    r = client.post("/api/quiz/submit", json={"quiz_id": 999999, "answers": []}, headers=h)
     assert r.status_code == 409
 
 
 def test_submit_quiz_ignores_unknown_knowledge_point(setup_db):
     """AI 编造/已删除的知识点 id 不能落进外键列：错题照收，只是不关联知识点。"""
     from app.models import KnowledgeMastery, Mistake
-    lid = _seed_lesson()
+    lid, uid = _seed_lesson()
     db = SessionLocal()
-    uid = db.query(User).first().id
     q = {"id": "q1", "prompt": "白鹭像什么？", "choices": ["诗", "画", "歌", "书"],
          "correct_index": 0, "evidence": "白鹭是一首精巧的诗", "knowledge_point_id": 999}
     quiz = Quiz(lesson_id=lid, user_id=uid, questions=json.dumps([q], ensure_ascii=False))
     db.add(quiz); db.commit(); qid = quiz.id
     db.close()
 
-    r = client.post("/api/quiz/submit", json={"quiz_id": qid, "answers": [{"question_id": "q1", "selected_index": 1}]})
+    h = bound_child_headers(uid)
+    r = client.post("/api/quiz/submit", json={"quiz_id": qid, "answers": [{"question_id": "q1", "selected_index": 1}]},
+                    headers=h)
     assert r.status_code == 200
     assert r.json()["score"] == 0
     db = SessionLocal()

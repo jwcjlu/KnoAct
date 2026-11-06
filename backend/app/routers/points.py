@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from ..core.access import ensure_user_access, require_learning_user, resolve_target_user_id
 from ..database import get_db
-from ..models import Point, Reward
+from ..models import Point, Reward, User
 from ..services.bucket_guard import resolve_bucket_id, assert_writable
 
 router = APIRouter(prefix="/api/points", tags=["points"])
@@ -15,7 +16,9 @@ class RedeemReq(BaseModel):
     minutes: int
 
 @router.get("/balance")
-def balance(user_id: int, bucket_id: int | None = None, db: Session = Depends(get_db)):
+def balance(user_id: int = Depends(resolve_target_user_id),
+            _auth: User = Depends(require_learning_user),
+            bucket_id: int | None = None, db: Session = Depends(get_db)):
     bid = resolve_bucket_id(db, user_id, bucket_id)
     if bid is None:
         return {"balance": 0}
@@ -23,7 +26,9 @@ def balance(user_id: int, bucket_id: int | None = None, db: Session = Depends(ge
     return {"balance": total}
 
 @router.post("/redeem")
-def redeem(req: RedeemReq, bucket_id: int | None = None, db: Session = Depends(get_db)):
+def redeem(req: RedeemReq, user: User = Depends(require_learning_user),
+           bucket_id: int | None = None, db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     assert_writable(db, req.user_id, bucket_id)
     bid = resolve_bucket_id(db, req.user_id, bucket_id)
     if bid is None:

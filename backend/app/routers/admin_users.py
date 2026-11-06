@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..core.deps import require_role
+from ..core.access import ensure_user_access
+from ..core.deps import get_current_user, require_role
 from ..database import get_db
 from ..models import RefreshToken, User
 from ..services.bucket_service import ensure_bucket
@@ -13,7 +14,6 @@ from ..services.user_factory import (
     DuplicateLoginName, UserFactoryError, create_child_user, create_user,
     validate_password,
 )
-from .users import archive_child, unarchive_child
 
 router = APIRouter(
     prefix="/api/admin", tags=["admin"],
@@ -155,12 +155,31 @@ def reset_password(user_id: int, req: ResetPasswordReq, db: Session = Depends(ge
 
 
 @router.post("/users/{user_id}/archive")
-def archive(user_id: int, db: Session = Depends(get_db)):
+def archive(user_id: int, db: Session = Depends(get_db),
+            actor: User = Depends(get_current_user)):
+    """不能直接调 ``users.archive_child``：其签名为 FastAPI 依赖，位置传参会错位。"""
+    if actor.role != "admin":
+        raise _err(403, "forbidden")
     _get_user(db, user_id)
-    return archive_child(user_id, db)
+    child = db.get(User, user_id)
+    if not child:
+        return {"error": "not found"}
+    ensure_user_access(actor, user_id, db)
+    child.status = "archived"
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/users/{user_id}/unarchive")
-def unarchive(user_id: int, db: Session = Depends(get_db)):
+def unarchive(user_id: int, db: Session = Depends(get_db),
+              actor: User = Depends(get_current_user)):
+    if actor.role != "admin":
+        raise _err(403, "forbidden")
     _get_user(db, user_id)
-    return unarchive_child(user_id, db)
+    child = db.get(User, user_id)
+    if not child:
+        return {"error": "not found"}
+    ensure_user_access(actor, user_id, db)
+    child.status = "active"
+    db.commit()
+    return {"ok": True}

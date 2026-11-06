@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from ..core.access import ensure_user_access, require_learning_user, resolve_target_user_id
 from ..database import get_db
+from ..models import User
 from ..models import KnowledgeMastery, KnowledgePoint
 from ..services.mastery import record_attempt as _record
 from ..services.bucket_guard import resolve_bucket_id
@@ -22,7 +24,9 @@ class RecordReq(BaseModel):
 
 
 @router.get("/overview")
-def overview(user_id: int, subject: str = "", bucket_id: int | None = None,
+def overview(user_id: int = Depends(resolve_target_user_id),
+             _auth: User = Depends(require_learning_user),
+             subject: str = "", bucket_id: int | None = None,
              db: Session = Depends(get_db)):
     bid = resolve_bucket_id(db, user_id, bucket_id)
     q = (db.query(KnowledgeMastery, KnowledgePoint)
@@ -44,7 +48,9 @@ def overview(user_id: int, subject: str = "", bucket_id: int | None = None,
 
 
 @router.post("/record")
-def record(req: RecordReq, db: Session = Depends(get_db)):
+def record(req: RecordReq, user: User = Depends(require_learning_user),
+           db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     bid = resolve_bucket_id(db, req.user_id, None)
     mastery = _record(db, req.user_id, req.target_type, req.target_id,
                       req.is_correct, bucket_id=bid)
@@ -52,7 +58,9 @@ def record(req: RecordReq, db: Session = Depends(get_db)):
 
 
 @router.get("/report")
-def report(user_id: int, subject: str = "", bucket_id: int | None = None,
+def report(user_id: int = Depends(resolve_target_user_id),
+           _auth: User = Depends(require_learning_user),
+           subject: str = "", bucket_id: int | None = None,
            db: Session = Depends(get_db)):
     """掌握度报告：已掌握 / 薄弱 / 总数。"""
     bid = resolve_bucket_id(db, user_id, bucket_id)

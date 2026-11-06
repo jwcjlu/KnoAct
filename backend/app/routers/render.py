@@ -3,8 +3,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
+from ..core.deps import get_current_user
 from ..database import get_db
-from ..models import RenderTask
+from ..models import RenderTask, User
 
 router = APIRouter(tags=["render"])
 
@@ -12,7 +13,8 @@ from ..config import RENDER_SERVICE_URL
 
 
 @router.get("/api/render/{task_id}")
-def render_status(task_id: str, db: Session = Depends(get_db)):
+def render_status(task_id: str, _auth: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
     row = db.query(RenderTask).filter_by(task_id=task_id).first()
     if row is None:
         raise HTTPException(404, "任务不存在")
@@ -42,7 +44,7 @@ def render_status(task_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/render_media/{path:path}")
-def render_media(path: str):
+def render_media(path: str, _auth: User = Depends(get_current_user)):
     """把渲染服务的媒体文件代理给前端（前端不直连渲染服务）。"""
     # 防路径穿越：拒绝 .. 和绝对路径，只允许 MEDIA_DIR 内的相对路径
     if ".." in path or path.startswith("/") or "\\" in path:

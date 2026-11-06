@@ -107,7 +107,7 @@ class RegisterReq(BaseModel):
 class LoginReq(BaseModel):
     login_name: str | None = None
     password: str | None = None
-    # 旧版按名字登录（仅 KNOACT_LEGACY_NAME_LOGIN=1 时生效）
+    # 旧版 student-app Web 仅传 name；见 login() 兼容逻辑
     name: str | None = None
     role: str = "child"
 
@@ -170,6 +170,17 @@ def register(req: RegisterReq, db: Session = Depends(get_db)):
     return _issue_tokens(db, user)
 
 
+def _normalize_login_req(req: LoginReq) -> LoginReq:
+    """旧 Web 包只传 name → 映射 login_name，并尝试迁移默认密码。"""
+    login_name = (req.login_name or req.name or "").strip()
+    password = req.password
+    if login_name and password is None and req.name and not req.login_name:
+        password = os.environ.get("KNOACT_LEGACY_DEFAULT_PASSWORD", "ChangeMe123")
+    if login_name != req.login_name or password != req.password:
+        return LoginReq(login_name=login_name or None, password=password, name=req.name, role=req.role)
+    return req
+
+
 @router.post("/login")
 def login(req: LoginReq, db: Session = Depends(get_db)):
     if _legacy_enabled() and req.name and not req.login_name:
@@ -181,10 +192,13 @@ def login(req: LoginReq, db: Session = Depends(get_db)):
             db.add(user); db.commit(); db.refresh(user)
         return {"id": user.id, "name": user.name, "role": user.role}
 
+    req = _normalize_login_req(req)
     if not req.login_name or req.password is None:
         raise _bad_request("invalid_credentials", 401)
     user = _find_active(db, req.login_name)
     if not user or not user.password_hash or not verify_password(req.password, user.password_hash):
+        if req.name and not user:
+            raise _bad_request("please_register", 401)
         raise _bad_request("invalid_credentials", 401)
     _check_status(user)
     return _issue_tokens(db, user)

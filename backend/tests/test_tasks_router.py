@@ -48,6 +48,15 @@ def _h(uid):
         db.close()
 
 
+def _parent_h(uid):
+    db = SessionLocal()
+    try:
+        child = db.get(User, uid)
+        return auth_headers(db.get(User, child.parent_id))
+    finally:
+        db.close()
+
+
 def test_list_tasks_published_only_for_child():
     uid = _seed()
     generate_tasks_for_user(SessionLocal(), uid, date.today())
@@ -63,7 +72,7 @@ def test_approve_then_child_sees_task():
     task = db.query(Task).filter_by(user_id=uid, date=date.today()).first()
     tid = task.id
     db.close()
-    assert client.post(f"/api/tasks/{tid}/approve").json() == {"ok": True}
+    assert client.post(f"/api/tasks/{tid}/approve", headers=_parent_h(uid)).json() == {"ok": True}
     r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=child", headers=_h(uid))
     assert len(r.json()) >= 1
 
@@ -85,11 +94,11 @@ def test_list_tasks_filters_by_bucket_id():
     db.close()
 
     # 按历史桶过滤只返回该桶任务
-    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b1id}", headers=_h(uid))
+    r = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b1id}", headers=_parent_h(uid))
     titles = [t["title"] for t in r.json()]
     assert titles == ["历史桶任务"]
 
-    r2 = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b2id}", headers=_h(uid))
+    r2 = client.get(f"/api/tasks?user_id={uid}&date={date.today()}&role=parent&bucket_id={b2id}", headers=_parent_h(uid))
     titles2 = [t["title"] for t in r2.json()]
     assert titles2 == ["当前桶任务"]
 
@@ -99,11 +108,11 @@ def test_add_custom_task_and_confirm_awards_points():
     r = client.post("/api/tasks", json={
         "user_id": uid, "date": str(date.today()), "task_type": "custom",
         "title": "读一页书", "points": 30,
-    })
+    }, headers=_parent_h(uid))
     assert r.status_code == 200
     tid = r.json()["id"]
     assert client.post(f"/api/tasks/{tid}/submit", headers=_h(uid)).json() == {"ok": True}
-    assert client.post(f"/api/tasks/{tid}/confirm").json()["ok"] is True
+    assert client.post(f"/api/tasks/{tid}/confirm", headers=_parent_h(uid)).json()["ok"] is True
     db = SessionLocal()
     pts = db.query(Point).filter_by(user_id=uid).all()
     assert len(pts) == 1
@@ -116,11 +125,12 @@ def test_double_confirm_awards_only_one_point():
     r = client.post("/api/tasks", json={
         "user_id": uid, "date": str(date.today()), "task_type": "custom",
         "title": "读一页书", "points": 30,
-    })
+    }, headers=_parent_h(uid))
     tid = r.json()["id"]
     client.post(f"/api/tasks/{tid}/submit", headers=_h(uid))
-    first = client.post(f"/api/tasks/{tid}/confirm").json()
-    second = client.post(f"/api/tasks/{tid}/confirm").json()
+    ph = _parent_h(uid)
+    first = client.post(f"/api/tasks/{tid}/confirm", headers=ph).json()
+    second = client.post(f"/api/tasks/{tid}/confirm", headers=ph).json()
     assert first["ok"] is True
     assert second["ok"] is True
     assert second.get("already") is True
@@ -136,10 +146,10 @@ def test_submit_after_confirm_does_not_downgrade():
     r = client.post("/api/tasks", json={
         "user_id": uid, "date": str(date.today()), "task_type": "custom",
         "title": "读一页书", "points": 30,
-    })
+    }, headers=_parent_h(uid))
     tid = r.json()["id"]
     client.post(f"/api/tasks/{tid}/submit", headers=_h(uid))
-    client.post(f"/api/tasks/{tid}/confirm")
+    client.post(f"/api/tasks/{tid}/confirm", headers=_parent_h(uid))
     # 已 approved，再 submit 不应降级回 submitted
     assert client.post(f"/api/tasks/{tid}/submit", headers=_h(uid)).json() == {"ok": True}
     db = SessionLocal()
@@ -153,9 +163,9 @@ def test_confirm_unsubmitted_task_is_refused():
     r = client.post("/api/tasks", json={
         "user_id": uid, "date": str(date.today()), "task_type": "custom",
         "title": "读一页书",
-    })
+    }, headers=_parent_h(uid))
     tid = r.json()["id"]
-    resp = client.post(f"/api/tasks/{tid}/confirm").json()
+    resp = client.post(f"/api/tasks/{tid}/confirm", headers=_parent_h(uid)).json()
     assert resp["ok"] is False
     db = SessionLocal()
     t = db.get(Task, tid)
@@ -170,11 +180,12 @@ def test_upload_photo_rejects_unsupported_ext():
     r = client.post("/api/tasks", json={
         "user_id": uid, "date": str(date.today()), "task_type": "custom",
         "title": "读一页书",
-    })
+    }, headers=_parent_h(uid))
     tid = r.json()["id"]
     resp = client.post(
         f"/api/tasks/{tid}/upload-photo",
         files={"file": ("bad.txt", b"hello", "text/plain")},
+        headers=_h(uid),
     )
     assert resp.json() == {"ok": False, "error": "unsupported file type"}
 
@@ -190,7 +201,7 @@ def _make_knowledge_task(uid, kp_id, content_extra=None):
     r = client.post("/api/tasks", json={
         "user_id": uid, "date": str(date.today()), "task_type": "knowledge", "title": "基础知识",
         "content": json.dumps([point], ensure_ascii=False),
-    })
+    }, headers=_parent_h(uid))
     return r.json()["id"]
 
 
@@ -206,7 +217,8 @@ def test_knowledge_review_grade_records_mastery():
 
     # 关键词命中的答案 → 判对，落掌握度
     d = client.post(f"/api/tasks/{tid}/knowledge-review",
-                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "白鹭是鸟，白露是节气"}]}).json()
+                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "白鹭是鸟，白露是节气"}]},
+                    headers=_h(uid)).json()
     assert d["ok"] is True
     assert d["correct"] == 1
     assert d["total"] == 1
@@ -235,7 +247,8 @@ def test_knowledge_review_wrong_answer_records_false():
     tid = _make_knowledge_task(uid, kp_id)
 
     d = client.post(f"/api/tasks/{tid}/knowledge-review",
-                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "不知道"}]}).json()
+                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "不知道"}]},
+                    headers=_h(uid)).json()
     assert d["ok"] is True
     assert d["results"][0]["is_correct"] is False
 
@@ -259,5 +272,6 @@ def test_knowledge_review_refused_after_approval():
     db.close()
 
     d = client.post(f"/api/tasks/{tid}/knowledge-review",
-                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "白鹭是鸟"}]}).json()
+                    json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "白鹭是鸟"}]},
+                    headers=_h(uid)).json()
     assert d["ok"] is False

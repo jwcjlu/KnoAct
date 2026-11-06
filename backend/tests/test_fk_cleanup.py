@@ -7,11 +7,13 @@ from fastapi.testclient import TestClient
 from app.database import SessionLocal
 from app.models import (
     Annotation, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson, Mistake, Note,
-    PdfDocument, PdfPage, Question, Quiz, Text, Textbook, ToolCall, Turn, WordBank, WordMastery,
+    PdfDocument, PdfPage, Question, Quiz, Text, Textbook, ToolCall, Turn, UserDocument, WordBank,
+    WordMastery,
 )
 from app.routers.knowledge import router as knowledge_router
 from app.routers.pdf import router as pdf_router
-from conftest import make_user, make_document, make_lesson
+from app.models import User
+from conftest import auth_headers, make_account, make_document, make_lesson
 
 
 def _client(router):
@@ -23,10 +25,12 @@ def _client(router):
 def _seed(storage_path=""):
     """一份教材一课，课下生词/知识点各一，并让各类行引用它们。返回 id 字典。"""
     s = SessionLocal()
-    uid = make_user(s).id
+    parent = make_account(s, "p_fk", "parent")
+    uid = make_account(s, "kid_fk", "child", parent=parent).id
     doc = make_document(s, storage_path=storage_path)
     lesson = make_lesson(s, document=doc, extract_status="done", audit_status="approved")
     lid = lesson.id
+    s.add(UserDocument(user_id=uid, document_id=doc.id))
     wb = WordBank(lesson_id=lid, subject="语文", word="白鹭", extra="bái lù")
     kp = KnowledgePoint(lesson_id=lid, subject="语文", category="修辞", content="比喻")
     s.add_all([wb, kp]); s.flush()
@@ -50,7 +54,7 @@ def _seed(storage_path=""):
     s.add(turn); s.flush()
     s.add(ToolCall(turn_id=turn.id, step=1, tool_name="lookup_word"))
     s.commit()
-    ids = {"uid": uid, "doc": doc.id, "lesson": lid, "wb": wb.id, "kp": kp.id, "turn": turn.id}
+    ids = {"uid": uid, "parent_id": parent.id, "doc": doc.id, "lesson": lid, "wb": wb.id, "kp": kp.id, "turn": turn.id}
     s.close()
     return ids
 
@@ -113,7 +117,10 @@ def test_resplit_document_purges_lessons_and_references(setup_db, monkeypatch, t
         {"title": "新第2课", "start_page": 3, "end_page": 4},
     ])
 
-    resp = _client(pdf_router).post(f"/api/pdf/documents/{ids['doc']}/resplit")
+    s = SessionLocal()
+    h = auth_headers(s.get(User, ids["parent_id"]))
+    s.close()
+    resp = _client(pdf_router).post(f"/api/pdf/documents/{ids['doc']}/resplit", headers=h)
     assert resp.status_code == 200
     assert resp.json() == {"lessons": 2}
 
@@ -131,7 +138,10 @@ def test_delete_document_purges_lessons_and_references(setup_db, monkeypatch, tm
     # 页面目录按相对路径 uploads/{id}_pages 拼，别误删开发库里的真实页面
     monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: None)
 
-    resp = _client(pdf_router).delete(f"/api/pdf/documents/{ids['doc']}")
+    s = SessionLocal()
+    h = auth_headers(s.get(User, ids["parent_id"]))
+    s.close()
+    resp = _client(pdf_router).delete(f"/api/pdf/documents/{ids['doc']}", headers=h)
     assert resp.status_code == 200
     assert resp.json() == {"ok": True, "deleted": ids["doc"]}
 
@@ -146,7 +156,10 @@ def test_delete_document_purges_lessons_and_references(setup_db, monkeypatch, tm
 
 def test_delete_knowledge_point_detaches_references(setup_db):
     ids = _seed()
-    resp = _client(knowledge_router).delete(f"/api/knowledge/{ids['kp']}")
+    s = SessionLocal()
+    h = auth_headers(s.get(User, ids["parent_id"]))
+    s.close()
+    resp = _client(knowledge_router).delete(f"/api/knowledge/{ids['kp']}", headers=h)
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 

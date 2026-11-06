@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from ..core.access import require_learning_user
+from ..core.deps import get_current_user, require_role
 from ..database import get_db
-from ..models import Question, Lesson, Text
+from ..models import Question, Lesson, Text, User
 from ..services.question_gen import generate_reading_questions
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
@@ -23,13 +25,15 @@ class AddReq(BaseModel):
 
 
 @router.get("")
-def list_questions(lesson_id: int, db: Session = Depends(get_db)):
+def list_questions(lesson_id: int, _auth: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
     qs = db.query(Question).filter_by(lesson_id=lesson_id).order_by(Question.id).all()
     return [{"id": q.id, "qtype": q.qtype, "question": q.question, "answer": q.answer} for q in qs]
 
 
 @router.post("/generate")
-def regenerate_questions(req: GenerateReq, db: Session = Depends(get_db)):
+def regenerate_questions(req: GenerateReq, _auth: User = Depends(require_role("parent", "admin")),
+                         db: Session = Depends(get_db)):
     t = db.query(Text).filter_by(lesson_id=req.lesson_id).first()
     if not t or not t.content.strip():
         raise HTTPException(status_code=404, detail="该课暂无课文，无法出题")
@@ -43,7 +47,8 @@ def regenerate_questions(req: GenerateReq, db: Session = Depends(get_db)):
 
 
 @router.post("")
-def add_question(req: AddReq, db: Session = Depends(get_db)):
+def add_question(req: AddReq, _auth: User = Depends(require_role("parent", "admin")),
+                 db: Session = Depends(get_db)):
     question = req.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="题目内容不能为空")
@@ -55,7 +60,8 @@ def add_question(req: AddReq, db: Session = Depends(get_db)):
 
 
 @router.delete("/{question_id}")
-def delete_question(question_id: int, db: Session = Depends(get_db)):
+def delete_question(question_id: int, _auth: User = Depends(require_role("parent", "admin")),
+                    db: Session = Depends(get_db)):
     q = db.get(Question, question_id)
     if not q:
         raise HTTPException(status_code=404, detail="题目不存在")
@@ -65,7 +71,9 @@ def delete_question(question_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/review")
-def review_questions(d: date_type, subject: str = "", db: Session = Depends(get_db)):
+def review_questions(d: date_type, subject: str = "",
+                     _auth: User = Depends(require_role("parent", "admin")),
+                     db: Session = Depends(get_db)):
     """待审核题目，按学科→课程分组。"""
     q = db.query(Question).filter(Question.status == "pending")
     if d:
@@ -90,7 +98,8 @@ def review_questions(d: date_type, subject: str = "", db: Session = Depends(get_
 
 
 @router.post("/{question_id}/approve")
-def approve_question(question_id: int, db: Session = Depends(get_db)):
+def approve_question(question_id: int, _auth: User = Depends(require_role("parent", "admin")),
+                     db: Session = Depends(get_db)):
     q = db.get(Question, question_id)
     if not q:
         raise HTTPException(status_code=404, detail="题目不存在")
@@ -100,7 +109,8 @@ def approve_question(question_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{question_id}/reject")
-def reject_question(question_id: int, db: Session = Depends(get_db)):
+def reject_question(question_id: int, _auth: User = Depends(require_role("parent", "admin")),
+                    db: Session = Depends(get_db)):
     q = db.get(Question, question_id)
     if not q:
         raise HTTPException(status_code=404, detail="题目不存在")
@@ -110,7 +120,9 @@ def reject_question(question_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/approve-by-lesson")
-def approve_by_lesson(lesson_id: int, d: date_type, db: Session = Depends(get_db)):
+def approve_by_lesson(lesson_id: int, d: date_type,
+                      _auth: User = Depends(require_role("parent", "admin")),
+                      db: Session = Depends(get_db)):
     db.query(Question).filter_by(lesson_id=lesson_id, date=d, status="pending").update(
         {"status": "published"}, synchronize_session=False)
     db.commit()
@@ -118,7 +130,9 @@ def approve_by_lesson(lesson_id: int, d: date_type, db: Session = Depends(get_db
 
 
 @router.post("/approve-by-subject")
-def approve_by_subject(subject: str, d: date_type, db: Session = Depends(get_db)):
+def approve_by_subject(subject: str, d: date_type,
+                       _auth: User = Depends(require_role("parent", "admin")),
+                       db: Session = Depends(get_db)):
     db.query(Question).filter_by(subject=subject, date=d, status="pending").update(
         {"status": "published"}, synchronize_session=False)
     db.commit()

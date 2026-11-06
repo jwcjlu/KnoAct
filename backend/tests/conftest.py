@@ -86,6 +86,42 @@ def make_account(session, login_name, role="child", parent=None):
     return u
 
 
+def parent_child(session, prefix="pc"):
+    """家长 + 已绑定孩子，返回 (parent, child, parent_h, child_h)。"""
+    parent = make_account(session, f"{prefix}_parent", "parent")
+    child = make_account(session, f"{prefix}_child", "child", parent=parent)
+    return parent, child, auth_headers(parent), auth_headers(child)
+
+
+def bound_pair(session, prefix="bp"):
+    """同一家长下两个孩子 + 家长；返回 (parent, child_a, child_b, parent_h, child_a_h, child_b_h)。"""
+    parent = make_account(session, f"{prefix}_parent", "parent")
+    a = make_account(session, f"{prefix}_a", "child", parent=parent)
+    b = make_account(session, f"{prefix}_b", "child", parent=parent)
+    return parent, a, b, auth_headers(parent), auth_headers(a), auth_headers(b)
+
+
+def bound_parent_headers(child_id):
+    """确保孩子已绑定家长，返回家长的 Bearer 头（家长代操作 PUT / 列表等）。"""
+    from app.models import User
+    s = SessionLocal()
+    try:
+        child = s.get(User, child_id)
+        if child is None:
+            raise ValueError(f"no user {child_id}")
+        if child.parent_id is None:
+            parent = User(name=f"parent_of_{child_id}", role="parent")
+            s.add(parent)
+            s.flush()
+            child.parent_id = parent.id
+            s.commit()
+        else:
+            parent = s.get(User, child.parent_id)
+        return auth_headers(parent)
+    finally:
+        s.close()
+
+
 def bound_child_headers(user_id):
     """给已存在的孩子建一个家长并绑定，返回孩子的 Bearer 头（通过 parent_required 校验）。"""
     from app.models import User

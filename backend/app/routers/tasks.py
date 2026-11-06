@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..core.access import require_learning_user
+from ..core.access import ensure_user_access, require_learning_user, resolve_target_user_id
+from ..core.deps import require_role
 from ..database import get_db
 from ..models import Task, Point, User
 from ..services.task_gen import generate_tasks_for_user
@@ -61,7 +62,8 @@ def _to_dict(t: Task) -> dict:
 
 
 @router.get("")
-def list_tasks(user_id: int, date: date, role: str = "child", bucket_id: int | None = None,
+def list_tasks(date: date, role: str = "child", bucket_id: int | None = None,
+               user_id: int = Depends(resolve_target_user_id),
                _user: User = Depends(require_learning_user), db: Session = Depends(get_db)):
     from ..services.bucket_guard import resolve_bucket_id
     bid = resolve_bucket_id(db, user_id, bucket_id)
@@ -75,14 +77,19 @@ def list_tasks(user_id: int, date: date, role: str = "child", bucket_id: int | N
 
 
 @router.post("/generate")
-def generate(user_id: int, d: date, force: bool = False, db: Session = Depends(get_db)):
+def generate(user_id: int, d: date, force: bool = False,
+             user: User = Depends(require_role("parent", "admin")),
+             db: Session = Depends(get_db)):
     """手动生成当天任务。默认补缺失（幂等），force=true 覆盖重生成。"""
+    ensure_user_access(user, user_id, db)
     generate_tasks_for_user(db, user_id, d, force=force)
     return {"ok": True}
 
 
 @router.post("/approve-all")
-def approve_all(req: ApproveAllReq, db: Session = Depends(get_db)):
+def approve_all(req: ApproveAllReq, user: User = Depends(require_role("parent", "admin")),
+                db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     db.query(Task).filter_by(user_id=req.user_id, date=req.date, content_status="pending_review").update(
         {"content_status": "published"}, synchronize_session=False
     )
@@ -91,10 +98,12 @@ def approve_all(req: ApproveAllReq, db: Session = Depends(get_db)):
 
 
 @router.post("/{task_id}/approve")
-def approve(task_id: int, db: Session = Depends(get_db)):
+def approve(task_id: int, user: User = Depends(require_role("parent", "admin")),
+            db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
+    ensure_user_access(user, t.user_id, db)
     if t.content_status == "pending_review":
         t.content_status = "published"
         db.commit()
@@ -102,10 +111,12 @@ def approve(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{task_id}")
-def edit_task(task_id: int, req: EditReq, db: Session = Depends(get_db)):
+def edit_task(task_id: int, req: EditReq, user: User = Depends(require_role("parent", "admin")),
+              db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
+    ensure_user_access(user, t.user_id, db)
     if req.title:
         t.title = req.title
     if req.detail:
@@ -117,17 +128,21 @@ def edit_task(task_id: int, req: EditReq, db: Session = Depends(get_db)):
 
 
 @router.delete("/{task_id}")
-def delete_task(task_id: int, db: Session = Depends(get_db)):
+def delete_task(task_id: int, user: User = Depends(require_role("parent", "admin")),
+                db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
+    ensure_user_access(user, t.user_id, db)
     db.delete(t)
     db.commit()
     return {"ok": True}
 
 
 @router.post("")
-def add_task(req: AddReq, db: Session = Depends(get_db)):
+def add_task(req: AddReq, user: User = Depends(require_role("parent", "admin")),
+             db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     t = Task(
         user_id=req.user_id,
         date=req.date,
@@ -146,11 +161,12 @@ def add_task(req: AddReq, db: Session = Depends(get_db)):
 
 
 @router.post("/{task_id}/submit")
-def submit(task_id: int, _user: User = Depends(require_learning_user),
+def submit(task_id: int, user: User = Depends(require_learning_user),
            db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
+    ensure_user_access(user, t.user_id, db)
     if t.submit_status != "approved":
         t.submit_status = "submitted"
         db.commit()
@@ -158,14 +174,18 @@ def submit(task_id: int, _user: User = Depends(require_learning_user),
 
 
 @router.post("/{task_id}/knowledge-review")
-def knowledge_review(task_id: int, req: KnowledgeReviewReq, db: Session = Depends(get_db)):
+def knowledge_review(task_id: int, req: KnowledgeReviewReq,
+                     user: User = Depends(require_learning_user),
+                     db: Session = Depends(get_db)):
     """基础知识任务：孩子逐题简答，混合判分，落知识点掌握度，然后提交待家长确认。"""
     from ..services.mastery import record_attempt
     from ..services.knowledge_quiz import grade_knowledge_answer
     from ..services.bucket_guard import resolve_bucket_id
+    ensure_user_access(user, req.user_id, db)
     t = db.get(Task, task_id)
     if not t or t.task_type != "knowledge":
         return {"ok": False, "error": "任务不存在"}
+    ensure_user_access(user, t.user_id, db)
     if t.submit_status == "approved":
         return {"ok": False, "error": "家长已确认，不能再修改"}
     try:
@@ -195,10 +215,13 @@ def knowledge_review(task_id: int, req: KnowledgeReviewReq, db: Session = Depend
 
 
 @router.post("/{task_id}/upload-photo")
-async def upload_photo(task_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_photo(task_id: int, file: UploadFile = File(...),
+                       user: User = Depends(require_learning_user),
+                       db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
+    ensure_user_access(user, t.user_id, db)
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXT:
         return {"ok": False, "error": "unsupported file type"}
@@ -215,10 +238,12 @@ async def upload_photo(task_id: int, file: UploadFile = File(...), db: Session =
 
 
 @router.post("/{task_id}/confirm")
-def confirm(task_id: int, db: Session = Depends(get_db)):
+def confirm(task_id: int, user: User = Depends(require_role("parent", "admin")),
+            db: Session = Depends(get_db)):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
+    ensure_user_access(user, t.user_id, db)
     if t.submit_status == "approved":
         return {"ok": True, "points": t.points, "already": True}
     if t.submit_status != "submitted":

@@ -2,8 +2,13 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.database import SessionLocal
 from app.models import User, WordBank, Lesson, PdfDocument, Mistake
+from conftest import bound_child_headers
 
 client = TestClient(app)
+
+
+def _h(uid):
+    return bound_child_headers(uid)
 
 
 def _seed():
@@ -11,7 +16,9 @@ def _seed():
     for m in (Mistake, WordBank, Lesson, PdfDocument, User):
         db.query(m).delete()
     db.commit()
-    u = User(name="孩子", role="child")
+    parent = User(name="家长", role="parent")
+    db.add(parent); db.flush()
+    u = User(name="孩子", role="child", parent_id=parent.id)
     db.add(u); db.flush()
     doc = PdfDocument(filename="y.pdf", subject="语文", storage_path="")
     db.add(doc); db.flush()
@@ -32,11 +39,11 @@ def test_mark_correct_with_word_id_removes_only_after_gate(setup_db):
     db.add(m); db.commit(); mid = m.id
     db.close()
 
-    r1 = client.post(f"/api/mistakes/{mid}/correct").json()
+    r1 = client.post(f"/api/mistakes/{mid}/correct", headers=_h(uid)).json()
     assert r1["removed"] is False   # 0.5 未达标
-    r2 = client.post(f"/api/mistakes/{mid}/correct").json()
+    r2 = client.post(f"/api/mistakes/{mid}/correct", headers=_h(uid)).json()
     assert r2["removed"] is False   # 0.8 未达标
-    r3 = client.post(f"/api/mistakes/{mid}/correct").json()
+    r3 = client.post(f"/api/mistakes/{mid}/correct", headers=_h(uid)).json()
     assert r3["removed"] is True    # 1.0 达标
 
     db = SessionLocal()
@@ -52,9 +59,9 @@ def test_mark_correct_without_id_uses_legacy_threshold(setup_db):
     db.add(m); db.commit(); mid = m.id
     db.close()
 
-    client.post(f"/api/mistakes/{mid}/correct")
-    client.post(f"/api/mistakes/{mid}/correct")
-    r3 = client.post(f"/api/mistakes/{mid}/correct").json()
+    client.post(f"/api/mistakes/{mid}/correct", headers=_h(uid))
+    client.post(f"/api/mistakes/{mid}/correct", headers=_h(uid))
+    r3 = client.post(f"/api/mistakes/{mid}/correct", headers=_h(uid)).json()
     assert r3["removed"] is True    # 旧逻辑：连续 3 次
 
 
@@ -109,7 +116,7 @@ def test_mark_correct_updates_same_bucketed_mastery(setup_db):
     db.add(m); db.commit(); mid = m.id
     db.close()
 
-    client.post(f"/api/mistakes/{mid}/correct")
+    client.post(f"/api/mistakes/{mid}/correct", headers=_h(uid))
 
     db = SessionLocal()
     # 桶内行被更新，且不存在 NULL 命名空间的散行

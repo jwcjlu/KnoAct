@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from ..core.deps import require_role
+from ..core.access import ensure_user_access
+from ..core.deps import get_current_user, require_role
 from ..database import get_db
 from ..models import User
 
@@ -13,13 +14,19 @@ children_router = APIRouter(prefix="/api/children", tags=["children"])
 
 @router.get("")
 def list_users(role: str | None = None, parent_id: int | None = None,
-               include_archived: int = 0, db: Session = Depends(get_db)):
+               include_archived: int = 0,
+               user: User = Depends(require_role("parent", "admin")),
+               db: Session = Depends(get_db)):
     """用户列表（家长端选择孩子用）：可按 role / parent_id 过滤，按 id 升序。"""
     q = db.query(User)
     if role:
         q = q.filter_by(role=role)
     if parent_id is not None:
+        if user.role == "parent" and parent_id != user.id:
+            raise HTTPException(status_code=403, detail={"error": "forbidden"})
         q = q.filter_by(parent_id=parent_id)
+    elif user.role == "parent":
+        q = q.filter_by(parent_id=user.id)
     if not include_archived:
         q = q.filter(User.status != "archived")
     return [{"id": u.id, "name": u.name, "role": u.role, "grade": u.grade, "edition": u.edition, "status": u.status}
@@ -48,7 +55,11 @@ def create_child(req: CreateChildReq, user: User = Depends(require_role("parent"
 
 
 @children_router.post("/{child_id}/promote")
-def promote_child(child_id: int, db: Session = Depends(get_db)):
+def promote_child(child_id: int, user: User = Depends(require_role("parent", "admin")),
+                  db: Session = Depends(get_db)):
+    child = db.get(User, child_id)
+    if child:
+        ensure_user_access(user, child_id, db)
     from ..services.bucket_service import promote_grade
     promote_grade(db, child_id)
     child = db.get(User, child_id)
@@ -62,10 +73,13 @@ class UpdateChildReq(BaseModel):
 
 
 @children_router.put("/{child_id}")
-def update_child(child_id: int, req: UpdateChildReq, db: Session = Depends(get_db)):
+def update_child(child_id: int, req: UpdateChildReq,
+                 user: User = Depends(require_role("parent", "admin")),
+                 db: Session = Depends(get_db)):
     child = db.get(User, child_id)
     if not child:
         return {"error": "not found"}
+    ensure_user_access(user, child_id, db)
     if req.name is not None:
         child.name = req.name
     if req.edition is not None:
@@ -81,27 +95,33 @@ def update_child(child_id: int, req: UpdateChildReq, db: Session = Depends(get_d
 
 
 @children_router.post("/{child_id}/archive")
-def archive_child(child_id: int, db: Session = Depends(get_db)):
+def archive_child(child_id: int, user: User = Depends(require_role("parent", "admin")),
+                  db: Session = Depends(get_db)):
     child = db.get(User, child_id)
     if not child:
         return {"error": "not found"}
+    ensure_user_access(user, child_id, db)
     child.status = "archived"
     db.commit()
     return {"ok": True}
 
 
 @children_router.post("/{child_id}/unarchive")
-def unarchive_child(child_id: int, db: Session = Depends(get_db)):
+def unarchive_child(child_id: int, user: User = Depends(require_role("parent", "admin")),
+                    db: Session = Depends(get_db)):
     child = db.get(User, child_id)
     if not child:
         return {"error": "not found"}
+    ensure_user_access(user, child_id, db)
     child.status = "active"
     db.commit()
     return {"ok": True}
 
 
 @children_router.get("/{child_id}/documents")
-def child_documents(child_id: int, db: Session = Depends(get_db)):
+def child_documents(child_id: int, user: User = Depends(require_role("parent", "admin")),
+                    db: Session = Depends(get_db)):
+    ensure_user_access(user, child_id, db)
     from ..models import UserDocument, PdfDocument
     bound = db.query(UserDocument.document_id).filter_by(user_id=child_id)
     docs = db.query(PdfDocument).filter(PdfDocument.id.in_(bound)).all()

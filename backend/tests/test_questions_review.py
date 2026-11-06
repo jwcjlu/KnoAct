@@ -3,12 +3,17 @@ from datetime import date
 from fastapi.testclient import TestClient
 from app.main import app
 from app.database import SessionLocal
-from app.models import PdfDocument, Lesson, Question
+from app.models import PdfDocument, Lesson, Question, User
+from conftest import auth_headers, make_account
+
+client = TestClient(app)
 
 
 def _seed_questions():
     """造 2 道 pending 题目（不同学科），各属一个 lesson。"""
     db = SessionLocal()
+    parent = make_account(db, "p_qr", "parent")
+    db.commit()
     doc_math = PdfDocument(filename="math.pdf", subject="数学", storage_path="")
     doc_cn = PdfDocument(filename="cn.pdf", subject="语文", storage_path="")
     db.add_all([doc_math, doc_cn])
@@ -27,13 +32,22 @@ def _seed_questions():
     db.add_all([q1, q2])
     db.commit()
     ids = (q1.id, q2.id)
+    pid = parent.id
     db.close()
-    return ids, today
+    return ids, today, pid
+
+
+def _ph(pid):
+    s = SessionLocal()
+    h = auth_headers(s.get(User, pid))
+    s.close()
+    return h
 
 
 def test_review_groups_by_subject_and_lesson(client, setup_db):
-    ids, today = _seed_questions()
-    r = client.get(f"/api/questions/review?d={today.isoformat()}")
+    ids, today, pid = _seed_questions()
+    h = _ph(pid)
+    r = client.get(f"/api/questions/review?d={today.isoformat()}", headers=h)
     assert r.status_code == 200
     groups = r.json()["groups"]
     subjects = {g["subject"] for g in groups}
@@ -47,8 +61,9 @@ def test_review_groups_by_subject_and_lesson(client, setup_db):
 
 
 def test_review_filters_by_subject(client, setup_db):
-    ids, today = _seed_questions()
-    r = client.get(f"/api/questions/review?d={today.isoformat()}&subject=数学")
+    ids, today, pid = _seed_questions()
+    h = _ph(pid)
+    r = client.get(f"/api/questions/review?d={today.isoformat()}&subject=数学", headers=h)
     assert r.status_code == 200
     groups = r.json()["groups"]
     assert len(groups) == 1
@@ -57,8 +72,9 @@ def test_review_filters_by_subject(client, setup_db):
 
 
 def test_approve_question(client, setup_db):
-    ids, _ = _seed_questions()
-    r = client.post(f"/api/questions/{ids[0]}/approve")
+    ids, _, pid = _seed_questions()
+    h = _ph(pid)
+    r = client.post(f"/api/questions/{ids[0]}/approve", headers=h)
     assert r.status_code == 200
     assert r.json()["ok"] is True
     db = SessionLocal()
@@ -68,8 +84,9 @@ def test_approve_question(client, setup_db):
 
 
 def test_reject_question(client, setup_db):
-    ids, _ = _seed_questions()
-    r = client.post(f"/api/questions/{ids[0]}/reject")
+    ids, _, pid = _seed_questions()
+    h = _ph(pid)
+    r = client.post(f"/api/questions/{ids[0]}/reject", headers=h)
     assert r.status_code == 200
     assert r.json()["ok"] is True
     db = SessionLocal()
@@ -79,18 +96,22 @@ def test_reject_question(client, setup_db):
 
 
 def test_approve_missing_question_404(client, setup_db):
-    r = client.post("/api/questions/99999/approve")
+    _, _, pid = _seed_questions()
+    h = _ph(pid)
+    r = client.post("/api/questions/99999/approve", headers=h)
     assert r.status_code == 404
 
 
 def test_approve_by_lesson(client, setup_db):
-    ids, today = _seed_questions()
+    ids, today, pid = _seed_questions()
+    h = _ph(pid)
     # 数学第1课 -> ids[0] 属 lesson，直接查它的 lesson_id
     db = SessionLocal()
     lesson_id = db.get(Question, ids[0]).lesson_id
     db.close()
     r = client.post("/api/questions/approve-by-lesson",
-                    params={"lesson_id": lesson_id, "d": today.isoformat()})
+                    params={"lesson_id": lesson_id, "d": today.isoformat()},
+                    headers=h)
     assert r.status_code == 200
     db = SessionLocal()
     q = db.get(Question, ids[0])
@@ -99,9 +120,11 @@ def test_approve_by_lesson(client, setup_db):
 
 
 def test_approve_by_subject(client, setup_db):
-    ids, today = _seed_questions()
+    ids, today, pid = _seed_questions()
+    h = _ph(pid)
     r = client.post("/api/questions/approve-by-subject",
-                    params={"subject": "语文", "d": today.isoformat()})
+                    params={"subject": "语文", "d": today.isoformat()},
+                    headers=h)
     assert r.status_code == 200
     db = SessionLocal()
     q = db.get(Question, ids[1])

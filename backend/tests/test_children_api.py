@@ -19,11 +19,18 @@ def _add_user(name, role, **kw):
     return uid
 
 
+def _headers(user_id):
+    s = SessionLocal()
+    h = auth_headers(s.get(User, user_id))
+    s.close()
+    return h
+
+
 def test_list_children_filters_by_parent(setup_db):
     parent = _add_user("金爸爸", "parent")
     c1 = _add_user("晨晨", "child", parent_id=parent, grade=3)
     _add_user("林晨", "child", grade=4)  # 别的家长的孩子
-    resp = _client().get(f"/api/users?role=child&parent_id={parent}")
+    resp = _client().get(f"/api/users?role=child&parent_id={parent}", headers=_headers(parent))
     data = resp.json()
     assert [u["id"] for u in data] == [c1]
 
@@ -39,7 +46,9 @@ def test_create_child_builds_bucket(setup_db):
     assert resp.status_code == 200
     data = resp.json()
     assert data["grade"] == 2
-    buckets = _client().get(f"/api/buckets?user_id={data['id']}").json()
+    buckets = _client().get(
+        f"/api/buckets?user_id={data['id']}", headers=headers,
+    ).json()
     assert any(b["status"] == "active" and b["grade"] == 2 for b in buckets)
 
 
@@ -59,16 +68,16 @@ def test_create_child_requires_own_parent_token(setup_db, client, db):
 
 
 def test_promote_grade_endpoint(setup_db):
-    child = _add_user("晨晨", "child", grade=3)
-    # 真实流程中孩子必有 active 桶（create_child 会 ensure_bucket）；这里补齐前置状态。
+    parent = _add_user("金爸爸", "parent")
+    child = _add_user("晨晨", "child", parent_id=parent, grade=3)
     from app.services.bucket_service import ensure_bucket
     s = SessionLocal()
     ensure_bucket(s, child)
     s.close()
-    resp = _client().post(f"/api/children/{child}/promote")
+    resp = _client().post(f"/api/children/{child}/promote", headers=_headers(parent))
     assert resp.status_code == 200
     assert resp.json()["grade"] == 4
-    buckets = _client().get(f"/api/buckets?user_id={child}").json()
+    buckets = _client().get(f"/api/buckets?user_id={child}", headers=_headers(parent)).json()
     assert any(b["status"] == "archived" and b["grade"] == 3 for b in buckets)
     assert any(b["status"] == "active" and b["grade"] == 4 for b in buckets)
 
@@ -82,9 +91,13 @@ def test_archived_child_login_rejected(setup_db, client, db, monkeypatch):
 
 
 def test_edit_child_updates_fields(setup_db, client, db):
+    parent = User(name="爸", role="parent")
     c = User(name="晨晨", role="child", grade=3, edition="人教")
+    db.add(parent); db.flush()
+    c.parent_id = parent.id
     db.add(c); db.commit()
-    r = client.put(f"/api/children/{c.id}", json={"name": "晨晨2", "grade": 5, "edition": "北师大"})
+    r = client.put(f"/api/children/{c.id}", json={"name": "晨晨2", "grade": 5, "edition": "北师大"},
+                   headers=auth_headers(parent))
     assert r.status_code == 200
     assert r.json()["grade"] == 5
     assert r.json()["edition"] == "北师大"
@@ -92,36 +105,46 @@ def test_edit_child_updates_fields(setup_db, client, db):
 
 
 def test_archive_unarchive_idempotent(setup_db, client, db):
+    parent = User(name="爸", role="parent")
     c = User(name="晨晨", role="child", grade=3)
+    db.add(parent); db.flush()
+    c.parent_id = parent.id
     db.add(c); db.commit()
-    assert client.post(f"/api/children/{c.id}/archive").json() == {"ok": True}
-    assert client.post(f"/api/children/{c.id}/archive").json() == {"ok": True}
+    hp = auth_headers(parent)
+    assert client.post(f"/api/children/{c.id}/archive", headers=hp).json() == {"ok": True}
+    assert client.post(f"/api/children/{c.id}/archive", headers=hp).json() == {"ok": True}
     db.expire_all()
     assert db.get(User, c.id).status == "archived"
-    assert client.post(f"/api/children/{c.id}/unarchive").json() == {"ok": True}
+    assert client.post(f"/api/children/{c.id}/unarchive", headers=hp).json() == {"ok": True}
     db.expire_all()
     assert db.get(User, c.id).status == "active"
 
 
 def test_child_documents_listing(setup_db, client, db):
     from app.models import PdfDocument, UserDocument
+    parent = User(name="爸", role="parent")
     c = User(name="晨晨", role="child", grade=3)
     d = PdfDocument(filename="语文.pdf", subject="语文", storage_path="", grade=3, edition="人教")
+    db.add(parent); db.flush()
+    c.parent_id = parent.id
     db.add_all([c, d]); db.flush()
     db.add(UserDocument(user_id=c.id, document_id=d.id))
     db.commit()
-    r = client.get(f"/api/children/{c.id}/documents").json()
+    r = client.get(f"/api/children/{c.id}/documents", headers=auth_headers(parent)).json()
     assert len(r["documents"]) == 1
     assert r["documents"][0]["filename"] == "语文.pdf"
 
 
 def test_users_include_archived(setup_db, client, db):
+    admin = User(name="root", role="admin")
+    db.add(admin)
     db.add(User(name="活跃", role="child", status="active"))
     db.add(User(name="归档", role="child", status="archived"))
     db.commit()
-    active = client.get("/api/users?role=child").json()
+    ha = auth_headers(admin)
+    active = client.get("/api/users?role=child", headers=ha).json()
     assert all(u["name"] != "归档" for u in active)
-    allu = client.get("/api/users?role=child&include_archived=1").json()
+    allu = client.get("/api/users?role=child&include_archived=1", headers=ha).json()
     assert any(u["name"] == "归档" for u in allu)
 
 

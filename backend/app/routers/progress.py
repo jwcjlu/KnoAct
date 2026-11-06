@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from ..core.access import ensure_user_access, require_learning_user
 from ..database import get_db
-from ..models import LearningProgress, Lesson
+from ..models import LearningProgress, Lesson, User
 
 router = APIRouter(prefix="/api/progress", tags=["progress"])
 
@@ -18,7 +19,9 @@ class AdjustReq(BaseModel):
     subject: str = "语文"
 
 @router.post("/advance")
-def advance(req: AdvanceReq, db: Session = Depends(get_db)):
+def advance(req: AdvanceReq, user: User = Depends(require_learning_user),
+            db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     from ..models import ModelConfig
     row = db.query(ModelConfig).filter_by(key="assignment_pass_threshold").first()
     try:
@@ -47,7 +50,9 @@ def advance(req: AdvanceReq, db: Session = Depends(get_db)):
     return {"passed": passed, "rate": rate}
 
 @router.post("/adjust")
-def adjust(req: AdjustReq, db: Session = Depends(get_db)):
+def adjust(req: AdjustReq, user: User = Depends(require_learning_user),
+           db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     prog = db.query(LearningProgress).filter_by(user_id=req.user_id, subject=req.subject).first()
     if not prog:
         prog = LearningProgress(user_id=req.user_id, subject=req.subject, current_lesson_id=req.lesson_id)

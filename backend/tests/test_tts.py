@@ -37,8 +37,15 @@ def test_tts_endpoint_fake_uses_browser(setup_db):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from app.routers.tts_router import router
+    from app.database import SessionLocal
+    from conftest import make_account, auth_headers
+    s = SessionLocal()
+    u = make_account(s, "u_tts", "child")
+    s.commit()
+    h = auth_headers(u)
+    s.close()
     app = FastAPI()
     app.include_router(router)
-    resp = TestClient(app).get("/api/tts/synthesize?text=徘徊")
+    resp = TestClient(app).get("/api/tts/synthesize?text=徘徊", headers=h)
     assert resp.status_code == 200
     assert resp.json()["use_browser_tts"] is True

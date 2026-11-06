@@ -1,10 +1,15 @@
 import base64 as _base64
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime
-from ..core.access import require_learning_user
+from ..core.access import (
+    ensure_lesson_document_access,
+    ensure_user_access,
+    require_learning_user,
+    resolve_target_user_id,
+)
 from ..database import get_db
 from ..models import Lesson, WordBank, Point, User
 from ..models import KnowledgePoint, Mistake, WordMastery, LearningProgress
@@ -39,7 +44,8 @@ def _cfg_str(db, key, fallback, child_id=None):
 
 
 @router.get("/api/dictation/words")
-def dictation_words(user_id: int, subject: str = "语文",
+def dictation_words(subject: str = "语文",
+                    user_id: int = Depends(resolve_target_user_id),
                     _user: User = Depends(require_learning_user),
                     db: Session = Depends(get_db)):
     # 只取当前课的生词（与 task_gen._current_lesson 口径一致），而非全库所有已审核课
@@ -74,7 +80,11 @@ class GradeReq(BaseModel):
 
 
 @router.post("/api/dictation/grade")
-def dictation_grade(req: GradeReq, db: Session = Depends(get_db)):
+def dictation_grade(req: GradeReq, user: User = Depends(require_learning_user),
+                    db: Session = Depends(get_db)):
+    uid = req.user_id or user.id
+    if req.user_id:
+        ensure_user_access(user, req.user_id, db)
     correct = req.answer.strip() == req.word.strip()
     # 更新掌握度（按词条匹配或 word_id 定位）
     w = None
@@ -85,8 +95,8 @@ def dictation_grade(req: GradeReq, db: Session = Depends(get_db)):
     if w:
         from ..services.mastery import record_attempt as record_mastery
         # user_id 是可空外键：未传（0）时存 NULL
-        bid = resolve_bucket_id(db, req.user_id, None) if req.user_id else None
-        record_mastery(db, req.user_id or None, "word", w.id, correct,
+        bid = resolve_bucket_id(db, uid, None) if uid else None
+        record_mastery(db, uid or None, "word", w.id, correct,
                        bucket_id=bid)
     return {"correct": correct}
 
@@ -102,7 +112,9 @@ class CompleteReq(BaseModel):
     wrong_words: list[WrongWord] = []
 
 @router.post("/api/dictation/complete")
-def dictation_complete(req: CompleteReq, db: Session = Depends(get_db)):
+def dictation_complete(req: CompleteReq, user: User = Depends(require_learning_user),
+                       db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     awarded = max(req.correct * 2, 10)
     bid = resolve_bucket_id(db, req.user_id, None)
     db.add(Point(user_id=req.user_id, delta=awarded, reason="听写打卡",
@@ -120,7 +132,9 @@ def dictation_complete(req: CompleteReq, db: Session = Depends(get_db)):
     return {"points_awarded": awarded, "mistakes_recorded": len(req.wrong_words)}
 
 @router.get("/api/review/questions")
-def review_questions(subject: str, db: Session = Depends(get_db)):
+def review_questions(subject: str, user_id: int = Depends(resolve_target_user_id),
+                     _auth: User = Depends(require_learning_user),
+                     db: Session = Depends(get_db)):
     points = db.query(KnowledgePoint).filter_by(subject=subject).all()
     provider = get_provider(db)
     if not points:
@@ -146,7 +160,9 @@ class ReviewSubmitReq(BaseModel):
     source_type: str = "review"
 
 @router.post("/api/review/submit")
-def review_submit(req: ReviewSubmitReq, db: Session = Depends(get_db)):
+def review_submit(req: ReviewSubmitReq, user: User = Depends(require_learning_user),
+                  db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     if req.your_answer.strip() != req.correct_answer.strip():
         bid = resolve_bucket_id(db, req.user_id, None)
         db.add(Mistake(
@@ -158,7 +174,8 @@ def review_submit(req: ReviewSubmitReq, db: Session = Depends(get_db)):
     return {"ok": True}
 
 @router.get("/api/listening/material")
-def listening_material(user_id: int, _user: User = Depends(require_learning_user),
+def listening_material(user_id: int = Depends(resolve_target_user_id),
+                       _user: User = Depends(require_learning_user),
                        db: Session = Depends(get_db)):
     import json as _json
     from datetime import date as _date
@@ -200,7 +217,13 @@ def listening_material(user_id: int, _user: User = Depends(require_learning_user
     }
 
 @router.get("/api/reading/material")
-def reading_material(lesson_id: int, db: Session = Depends(get_db)):
+def reading_material(lesson_id: int, user_id: int = Depends(resolve_target_user_id),
+                     _auth: User = Depends(require_learning_user),
+                     db: Session = Depends(get_db)):
+    viewer = db.get(User, user_id)
+    if viewer is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    ensure_lesson_document_access(viewer, lesson_id, db)
     from ..models import Text, Question
     from ..services.question_gen import generate_reading_questions
     t = db.query(Text).filter_by(lesson_id=lesson_id).first()
@@ -218,7 +241,10 @@ def reading_material(lesson_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/api/learning/lessons")
-def learning_lessons(user_id: int, subject: str = "语文", db: Session = Depends(get_db)):
+def learning_lessons(subject: str = "语文",
+                     user_id: int = Depends(resolve_target_user_id),
+                     _auth: User = Depends(require_learning_user),
+                     db: Session = Depends(get_db)):
     """个性化学习选课列表：返回该学科所有课（含教材来源、当前进度标记）。"""
     from ..models import PdfDocument
     lessons = db.query(Lesson).filter_by(subject=subject).order_by(Lesson.id).all()
@@ -245,7 +271,9 @@ class AssignmentReq(BaseModel):
 
 
 @router.post("/api/learning/assignment")
-def assignment(req: AssignmentReq, db: Session = Depends(get_db)):
+def assignment(req: AssignmentReq, user: User = Depends(require_learning_user),
+               db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     """AI 现场出作业：读配置的题数与难度，基于本课正文出题，并关联本课知识点。"""
     from ..models import Text
     from ..services.assignment import generate_assignment
@@ -272,7 +300,9 @@ class AssignmentGradeReq(BaseModel):
 
 
 @router.post("/api/learning/assignment/grade")
-def assignment_grade(req: AssignmentGradeReq, db: Session = Depends(get_db)):
+def assignment_grade(req: AssignmentGradeReq, user: User = Depends(require_learning_user),
+                     db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     """判分：正确率 >= 阈值则推进进度；逐题落知识点掌握度（驱动遗忘曲线）。
 
     传 items 时由服务端（AI）逐题判对错并返回参考答案与讲解；否则沿用 answers 里的 is_correct。
@@ -334,7 +364,9 @@ class GradeHandwritingReq(BaseModel):
 
 
 @router.post("/api/dictation/grade-handwriting")
-def grade_handwriting_endpoint(req: GradeHandwritingReq, db: Session = Depends(get_db)):
+def grade_handwriting_endpoint(req: GradeHandwritingReq, user: User = Depends(require_learning_user),
+                               db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     from ..services.handwriting import grade_handwriting
     image_bytes = _base64.b64decode(req.image_base64) if req.image_base64 else b""
     results = grade_handwriting(db, image_bytes, req.words)
@@ -349,7 +381,9 @@ class AppealReq(BaseModel):
 
 
 @router.post("/api/dictation/appeal")
-def appeal(req: AppealReq, db: Session = Depends(get_db)):
+def appeal(req: AppealReq, user: User = Depends(require_learning_user),
+           db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
     """孩子申诉：某词批改有误，标记待复核。"""
     # 本阶段简化：记录申诉到 Mistake 表（source_type="appeal"）或直接返回 ok
     # 家长复核 UI 是后续，这里先落一条记录供家长端查询

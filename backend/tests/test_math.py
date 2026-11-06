@@ -1,7 +1,7 @@
 """数学出题 + 数值归一判分 + 进度按学科隔离。"""
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from conftest import make_lesson
+from conftest import make_account, make_lesson, bound_child_headers
 
 
 def test_grade_math_answer_normalization():
@@ -28,7 +28,7 @@ def test_generate_math_questions_fallback(setup_db):
 
 
 def test_math_material_endpoint(setup_db):
-    from app.models import User, Lesson, Text
+    from app.models import User, Lesson, Text, UserDocument
     from app.database import SessionLocal
     from app.routers.math import router as math_router
     s = SessionLocal()
@@ -36,6 +36,9 @@ def test_math_material_endpoint(setup_db):
     s.commit()
     lesson = s.query(Lesson).filter_by(subject="数学").first()
     s.add(Text(lesson_id=lesson.id, content="认识加法：3+5=8"))
+    p = make_account(s, "p_mm", "parent")
+    uid = make_account(s, "晨晨", "child", parent=p).id
+    s.add(UserDocument(user_id=uid, document_id=lesson.document_id))
     s.commit()
     lid = lesson.id
     s.close()
@@ -43,7 +46,8 @@ def test_math_material_endpoint(setup_db):
     app = FastAPI()
     app.include_router(math_router)
     c = TestClient(app)
-    r = c.get(f"/api/math/material?lesson_id={lid}")
+    h = bound_child_headers(uid)
+    r = c.get(f"/api/math/material?lesson_id={lid}", headers=h)
     assert r.status_code == 200
     d = r.json()
     assert d["title"] == "第 1 单元 · 加法"
@@ -59,7 +63,9 @@ def test_math_task_grade_endpoint(setup_db):
     from app.database import SessionLocal
     from app.routers.math import router as math_router
     s = SessionLocal()
-    s.add(User(name="晨晨", role="child")); s.commit()
+    p = make_account(s, "p_mtg", "parent")
+    make_account(s, "晨晨", "child", parent=p)
+    s.commit()
     uid = s.query(User).filter_by(name="晨晨").first().id
     qs = [{"question": "3 + 5 = ？", "answer": "8"}, {"question": "12 - 7 = ？", "answer": "5"}]
     t = Task(user_id=uid, date=date.today(), subject="数学", task_type="math", title="数学练习",
@@ -71,7 +77,8 @@ def test_math_task_grade_endpoint(setup_db):
     app = FastAPI()
     app.include_router(math_router)
     c = TestClient(app)
-    r = c.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["八", "6"]})
+    h = bound_child_headers(uid)
+    r = c.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["八", "6"]}, headers=h)
     d = r.json()
     assert d["ok"] is True
     assert d["correct"] == 1 and d["total"] == 2
@@ -87,7 +94,7 @@ def test_math_task_grade_endpoint(setup_db):
     s2.commit()
     s2.close()
 
-    r2 = c.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["8", "5"]})
+    r2 = c.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["8", "5"]}, headers=h)
     assert r2.json()["ok"] is False
 
 
@@ -99,7 +106,9 @@ def test_math_task_grade_scoped_to_bucket(setup_db):
     from app.services.bucket_service import ensure_bucket
     from app.routers.math import router as math_router
     s = SessionLocal()
-    s.add(User(name="晨晨", role="child", grade=3)); s.commit()
+    p = make_account(s, "p_mts", "parent")
+    make_account(s, "晨晨", "child", parent=p)
+    s.commit()
     uid = s.query(User).filter_by(name="晨晨").first().id
     b = ensure_bucket(s, uid)
     b_id = b.id
@@ -114,7 +123,8 @@ def test_math_task_grade_scoped_to_bucket(setup_db):
     app = FastAPI()
     app.include_router(math_router)
     c = TestClient(app)
-    r = c.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["八", "6"]})
+    h = bound_child_headers(uid)
+    r = c.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["八", "6"]}, headers=h)
     assert r.json()["ok"] is True
 
     s2 = SessionLocal()
@@ -129,7 +139,9 @@ def test_progress_advance_subject_isolation(setup_db):
     from app.database import SessionLocal
     from app.routers.progress import router as progress_router
     s = SessionLocal()
-    s.add(User(name="晨晨", role="child")); s.commit()
+    p = make_account(s, "p_pais", "parent")
+    make_account(s, "晨晨", "child", parent=p)
+    s.commit()
     uid = s.query(User).filter_by(name="晨晨").first().id
     make_lesson(s, subject="语文", title="语文第1课")
     make_lesson(s, subject="数学", title="数学第1课")
@@ -140,7 +152,9 @@ def test_progress_advance_subject_isolation(setup_db):
     app = FastAPI()
     app.include_router(progress_router)
     c = TestClient(app)
-    r = c.post("/api/progress/advance", json={"user_id": uid, "correct": 3, "total": 3, "subject": "数学"})
+    h = bound_child_headers(uid)
+    r = c.post("/api/progress/advance", json={"user_id": uid, "correct": 3, "total": 3, "subject": "数学"},
+               headers=h)
     assert r.json()["passed"] is True
 
     s2 = SessionLocal()
