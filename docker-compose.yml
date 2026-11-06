@@ -55,6 +55,9 @@ services:
       DATABASE_URL: *db-url
       KNOACT_RENDER_SERVICE_URL: http://render:8011
       TZ: ${TZ:-Asia/Shanghai}
+      # 生产务必在 .env 设置强 JWT_SECRET 与 ADMIN_INITIAL_PASSWORD（勿提交 .env）
+      JWT_SECRET: ${JWT_SECRET:-dev-change-me}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-ChangeMe123}
     volumes:
       - knoact-uploads:/app/uploads
     depends_on:

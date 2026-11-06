@@ -155,6 +155,11 @@ binding (ModelProfile + ModelConnection)  →  legacy (ModelConfig 老键)  → 
    或绝对路径 `DATABASE_URL="sqlite:///D:/workspace/github/KnoAct/backend/zhixueban.db"`。
 3. **GBK 管道**：`curl … | python -c "json.load(sys.stdin)"` 会把中文按 GBK 重解码
    报 JSONDecodeError。验证 API 用 `urllib`/`requests` 单进程做请求+解析。
+4. **JWT 与管理账号（生产）**：`JWT_SECRET` 在生产环境必须设为长随机密钥（默认
+   `dev-change-me` 仅本地）；`ADMIN_INITIAL_PASSWORD` 控制种子为无密码用户及默认
+   `login_name=admin` 写入的初始密码（默认 `ChangeMe123`）。部署后应尽快在运营后台改
+   `admin` 密码。未正确设置时，后端启动日志会 warning（`pytest` 不触发）。详见仓库根
+   `README.md`「生产环境：JWT 与管理员密码」与 `.env.example`。
 
 前端静态页：学生端 `python -m http.server 8766 --directory frontend`，家长端
 `python -m http.server 8767 --directory parent-web`，运营后台

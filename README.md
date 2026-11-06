@@ -79,6 +79,15 @@ docker compose up -d --build    # 启动 MySQL + 后端 + 学生端（Flutter �
 
 浏览器访问 Flutter 学生端 `http://<服务器IP>:8082`、旧版学生端 `http://<服务器IP>:8080`、家长端 `http://<服务器IP>:8081`（端口分别由 `.env` 中的 `KNOACT_STUDENT_PORT`、`KNOACT_HTTP_PORT`、`KNOACT_PARENT_PORT` 决定）。Flutter 学生端镜像构建时会下载约 1.5 GB 的 Flutter SDK（走 `storage.flutter-io.cn` 镜像），首次构建较慢。
 
+### 生产环境：JWT 与管理员密码（必做）
+
+部署到公网或内网多人共用时，请在复制 `.env.example` 为 `.env` 后至少设置：
+
+- **`JWT_SECRET`**：签发 Bearer JWT 的密钥。须为**长随机串**（例如 `openssl rand -hex 32`），禁止使用示例中的空值或代码里的 `dev-change-me` 默认值。
+- **`ADMIN_INITIAL_PASSWORD`**：种子数据为「尚无 `password_hash` 的用户」和默认 **`login_name=admin`** 运营账号设置的**初始密码**。种子默认等价于 `ChangeMe123`；生产务必改为强密码，并在首次上线后通过运营后台（`admin-web`）或 `/api/admin/users` **立即修改** `admin` 密码。
+
+`docker-compose.yml` 已将上述变量传入 `backend` 容器。本地用 `uvicorn` 时也应在 shell 中 `export` 或在 `backend/` 下使用同名环境变量。若未改 `JWT_SECRET` 或仍使用默认 `ADMIN_INITIAL_PASSWORD`，进程启动时会在日志中打出 **warning**（测试 `pytest` 不会触发）。
+
 首次启动会自动建表并写入演示数据（孩子「金同学」、家长「金爸爸」）。AI 默认是 `fake` 兜底模式，打开家长端 →「设置」配置真实的模型与密钥后，出题、判分、对话等 AI 能力才会生效。
 
 ### 启用动画渲染（可选）
@@ -209,6 +218,11 @@ flutter test && flutter analyze
 | `KNOACT_PARENT_PORT` | `8081` | docker 部署的家长端对外端口 |
 | `KNOACT_STUDENT_PORT` | `8082` | docker 部署的 Flutter 学生端对外端口 |
 | `TZ` | `Asia/Shanghai` | 时区，影响每日任务生成时间 |
+| `JWT_SECRET` | 代码默认 `dev-change-me`（**仅本地**） | **生产必填**：JWT 签名密钥，须为长随机串 |
+| `ADMIN_INITIAL_PASSWORD` | 默认 `ChangeMe123` | 种子幂等补全密码与创建 `admin` 时的初始密码；**生产须改**并在上线后改密 |
+| `JWT_ACCESS_TTL` | `3600` | 访问令牌秒数 |
+| `JWT_REFRESH_DAYS` | `30` | 刷新令牌有效天数 |
+| `KNOACT_LEGACY_NAME_LOGIN` | 未设 | 设为 `1` 时放开旧版「仅姓名」登录（仅建议开发环境） |
 
 AI、TTS 的 provider 与密钥以及学习配置不走环境变量，在家长端页面配置后保存在数据库中。
 
