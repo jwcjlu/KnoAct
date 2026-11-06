@@ -15,8 +15,12 @@ class SessionNotifier extends AsyncNotifier<Child?> {
     final store = ref.read(sessionStoreProvider);
     final cached = await store.load();
     if (cached == null) return null;
+    // 账号体系升级前只存了 id/name，无 JWT：视为未登录，避免进首页后接口全 401
+    if (await store.readAccessToken() == null) {
+      await store.clear();
+      return null;
+    }
     // 有令牌时向 /me 校准 parent_bound 等字段；网络失败沿用缓存，401 由 ApiClient 触发 [expire]
-    if (await store.readAccessToken() == null) return cached;
     try {
       final fresh = await ref.read(authRepositoryProvider).me().timeout(const Duration(seconds: 5));
       await store.save(fresh);

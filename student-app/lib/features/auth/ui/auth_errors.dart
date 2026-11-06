@@ -8,6 +8,12 @@ String authErrorText(Object e, {String fallback = '操作失败，请检查网�
     switch (e.code) {
       case 'invalid_credentials':
         return '登录名或密码不正确';
+      case 'please_register':
+        return '还没有这个登录名，请先点「去注册」创建账号';
+      case 'weak_password':
+        return '密码至少 8 位，且需同时包含字母和数字';
+      case 'invalid_login_name':
+        return '登录名需 3–32 位，只能使用字母、数字或下划线';
       case 'login_name_taken':
         return '这个登录名已被使用，换一个试试';
       case 'invalid_code':

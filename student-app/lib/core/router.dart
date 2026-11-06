@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../features/auth/session.dart';
 import '../features/auth/ui/bind_parent_page.dart';
 import '../features/auth/ui/login_page.dart';
+import '../features/auth/ui/otp_login_page.dart';
 import '../features/auth/ui/register_page.dart';
 import '../features/assignment/ui/assignment_page.dart';
 import '../features/center/ui/center_page.dart';
@@ -19,7 +20,7 @@ import '../features/shell/app_shell.dart';
 import '../features/wrongbook/ui/wrongbook_page.dart';
 
 /// 未登录可访问的页面
-const _publicPaths = {'/login', '/register'};
+const _publicPaths = {'/login', '/login-otp', '/register'};
 
 /// 登录且已绑定家长后可访问的页面；登录/注册/绑定页与未知路径一律回到首页
 const _shellPaths = {'/home', '/center', '/wrongbook', '/profile'};
@@ -36,7 +37,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       final path = state.uri.path;
       if (child == null) return _publicPaths.contains(path) ? null : '/login';
       // 未绑定家长：只能停留在绑定页（parent_bound 来自登录响应 / 缓存 / 最近一次 /me）
-      if (!child.parentBound) return path == '/bind-parent' ? null : '/bind-parent';
+      if (!child.parentBound) {
+        return path == '/bind-parent' ? null : '/bind-parent';
+      }
+      if (_publicPaths.contains(path) || path == '/bind-parent') return '/home';
       if (_shellPaths.contains(path) ||
           path == '/assignment' ||
           path == '/math' ||
@@ -50,6 +54,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
+      GoRoute(path: '/login-otp', builder: (_, _) => const OtpLoginPage()),
       GoRoute(path: '/register', builder: (_, _) => const RegisterPage()),
       GoRoute(path: '/bind-parent', builder: (_, _) => const BindParentPage()),
       GoRoute(path: '/assignment', builder: (_, _) => const AssignmentPage()),

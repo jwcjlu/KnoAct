@@ -41,7 +41,10 @@ function errMsg(data, fallback) {
   if (typeof data === 'string') return data;
   const d = data.detail;
   if (typeof d === 'string') return d;
-  if (d && typeof d === 'object' && d.error) return String(d.error);
+  if (d && typeof d === 'object' && d.error) {
+    const map = { invalid_credentials: '登录名或密码错误' };
+    return map[d.error] || String(d.error);
+  }
   return fallback;
 }
 
@@ -174,6 +177,7 @@ function renderLogin() {
       <form class="login-card" onsubmit="loginSubmit(event)">
         <h1>知学伴运营后台</h1>
         <p>使用管理员账号登录，管理家长与孩子账户。</p>
+        <p class="hint">默认开发账号：<strong>admin</strong> / <strong>ChangeMe123</strong>（与 <code>ADMIN_INITIAL_PASSWORD</code> 一致）</p>
         <div class="field">
           <label for="login_name">登录名</label>
           <input id="login_name" name="login_name" required autocomplete="username" placeholder="admin">

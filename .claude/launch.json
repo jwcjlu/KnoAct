@@ -25,6 +25,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8767", "--directory", "parent-web"],
       "port": 8767
+    },
+    {
+      "name": "student-app-web-build",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8898", "--directory", "student-app/build/web"],
+      "port": 8898
     }
   ]
 }

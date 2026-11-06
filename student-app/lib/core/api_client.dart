@@ -107,16 +107,25 @@ class ApiClient {
     }
   }
 
-  ApiException _wrap(DioException e) => ApiException(
-        e.message ?? e.type.name,
-        statusCode: e.response?.statusCode,
-        code: _errorCode(e.response?.data),
-      );
+  ApiException _wrap(DioException e) {
+    final code = _errorCode(e.response?.data);
+    final msg = _errorMessage(e.response?.data) ?? e.message ?? e.type.name;
+    return ApiException(msg, statusCode: e.response?.statusCode, code: code);
+  }
 
   static String? _errorCode(Object? data) {
     if (data is Map) {
       final detail = data['detail'];
       if (detail is Map && detail['error'] is String) return detail['error'] as String;
+      if (detail is String) return detail;
+    }
+    return null;
+  }
+
+  static String? _errorMessage(Object? data) {
+    if (data is Map) {
+      final detail = data['detail'];
+      if (detail is Map && detail['message'] is String) return detail['message'] as String;
       if (detail is String) return detail;
     }
     return null;

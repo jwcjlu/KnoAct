@@ -108,6 +108,16 @@ void main() {
     expect(await c.read(sessionProvider.future), isNull);
   });
 
+  test('仅有旧版 id/name 缓存、无令牌时视为未登录并清缓存', () async {
+    SharedPreferences.setMockInitialValues({
+      SessionStore.childIdKey: 4,
+      'knoact_child_name': '金同学',
+    });
+    final c = makeContainer(FakeAuthRepository(kChild));
+    expect(await c.read(sessionProvider.future), isNull);
+    expect(await c.read(sessionStoreProvider).load(), isNull);
+  });
+
   test('登录成功后保存用户与令牌，并可在重建后恢复', () async {
     final repo = FakeAuthRepository(kChild);
     final c = makeContainer(repo);

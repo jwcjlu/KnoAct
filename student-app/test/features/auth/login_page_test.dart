@@ -80,34 +80,10 @@ void main() {
     expect(find.text('登录失败，请检查网络或后端服务'), findsOneWidget);
   });
 
-  testWidgets('切换到验证码登录：发送验证码并登录', (tester) async {
-    final repo = FakeAuthRepository(kChild);
-    final c = await pumpLogin(tester, repo);
-    await tester.tap(find.text('使用验证码登录'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('password')), findsNothing);
-    await tester.enterText(find.byKey(const Key('loginName')), 'jin');
-    await tester.pump();
-    await tester.tap(find.text('发送验证码'));
-    await tester.pumpAndSettle();
-    expect(repo.otpSent, isTrue);
-    expect(find.text('重新发送'), findsOneWidget);
-    await tester.enterText(find.byKey(const Key('otpCode')), '123456');
-    await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '登录'));
-    await tester.pumpAndSettle();
-    expect(repo.lastCode, '123456');
-    expect(c.read(sessionProvider).value, kChild);
-    // 可切回密码登录
-  });
-
-  testWidgets('验证码模式可切回密码登录', (tester) async {
+  testWidgets('登录页始终显示密码框', (tester) async {
     await pumpLogin(tester, FakeAuthRepository(kChild));
-    await tester.tap(find.text('使用验证码登录'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('使用密码登录'));
-    await tester.pumpAndSettle();
     expect(find.byKey(const Key('password')), findsOneWidget);
+    expect(find.text('账号登录'), findsOneWidget);
   });
 
   testWidgets('小屏弹出键盘且显示错误时不溢出', (tester) async {

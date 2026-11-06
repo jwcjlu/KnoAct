@@ -691,7 +691,8 @@ function applyParentSession(me){
 function renderLogin(){
   const isReg = loginAuthMode === 'register';
   const title = isReg ? '注册家长账号' : '家长登录';
-  const sub = isReg ? '创建账号后管理孩子与学习配置' : '使用登录名和密码进入家长端';
+  const sub = isReg ? '创建账号后管理孩子与学习配置' : '使用登录名和密码进入家长端（不再支持只填姓名）';
+  const legacyHint = isReg ? '' : `<p style="font-size:12px;color:#8e9691;line-height:1.5;margin:0 0 4px">老账号：登录名一般为原「姓名」（如 金爸爸），初始密码 <code style="font-size:11px">ChangeMe123</code>。新用户请点下方「注册」。</p>`;
   const toggle = isReg
     ? `<button type="button" class="btn-ghost" style="padding:0;font-size:13px;color:var(--blue)" onclick="loginAuthMode='login';render()">已有账号？去登录</button>`
     : `<button type="button" class="btn-ghost" style="padding:0;font-size:13px;color:var(--blue)" onclick="loginAuthMode='register';render()">没有账号？注册</button>`;
@@ -700,7 +701,8 @@ function renderLogin(){
       <div class="head"><div class="ic orange">${icon('star',20)}</div>
         <div><h3>${title}</h3><div class="sub">${sub}</div></div></div>
       <div class="bd" style="display:flex;flex-direction:column;gap:10px">
-        <input id="authLoginName" placeholder="登录名（字母数字下划线）" autocomplete="username"
+        ${legacyHint}
+        <input id="authLoginName" placeholder="登录名（新注册：字母数字；老账号可为原姓名）" autocomplete="username"
           style="border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"
           onkeydown="if(event.key==='Enter')${isReg?'doParentRegister()':'doParentLogin()'}">
         <input id="authPassword" type="password" placeholder="密码（至少 8 位）" autocomplete="${isReg?'new-password':'current-password'}"
