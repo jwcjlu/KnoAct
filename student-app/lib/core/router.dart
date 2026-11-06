@@ -30,7 +30,9 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.listen(sessionProvider, (_, _) => refresh.value++);
   ref.onDispose(refresh.dispose);
   return GoRouter(
-    initialLocation: '/home',
+    // 勿用 /home 作首屏：该路径在 StatefulShellRoute 分支内，未登录时首次解析会抛错并退出。
+    // 从公开路由进入，由 redirect 在会话就绪后跳到 /home 或 /bind-parent。
+    initialLocation: '/login',
     refreshListenable: refresh,
     redirect: (context, state) {
       final child = ref.read(sessionProvider).value;

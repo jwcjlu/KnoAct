@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_app/features/auth/data/auth_repository.dart';
+import 'package:student_app/features/auth/data/session_store.dart';
 import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/wrongbook/data/bucket_models.dart';
 import 'package:student_app/features/wrongbook/data/wrongbook_models.dart';
@@ -53,7 +54,12 @@ Future<(ProviderContainer, FakeWrongbookRepository)> pumpWrongbook(
   WidgetTester tester,
   FakeWrongbookRepository repo,
 ) async {
-  SharedPreferences.setMockInitialValues({'knoact_child_id': 4, 'knoact_child_name': '金同学'});
+  SharedPreferences.setMockInitialValues({
+    'knoact_child_id': 4,
+    'knoact_child_name': '金同学',
+    SessionStore.accessTokenKey: 'tok',
+    SessionStore.refreshTokenKey: 'ref',
+  });
   tester.view.physicalSize = const Size(420, 1400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);

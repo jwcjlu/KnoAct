@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_app/app.dart';
 import 'package:student_app/core/router.dart';
 import 'package:student_app/features/auth/data/auth_repository.dart';
+import 'package:student_app/features/auth/data/session_store.dart';
 import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/center/data/center_models.dart';
 import 'package:student_app/features/center/data/center_repository.dart';
@@ -22,16 +23,18 @@ class FlowAuthRepository implements AuthRepository {
   /// 在此集合里的登录名登录后 parent_bound=false
   final unbound = <String>{};
   Child? meResult;
+  Child? _lastLoggedChild;
 
   @override
   Future<AuthSession> login(String loginName, String password) async {
     final c = loginName == _a.name ? _a : _b;
-    return AuthSession(unbound.contains(loginName) ? c.copyWith(parentBound: false) : c,
-        accessToken: 'tok', refreshToken: 'ref');
+    final child = unbound.contains(loginName) ? c.copyWith(parentBound: false) : c;
+    _lastLoggedChild = child;
+    return AuthSession(child, accessToken: 'tok', refreshToken: 'ref');
   }
 
   @override
-  Future<Child> me() async => meResult!;
+  Future<Child> me() async => meResult ?? _lastLoggedChild ?? _a;
 
   @override
   Future<void> bindByCode(String code) async {}
@@ -226,7 +229,12 @@ void main() {
   });
 
   testWidgets('已登录访问登录/注册/绑定页回到首页', (tester) async {
-    final (c, _) = await pumpApp(tester, prefs: {'knoact_child_id': _a.id, 'knoact_child_name': _a.name});
+    final (c, _) = await pumpApp(tester, prefs: {
+      'knoact_child_id': _a.id,
+      'knoact_child_name': _a.name,
+      SessionStore.accessTokenKey: 'tok',
+      SessionStore.refreshTokenKey: 'ref',
+    });
     for (final path in ['/login', '/register', '/bind-parent']) {
       c.read(routerProvider).go(path);
       await tester.pumpAndSettle();
@@ -235,11 +243,14 @@ void main() {
   });
 
   testWidgets('启动时缓存 parent_bound=false 直接进入绑定页', (tester) async {
+    final auth = FlowAuthRepository()..meResult = _a.copyWith(parentBound: false);
     final (c, _) = await pumpApp(tester, prefs: {
       'knoact_child_id': _a.id,
       'knoact_child_name': _a.name,
       'knoact_parent_bound': false,
-    });
+      SessionStore.accessTokenKey: 'tok',
+      SessionStore.refreshTokenKey: 'ref',
+    }, auth: auth);
     expect(location(c), '/bind-parent');
   });
 
@@ -253,7 +264,12 @@ void main() {
   });
 
   testWidgets('已登录访问未知路径跳到首页', (tester) async {
-    final (c, _) = await pumpApp(tester, prefs: {'knoact_child_id': _a.id, 'knoact_child_name': _a.name});
+    final (c, _) = await pumpApp(tester, prefs: {
+      'knoact_child_id': _a.id,
+      'knoact_child_name': _a.name,
+      SessionStore.accessTokenKey: 'tok',
+      SessionStore.refreshTokenKey: 'ref',
+    });
     expect(location(c), '/home');
     c.read(routerProvider).go('/nope');
     await tester.pumpAndSettle();

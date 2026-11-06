@@ -3,12 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_app/core/api_client.dart';
+import 'package:student_app/features/auth/data/auth_repository.dart';
+import 'package:student_app/features/auth/data/session_store.dart';
 import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/home/data/home_models.dart';
 import 'package:student_app/features/home/data/home_repository.dart';
 import 'package:student_app/features/home/ui/home_page.dart';
 import 'package:student_app/features/home/ui/home_sections.dart';
 import 'package:student_app/features/wrongbook/data/bucket_models.dart';
+
+import '../auth/session_test.dart' show FakeAuthRepository;
 
 class FakeHomeRepository implements HomeRepository {
   FakeHomeRepository({this.fail = false, this.bucketList = const []});
@@ -59,12 +63,20 @@ class FakeHomeRepository implements HomeRepository {
 }
 
 Future<void> pumpHome(WidgetTester tester, FakeHomeRepository repo, {Size size = const Size(420, 900)}) async {
-  SharedPreferences.setMockInitialValues({'knoact_child_id': 4, 'knoact_child_name': '金同学'});
+  SharedPreferences.setMockInitialValues({
+    'knoact_child_id': 4,
+    'knoact_child_name': '金同学',
+    SessionStore.accessTokenKey: 'tok',
+    SessionStore.refreshTokenKey: 'ref',
+  });
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final container = ProviderContainer(
-    overrides: [homeRepositoryProvider.overrideWithValue(repo)],
+    overrides: [
+      homeRepositoryProvider.overrideWithValue(repo),
+      authRepositoryProvider.overrideWithValue(FakeAuthRepository(const Child(4, '金同学'))),
+    ],
     retry: (_, _) => null,
   );
   addTearDown(container.dispose);

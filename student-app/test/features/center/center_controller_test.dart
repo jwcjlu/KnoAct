@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_app/features/auth/data/auth_repository.dart';
+import 'package:student_app/features/auth/data/session_store.dart';
+import 'package:student_app/features/auth/data/auth_repository.dart' show AuthSession;
 import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/center/center_controller.dart';
 import 'package:student_app/features/center/center_logic.dart';
@@ -97,8 +99,28 @@ class FakeSpeechPlayer implements SpeechPlayer {
 
 late FakeSpeechPlayer speech;
 
+/// 与 [switchChild] 测试一致：`jin`→金同学、`li`→李同学
+class CenterFlowAuth extends FakeAuthRepository {
+  CenterFlowAuth() : super(const Child(4, '金同学', loginName: 'jin'));
+
+  @override
+  Future<AuthSession> login(String loginName, String password) async {
+    lastLoginName = loginName;
+    lastPassword = password;
+    final child = loginName == 'li'
+        ? const Child(5, '李同学', loginName: 'li')
+        : const Child(4, '金同学', loginName: 'jin');
+    return AuthSession(child, accessToken: 'acc-1', refreshToken: 'ref-1');
+  }
+}
+
 Future<(ProviderContainer, FakeCenterRepository, FakeTaskRepository)> setup() async {
-  SharedPreferences.setMockInitialValues({'knoact_child_id': 4, 'knoact_child_name': '金同学'});
+  SharedPreferences.setMockInitialValues({
+    'knoact_child_id': 4,
+    'knoact_child_name': '金同学',
+    SessionStore.accessTokenKey: 'tok',
+    SessionStore.refreshTokenKey: 'ref',
+  });
   final center = FakeCenterRepository();
   final tasks = FakeTaskRepository();
   speech = FakeSpeechPlayer();
@@ -107,7 +129,7 @@ Future<(ProviderContainer, FakeCenterRepository, FakeTaskRepository)> setup() as
       centerRepositoryProvider.overrideWithValue(center),
       homeRepositoryProvider.overrideWithValue(tasks),
       speechPlayerProvider.overrideWithValue(speech),
-      authRepositoryProvider.overrideWithValue(FakeAuthRepository(const Child(5, '李同学'))),
+      authRepositoryProvider.overrideWithValue(CenterFlowAuth()),
     ],
     retry: (_, _) => null,
   );

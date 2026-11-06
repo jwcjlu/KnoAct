@@ -5,7 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_app/core/api_client.dart';
+import 'package:student_app/features/auth/data/auth_repository.dart';
+import 'package:student_app/features/auth/data/session_store.dart';
 import 'package:student_app/features/auth/session.dart';
+
+import '../auth/session_test.dart' show FakeAuthRepository;
 import 'package:student_app/features/home/data/home_models.dart';
 import 'package:student_app/features/home/data/home_repository.dart';
 import 'package:student_app/features/home/home_controller.dart';
@@ -60,9 +64,17 @@ class ControllableHomeRepository implements HomeRepository {
 }
 
 Future<ProviderContainer> makeContainer(ControllableHomeRepository repo) async {
-  SharedPreferences.setMockInitialValues({'knoact_child_id': 4, 'knoact_child_name': '金同学'});
+  SharedPreferences.setMockInitialValues({
+    'knoact_child_id': 4,
+    'knoact_child_name': '金同学',
+    SessionStore.accessTokenKey: 'tok',
+    SessionStore.refreshTokenKey: 'ref',
+  });
   final container = ProviderContainer(
-    overrides: [homeRepositoryProvider.overrideWithValue(repo)],
+    overrides: [
+      homeRepositoryProvider.overrideWithValue(repo),
+      authRepositoryProvider.overrideWithValue(FakeAuthRepository(const Child(4, '金同学'))),
+    ],
     retry: (_, _) => null,
   );
   addTearDown(container.dispose);

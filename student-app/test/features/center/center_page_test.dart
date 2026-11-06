@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:student_app/features/auth/data/auth_repository.dart';
+import 'package:student_app/features/auth/data/session_store.dart';
 import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/center/center_controller.dart';
 import 'package:student_app/features/center/center_logic.dart';
@@ -12,6 +14,8 @@ import 'package:student_app/features/center/ui/center_page.dart';
 import 'package:student_app/features/home/data/home_models.dart';
 import 'package:student_app/features/home/data/home_repository.dart';
 import 'package:student_app/features/wrongbook/data/bucket_models.dart';
+
+import '../auth/session_test.dart' show FakeAuthRepository;
 
 class FakeCenterRepository implements CenterRepository {
   final wrong = <String>[];
@@ -70,7 +74,12 @@ class FakeSpeechPlayer implements SpeechPlayer {
 }
 
 Future<(ProviderContainer, FakeCenterRepository, FakeHomeRepository, FakeSpeechPlayer)> pumpCenter(WidgetTester tester) async {
-  SharedPreferences.setMockInitialValues({'knoact_child_id': 4, 'knoact_child_name': '金同学'});
+  SharedPreferences.setMockInitialValues({
+    'knoact_child_id': 4,
+    'knoact_child_name': '金同学',
+    SessionStore.accessTokenKey: 'tok',
+    SessionStore.refreshTokenKey: 'ref',
+  });
   // 阅读页含个性化学习入口 + 课文 + 对话栏 + 题目 + 提交按钮，用较高窗口避免按钮被挤出屏幕
   tester.view.physicalSize = const Size(420, 1400);
   tester.view.devicePixelRatio = 1;
@@ -83,6 +92,7 @@ Future<(ProviderContainer, FakeCenterRepository, FakeHomeRepository, FakeSpeechP
       centerRepositoryProvider.overrideWithValue(center),
       homeRepositoryProvider.overrideWithValue(home),
       speechPlayerProvider.overrideWithValue(speech),
+      authRepositoryProvider.overrideWithValue(FakeAuthRepository(const Child(4, '金同学'))),
     ],
     retry: (_, _) => null,
   );
