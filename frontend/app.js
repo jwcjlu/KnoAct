@@ -1070,21 +1070,27 @@ async function finishDictation(){
       ? list.find(x => x && x.id === s.taskId)
       : list.find(x => x && x.task_type === 'dictation' && x.subject === currentSubject && x.submit_status !== 'approved');
     if(task && task.id){
-      await api('/api/tasks/'+task.id+'/submit', {method:'POST'});
-      if(confirm('请拍照上传你的听写字迹，家长核对后发放积分。现在上传？')){
+      const uploadThenSubmit = () => new Promise((resolve)=>{
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
         input.onchange = async () => {
-          if(!input.files || !input.files[0]) return;
+          if(!input.files || !input.files[0]){ resolve(false); return; }
           const fd = new FormData();
           fd.append('file', input.files[0]);
           const r = await apiForm(`/api/tasks/${task.id}/upload-photo`, fd);
-          if(r && r.ok) toast('已上传，等待家长确认');
-          else toast('上传失败，请重试');
+          if(r && r.ok) resolve(true);
+          else { toast('上传失败，请重试'); resolve(false); }
         };
         input.click();
-      }
+      });
+      if(confirm('请拍照上传你的听写字迹，家长核对后发放积分。现在上传？')){
+        const ok = await uploadThenSubmit();
+        if(ok){
+          await api('/api/tasks/'+task.id+'/submit', {method:'POST'});
+          toast('已上传并提交，等待家长确认');
+        }else toast('尚未上传打卡照片，任务未提交');
+      }else toast('请先上传打卡照片后再提交任务');
     }
   } catch(e){ /* 任务查找失败不影响主流程 */ }
 

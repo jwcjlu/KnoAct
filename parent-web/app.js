@@ -394,7 +394,7 @@ function setParentTab(t){
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
-  if(t==='学习配置'){ loadConfig().then(()=>render()); return; }
+  if(t==='学习配置'){ loadConfig().then(()=>loadLearningPreferences()).then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
   if(t==='孩子管理'){ Promise.all([loadChildren(), loadArchivedChildren(), loadFamilyRequests()]).then(()=>render()); return; }
   render();
@@ -420,6 +420,16 @@ async function loadReport(){
   const q = b ? `&bucket_id=${b}` : '';
   const rows = await api(`/api/mistakes/report?user_id=${u}${q}`);
   if(u === uid) reportRows = rows;
+}
+async function loadLearningPreferences(){
+  if(!uid){ return; }
+  try{
+    const r = await api(`/api/learning/preferences?user_id=${uid}`);
+    if(r && r.dictation_input_mode) configMap.dictation_input_mode = r.dictation_input_mode;
+    else configMap.dictation_input_mode = configMap.dictation_input_mode || 'paper_photo';
+  }catch(e){
+    configMap.dictation_input_mode = configMap.dictation_input_mode || 'paper_photo';
+  }
 }
 async function loadConfig(){
   configMap = await api('/api/config');
@@ -618,8 +628,11 @@ function renderTaskTab(){
       actions = `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="approveTask(${t.id})">通过</button>`;
     } else if(t.submit_status==='submitted'){
       status = `<span class="g-status" style="background:var(--orange-soft);color:var(--orange2)">待完成审核</span>`;
+      const photoHint = (t.task_type==='dictation' && !t.photo_path)
+        ? `<span style="font-size:11px;color:#c05b4a">未上传打卡照</span>` : '';
       actions = `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="confirmTask(${t.id})">确认完成</button>` +
-        (t.photo_path ? `<a href="${API}/${t.photo_path}" target="_blank" style="font-size:12px;color:#3158e8;text-decoration:none;align-self:center">查看照片</a>` : '');
+        (t.photo_path ? `<a href="${API}/${t.photo_path}" target="_blank" style="font-size:12px;color:#3158e8;text-decoration:none;align-self:center">查看照片</a>` : '') +
+        photoHint;
     } else if(t.submit_status==='approved'){
       status = `<span class="g-status" style="background:var(--green-soft2);color:var(--green)">已完成</span>`;
     } else {
@@ -1506,6 +1519,14 @@ function renderLearningConfigTab(){
       <div class="parent-panel" style="grid-column:1/-1">
         <div class="head"><div class="ic blue">${icon('chart',20)}</div><div><h3>学习配置</h3><div class="sub">调整每日听写量、新旧比例、作业难度与测试开关</div></div></div>
         <div class="bd">
+          <div class="lc-row">
+            <div class="lc-label">听写作答方式</div>
+            <select class="lc-input" data-key="dictation_input_mode">
+              <option value="paper_photo" ${(configMap.dictation_input_mode||'paper_photo')==='paper_photo'?'selected':''}>纸上听写 + 拍照</option>
+              <option value="on_screen" ${configMap.dictation_input_mode==='on_screen'?'selected':''}>屏上手写</option>
+            </select>
+            <div class="lc-hint">仅对当前孩子生效；孩子端不可自行修改</div>
+          </div>
           ${num('task_dictation_count_语文','7','语文每日听写量','每天听写几个语文生词')}
           ${num('task_dictation_count_英语','7','英语每日听写量','每天听写几个英语单词')}
           ${num('task_new_ratio','5','新/旧比例（新名额）','每日任务里「当天新课」的名额，旧=总量-新')}
@@ -1526,15 +1547,25 @@ function renderLearningConfigTab(){
 async function saveLearningConfig(){
   // 收集所有 [data-key] 输入框/下拉/勾选框的当前值
   const inputs = document.querySelectorAll('[data-key]');
+  let dictMode = null;
   for(const el of inputs){
     const key = el.dataset.key;
+    if(key === 'dictation_input_mode'){
+      dictMode = el.value;
+      continue;
+    }
     let value;
     if(el.type === 'checkbox'){ value = el.checked ? 'true' : 'false'; }
     else { value = el.value; }
     await api('/api/config', {method:'POST', body:{key, value}});
   }
+  if(uid && dictMode){
+    await api('/api/learning/preferences', {method:'PUT', body:{user_id: uid, dictation_input_mode: dictMode}});
+    configMap.dictation_input_mode = dictMode;
+  }
   toast('学习配置已保存');
   await loadConfig();
+  await loadLearningPreferences();
 }
 
 // ---- 设置（旧版，保留作为回滚路径）----

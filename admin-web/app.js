@@ -15,6 +15,14 @@ let roleFilter = '';
 let searchQ = '';
 let users = [];
 let loading = false;
+let adminPage = 'users';
+let checkinDate = '';
+let checkinQ = '';
+let checkinStatus = '';
+let checkinSubject = '';
+let checkins = [];
+let checkinsTotal = 0;
+let checkinsLoading = false;
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -192,7 +200,7 @@ function renderLogin() {
     </div>`;
 }
 
-function renderShell(mainHtml) {
+function renderShell(mainHtml, active = 'users') {
   const name = adminUser?.display_name || adminUser?.name || adminUser?.login_name || '管理员';
   return `
     <div class="layout">
@@ -202,7 +210,8 @@ function renderShell(mainHtml) {
           <div class="logo-sub">运营后台</div>
         </div>
         <nav class="nav">
-          <button type="button" class="nav-item on">用户管理</button>
+          <button type="button" class="nav-item ${active === 'users' ? 'on' : ''}" onclick="setAdminPage('users')">用户管理</button>
+          <button type="button" class="nav-item ${active === 'checkins' ? 'on' : ''}" onclick="setAdminPage('checkins')">听写打卡</button>
         </nav>
         <div class="sidebar-foot">
           <div class="who">${esc(name)}</div>
@@ -289,7 +298,82 @@ function renderUsersPage() {
         <tbody>${tableBody}</tbody>
       </table>
     </div>
-  `);
+  `, 'users');
+}
+
+async function loadDictationCheckins() {
+  checkinsLoading = true;
+  render();
+  try {
+    if (!checkinDate) {
+      const t = new Date();
+      checkinDate = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    }
+    const qs = new URLSearchParams({ date: checkinDate, limit: '50' });
+    if (checkinQ.trim()) qs.set('q', checkinQ.trim());
+    if (checkinStatus) qs.set('submit_status', checkinStatus);
+    if (checkinSubject) qs.set('subject', checkinSubject);
+    const data = await api(`/api/admin/dictation-checkins?${qs}`);
+    checkins = data.items || [];
+    checkinsTotal = data.total ?? checkins.length;
+  } finally {
+    checkinsLoading = false;
+    render();
+  }
+}
+
+function renderCheckinsPage() {
+  const rows = checkins.map((t) => {
+    const photo = t.photo_path
+      ? `<a href="${API}/${esc(t.photo_path)}" target="_blank" rel="noopener">查看照片</a>`
+      : '<span style="color:#9aa39c">无</span>';
+    return `<tr>
+      <td>${esc(t.child_display_name || t.child_login_name || t.user_id)}</td>
+      <td>${esc(t.parent_display_name || '—')}</td>
+      <td>${esc(t.date)}</td>
+      <td>${esc(t.subject)}</td>
+      <td>${esc(t.title)}</td>
+      <td>${esc(t.submit_status)}</td>
+      <td>${t.points ?? '—'}</td>
+      <td>${photo}</td>
+    </tr>`;
+  }).join('');
+  const body = checkinsLoading
+    ? '<tr><td colspan="8" class="empty">加载中…</td></tr>'
+    : (rows || '<tr><td colspan="8" class="empty">暂无听写打卡记录</td></tr>');
+  return renderShell(`
+    <div class="page-head">
+      <h1>听写打卡</h1>
+      <p>只读查看各孩子听写任务提交与打卡照片（共 ${checkinsTotal} 条）。</p>
+    </div>
+    <div class="toolbar">
+      <input type="date" value="${esc(checkinDate)}" onchange="onCheckinDateChange(this.value)">
+      <input type="search" placeholder="孩子登录名/昵称" value="${esc(checkinQ)}"
+        onkeydown="if(event.key==='Enter'){onCheckinSearch(this.value)}">
+      <select onchange="checkinStatus=this.value;loadDictationCheckins().catch(e=>toast(e.message))">
+        <option value="" ${!checkinStatus ? 'selected' : ''}>全部状态</option>
+        <option value="not_started" ${checkinStatus === 'not_started' ? 'selected' : ''}>未开始</option>
+        <option value="submitted" ${checkinStatus === 'submitted' ? 'selected' : ''}>待审核</option>
+        <option value="approved" ${checkinStatus === 'approved' ? 'selected' : ''}>已通过</option>
+      </select>
+      <select onchange="checkinSubject=this.value;loadDictationCheckins().catch(e=>toast(e.message))">
+        <option value="" ${!checkinSubject ? 'selected' : ''}>全部学科</option>
+        <option value="语文" ${checkinSubject === '语文' ? 'selected' : ''}>语文</option>
+        <option value="英语" ${checkinSubject === '英语' ? 'selected' : ''}>英语</option>
+      </select>
+      <button type="button" class="btn-primary" onclick="loadDictationCheckins().catch(e=>toast(e.message))">刷新</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>孩子</th><th>家长</th><th>日期</th><th>学科</th><th>任务</th><th>状态</th><th>积分</th><th>照片</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  `, 'checkins');
 }
 
 function render() {
@@ -298,7 +382,13 @@ function render() {
     root.innerHTML = renderLogin();
     return;
   }
-  root.innerHTML = renderUsersPage();
+  root.innerHTML = adminPage === 'checkins' ? renderCheckinsPage() : renderUsersPage();
+}
+
+function setAdminPage(page) {
+  adminPage = page;
+  if (page === 'checkins') loadDictationCheckins().catch((e) => toast(e.message));
+  else render();
 }
 
 window.loginSubmit = async (ev) => {
@@ -328,6 +418,10 @@ window.resetPassword = resetPassword;
 window.archiveUser = archiveUser;
 window.loadUsers = () => loadUsers().catch((e) => toast(e.message));
 window.logout = logout;
+window.setAdminPage = setAdminPage;
+window.loadDictationCheckins = () => loadDictationCheckins().catch((e) => toast(e.message));
+window.onCheckinDateChange = (v) => { checkinDate = v; loadDictationCheckins().catch((e) => toast(e.message)); };
+window.onCheckinSearch = (v) => { checkinQ = v; loadDictationCheckins().catch((e) => toast(e.message)); };
 
 render();
 if (accessToken && adminUser?.role === 'admin') {
