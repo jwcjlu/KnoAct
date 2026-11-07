@@ -49,3 +49,28 @@ def test_tts_endpoint_fake_uses_browser(setup_db):
     resp = TestClient(app).get("/api/tts/synthesize?text=徘徊", headers=h)
     assert resp.status_code == 200
     assert resp.json()["use_browser_tts"] is True
+
+
+def test_tts_endpoint_synthesize_fail_degrades(setup_db):
+    """配置了真实 provider 但合成失败时不应 502，应回落浏览器朗读。"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.models import ModelConfig
+    from app.routers.tts_router import router
+    from app.database import SessionLocal
+    from conftest import make_account, auth_headers
+
+    s = SessionLocal()
+    s.add(ModelConfig(key="tts_provider", value="xunfei"))
+    s.add(ModelConfig(key="tts_key", value="dummy"))
+    u = make_account(s, "u_tts_xf", "child")
+    s.commit()
+    h = auth_headers(u)
+    s.close()
+    app = FastAPI()
+    app.include_router(router)
+    resp = TestClient(app).get("/api/tts/synthesize?text=算", headers=h)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("use_browser_tts") is True
+    assert body.get("provider") == "fake"

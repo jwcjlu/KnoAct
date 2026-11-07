@@ -24,6 +24,7 @@ def synthesize(
         return {"provider": "fake", "use_browser_tts": True}
     try:
         audio = tts.synthesize(text, voice=voice, speed=speed)
-    except Exception as e:
-        return Response(status_code=502, content=f'{{"error": "{str(e)}"}}', media_type="application/json")
+    except Exception:
+        # 与 fake 相同：前端/Flutter 走设备朗读，避免 502 污染网络面板
+        return {"provider": "fake", "use_browser_tts": True}
     return Response(content=audio, media_type="audio/mpeg")
