@@ -823,9 +823,63 @@
   .lc-input{width:100%;max-width:280px;border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px;background:var(--card)}
   .lc-input:focus{outline:none;border-color:var(--blue-border)}
   .lc-hint{margin-top:4px;font-size:12px;color:#8e9691}
+
+  /* 账号门控（登录 / 注册 / 绑定家长） */
+  .auth-gate{position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px}
+  .auth-gate[hidden]{display:none!important}
+  .auth-card{width:100%;max-width:420px;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:28px 32px 32px;box-shadow:0 10px 40px rgba(32,39,35,.07)}
+  .auth-card h1{margin:0;font-size:26px;font-weight:700;text-align:center}
+  .auth-card .auth-sub{margin-top:6px;font-size:14px;color:var(--gray);text-align:center;line-height:1.5}
+  .auth-card .auth-hint{margin-top:10px;font-size:12px;color:var(--gray2);text-align:center;line-height:1.45}
+  .auth-field{margin-top:16px}
+  .auth-field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--ink2)}
+  .auth-field input{width:100%;border:1px solid var(--line3);border-radius:12px;padding:11px 14px;font-size:14px}
+  .auth-field input:focus{outline:none;border-color:var(--blue-border)}
+  .auth-err{margin-top:10px;font-size:13px;color:#c62828;min-height:1.2em}
+  .auth-primary{margin-top:20px;width:100%;border-radius:12px;background:var(--blue);color:#fff;padding:12px 16px;font-size:15px;font-weight:700}
+  .auth-primary:disabled{opacity:.45;cursor:not-allowed}
+  .auth-link{margin-top:12px;width:100%;font-size:13px;font-weight:600;color:var(--blue2)}
+  .auth-badge{width:48px;height:48px;margin:0 auto 12px;border-radius:14px;background:var(--blue-soft);color:var(--blue);display:grid;place-items:center}
 </style>
 </head>
 <body>
+<div id="auth-gate" class="auth-gate" hidden>
+  <div id="auth-card-login" class="auth-card">
+    <div class="auth-badge">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 1.3 3.7L17 8l-3.7 1.3L12 13l-1.3-3.7L7 8l3.7-1.3Z"/></svg>
+    </div>
+    <h1>知学伴</h1>
+    <p class="auth-sub">学生端 · 账号登录</p>
+    <p class="auth-hint">请使用孩子登录名与密码。老账号初始密码多为 ChangeMe123；新同学可先注册。</p>
+    <div class="auth-field"><label for="authLoginName">登录名</label><input id="authLoginName" autocomplete="username" placeholder="例如：xiaoming"></div>
+    <div class="auth-field"><label for="authPassword">密码</label><input id="authPassword" type="password" autocomplete="current-password"></div>
+    <div id="authLoginErr" class="auth-err"></div>
+    <button type="button" class="auth-primary" onclick="submitLogin()">登录</button>
+    <button type="button" class="auth-link" onclick="showAuthPanel('register')">还没有账号？去注册</button>
+  </div>
+  <div id="auth-card-register" class="auth-card" hidden>
+    <h1>注册孩子账号</h1>
+    <p class="auth-sub">注册后需绑定家长才能学习</p>
+    <div class="auth-field"><label for="authRegName">登录名</label><input id="authRegName" autocomplete="username"></div>
+    <div class="auth-field"><label for="authRegPwd">密码</label><input id="authRegPwd" type="password" autocomplete="new-password"></div>
+    <div class="auth-field"><label for="authRegPwd2">确认密码</label><input id="authRegPwd2" type="password" autocomplete="new-password"></div>
+    <div id="authRegErr" class="auth-err"></div>
+    <button type="button" class="auth-primary" onclick="submitRegister()">注册并登录</button>
+    <button type="button" class="auth-link" onclick="showAuthPanel('login')">已有账号？去登录</button>
+  </div>
+  <div id="auth-card-bind" class="auth-card" hidden>
+    <h1>绑定家长</h1>
+    <p class="auth-sub">请向家长索取邀请码，或填写家长登录名申请绑定</p>
+    <div class="auth-field"><label for="authBindCode">家长邀请码</label><input id="authBindCode" placeholder="6 位邀请码" autocomplete="one-time-code"></div>
+    <div id="authBindErr" class="auth-err"></div>
+    <button type="button" class="auth-primary" onclick="submitBindCode()">用邀请码绑定</button>
+    <div class="auth-field" style="margin-top:20px"><label for="authParentLogin">家长登录名（申请绑定）</label><input id="authParentLogin" autocomplete="off"></div>
+    <div id="authBindReqErr" class="auth-err"></div>
+    <button type="button" class="auth-link" onclick="submitBindRequest()">发送绑定申请</button>
+    <button type="button" class="auth-link" onclick="submitBindRefresh()" style="margin-top:8px">家长已审批？刷新状态</button>
+    <button type="button" class="auth-link" onclick="logout()" style="margin-top:20px;color:var(--gray)">退出，换账号登录</button>
+  </div>
+</div>
 <div class="layout">
   <!-- 侧边栏 -->
   <aside class="sidebar">
@@ -852,6 +906,7 @@
         <div class="user-name" id="userName">金同学</div>
         <div class="user-grade" id="userGrade">五年级</div>
       </div>
+      <button onclick="logout()" id="authLogout" style="font-size:11px;font-weight:700;color:var(--gray);white-space:nowrap;margin-right:6px">退出</button>
       <button onclick="toggleRole()" id="roleSwitch" style="font-size:11px;font-weight:700;color:var(--blue2);white-space:nowrap">家长端</button>
     </div>
   </aside>
@@ -876,6 +931,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="config.js?v=1"></script>
-<script src="app.js?v=41"></script>
+<script src="app.js?v=42"></script>
 </body>
 </html>

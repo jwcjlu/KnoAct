@@ -1,12 +1,16 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 
 import 'app.dart';
 import 'features/screen_time/data/screen_time_worker.dart';
 import 'features/screen_time/data/screen_time_notifier.dart';
 
 void main() {
+  if (kIsWeb) {
+    usePathUrlStrategy();
+  }
   if (!kIsWeb) {
     registerScreenTimeWorker();
     requestNotificationPermission();

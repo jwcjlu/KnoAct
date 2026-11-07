@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Lesson, User, UserDocument
+from ..models import Lesson, PdfDocument, User, UserDocument
 from .deps import get_current_user
 
 
@@ -83,6 +83,29 @@ def ensure_lesson_document_access(actor: User, lesson_id: int, db: Session) -> L
         if not ok:
             raise HTTPException(status_code=403, detail={"error": "forbidden"})
         return lesson
+    raise HTTPException(status_code=403, detail={"error": "forbidden"})
+
+
+def ensure_pdf_document_access(actor: User, document_id: int, db: Session) -> PdfDocument:
+    """教材文档可读性：孩子仅当本人已绑定该 PdfDocument；家长与管理员与旧版一致（文档存在即可，便于上传后尚未绑孩子也管理课程）。"""
+    doc = db.get(PdfDocument, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="教材不存在")
+    if actor.role == "admin":
+        return doc
+    if actor.role == "parent":
+        return doc
+    if actor.role == "child":
+        if actor.parent_id is None:
+            raise HTTPException(status_code=403, detail={"error": "parent_required"})
+        bound = (
+            db.query(UserDocument)
+            .filter_by(user_id=actor.id, document_id=document_id)
+            .first()
+        )
+        if not bound:
+            raise HTTPException(status_code=403, detail={"error": "forbidden"})
+        return doc
     raise HTTPException(status_code=403, detail={"error": "forbidden"})
 
 

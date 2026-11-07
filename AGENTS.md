@@ -193,7 +193,7 @@ Web 走同源。验证：`flutter analyze && flutter test`（Flutter 位于 `E:\
 | `backend/app/capabilities/`               | `registry.py`（CapabilityRegistry）+ `chat.py`（Chat/Visualize/Solve 三 capability） |
 | `backend/tests/`                          | pytest，`conftest.py` + 每领域 test   |
 | `student-app/lib/core/`                   | Flutter 学生端：`router.dart`（登录守卫 + 三 Tab Shell）、`api_client.dart`、`config.dart`（`API_BASE` 解析） |
-| `student-app/lib/features/`               | `auth`（JWT 登录名+密码/OTP 登录、注册、绑定家长、会话与令牌存储、`currentChildIdProvider`）· `home`（首页任务/积分兑换）· `center`（听力/阅读答题、错题收录、任务自动提交、朗读）· `profile` · `shell` |
+| `student-app/lib/features/`               | `auth` · `home` · `center` · `profile` · `shell` · `reader`（`/reader/view` pdfrx PDF 页内划选 + 标注墨迹，对齐 Web；`pdf_lesson_reader.dart` / `reader_selection_bar.dart`） |
 | `student-app/test/`                       | flutter_test：`app_flow_test.dart`（整 App 流程）+ 每功能 test |
 | `student-app/Dockerfile` / `nginx.conf`   | Flutter Web 镜像（自带 CanvasKit）与 nginx 反代/缓存配置 |
 | `frontend/index.html` / `frontend/app.js` | 旧版学生端 Web（已冻结，待 Flutter 学生 App 取代；含对话栏 UI） |

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/session.dart';
+import '../reader/reader_controller.dart';
 import 'data/assignment_models.dart';
 import 'data/assignment_repository.dart';
 
@@ -63,10 +64,20 @@ class AssignmentController extends Notifier<AssignmentState> {
   @override
   AssignmentState build() {
     ref.watch(currentChildIdProvider);
+    ref.listen<int?>(
+      readerControllerProvider.select((s) => s.currentLesson?.id),
+      (prev, next) {
+        if (next == null) return;
+        if (prev == next && state.lessonId == next) return;
+        final subject = ref.read(readerControllerProvider).documentSubject;
+        state = AssignmentState(lessonId: next, subject: subject);
+      },
+      fireImmediately: true,
+    );
     return const AssignmentState();
   }
 
-  /// 从阅读页进入时初始化（lessonId + subject）
+  /// 学习中心等场景手动绑定（`/assignment` 路由）
   void init({required int lessonId, required String subject}) {
     state = AssignmentState(lessonId: lessonId, subject: subject);
   }

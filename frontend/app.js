@@ -64,7 +64,267 @@ const NAV = [
 ];
 let active = '学习首页';
 let points = 0;
-let uid = 1;
+let uid = 0;
+const AUTH_KEYS = { access: 'knoact_access_token', refresh: 'knoact_refresh_token' };
+let accessToken = '';
+let refreshToken = '';
+let sessionProfile = null;
+try {
+  accessToken = localStorage.getItem(AUTH_KEYS.access) || '';
+  refreshToken = localStorage.getItem(AUTH_KEYS.refresh) || '';
+} catch (e) { /* private mode */ }
+
+function authHeaders(extra = {}) {
+  const h = { ...extra };
+  if (accessToken) h.Authorization = 'Bearer ' + accessToken;
+  return h;
+}
+
+function persistTokens(u) {
+  if (u.access_token) {
+    accessToken = u.access_token;
+    try { localStorage.setItem(AUTH_KEYS.access, accessToken); } catch (e) {}
+  }
+  if (u.refresh_token) {
+    refreshToken = u.refresh_token;
+    try { localStorage.setItem(AUTH_KEYS.refresh, refreshToken); } catch (e) {}
+  }
+}
+
+function clearAuth() {
+  accessToken = '';
+  refreshToken = '';
+  sessionProfile = null;
+  uid = 0;
+  try {
+    localStorage.removeItem(AUTH_KEYS.access);
+    localStorage.removeItem(AUTH_KEYS.refresh);
+  } catch (e) {}
+}
+
+function applySession(u) {
+  const profile = u.user || u;
+  sessionProfile = profile;
+  if (profile.id != null) uid = profile.id;
+  persistTokens(u);
+  updateUserChrome(profile);
+  return profile;
+}
+
+function updateUserChrome(profile) {
+  const name = profile.display_name || profile.name || profile.login_name || '同学';
+  const av = document.getElementById('userAvatar');
+  const un = document.getElementById('userName');
+  const ug = document.getElementById('userGrade');
+  if (av) av.textContent = name.slice(0, 1);
+  if (un) un.textContent = name;
+  if (ug) ug.textContent = profile.grade ? `${profile.grade}年级` : '学生';
+}
+
+function authErrorMessage(data) {
+  const code = (data && data.detail && data.detail.error) || (data && data.error);
+  const map = {
+    invalid_credentials: '登录名或密码错误',
+    login_name_taken: '登录名已被占用',
+    please_register: '账号不存在，请先注册',
+    invalid_code: '邀请码无效',
+    code_used: '邀请码已使用',
+    code_expired: '邀请码已过期',
+    already_bound: '已绑定家长',
+    parent_not_found: '未找到该家长登录名',
+    parent_required: '请先绑定家长',
+    archived: '账号已停用',
+  };
+  return map[code] || '操作失败，请检查网络或稍后重试';
+}
+
+async function apiAuth(path, body) {
+  const r = await fetch(API + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const ct = r.headers.get('content-type') || '';
+  const data = ct.includes('json') ? await r.json() : {};
+  if (!r.ok) throw new Error(authErrorMessage(data));
+  return data;
+}
+
+function showAuthPanel(mode) {
+  const gate = document.getElementById('auth-gate');
+  if (!gate) return;
+  gate.hidden = false;
+  document.querySelector('.layout').style.display = 'none';
+  document.getElementById('auth-card-login').hidden = mode !== 'login';
+  document.getElementById('auth-card-register').hidden = mode !== 'register';
+  document.getElementById('auth-card-bind').hidden = mode !== 'bind';
+}
+
+function hideAuthGate() {
+  const gate = document.getElementById('auth-gate');
+  if (gate) gate.hidden = true;
+  document.querySelector('.layout').style.display = '';
+}
+
+async function submitLogin() {
+  const login_name = document.getElementById('authLoginName').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authLoginErr');
+  errEl.textContent = '';
+  if (!login_name || !password) {
+    errEl.textContent = '请填写登录名和密码';
+    return;
+  }
+  try {
+    const u = await apiAuth('/api/auth/login', { login_name, password });
+    if ((u.user || u).role !== 'child') {
+      clearAuth();
+      errEl.textContent = '请使用孩子账号登录学生端';
+      return;
+    }
+    applySession(u);
+    const me = await api('/api/auth/me');
+    sessionProfile = me;
+    updateUserChrome(me);
+    if (!me.parent_bound) {
+      showAuthPanel('bind');
+      return;
+    }
+    await bootApp();
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+async function submitRegister() {
+  const login_name = document.getElementById('authRegName').value.trim();
+  const password = document.getElementById('authRegPwd').value;
+  const password2 = document.getElementById('authRegPwd2').value;
+  const errEl = document.getElementById('authRegErr');
+  errEl.textContent = '';
+  if (!login_name || !password) {
+    errEl.textContent = '请填写登录名和密码';
+    return;
+  }
+  if (password !== password2) {
+    errEl.textContent = '两次密码不一致';
+    return;
+  }
+  try {
+    const u = await apiAuth('/api/auth/register', { login_name, password, role: 'child' });
+    applySession(u);
+    const me = await api('/api/auth/me');
+    sessionProfile = me;
+    toast('注册成功，请绑定家长');
+    showAuthPanel('bind');
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+async function submitBindCode() {
+  const code = document.getElementById('authBindCode').value.trim();
+  const errEl = document.getElementById('authBindErr');
+  errEl.textContent = '';
+  if (!code) {
+    errEl.textContent = '请输入邀请码';
+    return;
+  }
+  try {
+    await apiOk('/api/family/bind', { method: 'POST', body: { code } });
+    const me = await api('/api/auth/me');
+    sessionProfile = me;
+    updateUserChrome(me);
+    toast('已绑定家长');
+    await bootApp();
+  } catch (e) {
+    errEl.textContent = e.message || '绑定失败';
+  }
+}
+
+async function submitBindRefresh() {
+  const errEl = document.getElementById('authBindErr');
+  errEl.textContent = '';
+  try {
+    const me = await api('/api/auth/me');
+    sessionProfile = me;
+    updateUserChrome(me);
+    if (!me.parent_bound) {
+      errEl.textContent = '尚未绑定，请继续等待家长审批或使用邀请码';
+      return;
+    }
+    toast('绑定已生效');
+    await bootApp();
+  } catch (e) {
+    errEl.textContent = e.message || '刷新失败';
+  }
+}
+
+async function submitBindRequest() {
+  const parent_login_name = document.getElementById('authParentLogin').value.trim();
+  const errEl = document.getElementById('authBindReqErr');
+  errEl.textContent = '';
+  if (!parent_login_name) {
+    errEl.textContent = '请填写家长登录名';
+    return;
+  }
+  try {
+    await apiOk('/api/family/request', { method: 'POST', body: { parent_login_name } });
+    toast('已发送申请，请让家长端审批');
+    errEl.textContent = '等待家长审批中…';
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+async function logout() {
+  if (refreshToken) {
+    try { await apiAuth('/api/auth/logout', { refresh_token: refreshToken }); } catch (e) { /* ignore */ }
+  }
+  clearAuth();
+  isParent = false;
+  showAuthPanel('login');
+}
+
+async function tryRestoreSession() {
+  if (!accessToken) return false;
+  try {
+    let me = await api('/api/auth/me');
+    sessionProfile = me;
+    uid = me.id;
+    updateUserChrome(me);
+    if (me.role !== 'child') {
+      clearAuth();
+      return false;
+    }
+    if (!me.parent_bound) {
+      showAuthPanel('bind');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    if (!refreshToken) {
+      clearAuth();
+      return false;
+    }
+    try {
+      const u = await apiAuth('/api/auth/refresh', { refresh_token: refreshToken });
+      applySession(u);
+      const me = await api('/api/auth/me');
+      sessionProfile = me;
+      updateUserChrome(me);
+      if (!me.parent_bound) {
+        showAuthPanel('bind');
+        return false;
+      }
+      return true;
+    } catch (e2) {
+      clearAuth();
+      return false;
+    }
+  }
+}
+
 let isParent = false;
 let parentTab = '教材';
 let wrongFilter = '全部';
@@ -265,15 +525,52 @@ function toast(msg){
 }
 
 async function api(path, opts={}){
-  const init = {headers:{'Content-Type':'application/json'}, ...opts};
+  const init = {headers: authHeaders({'Content-Type': 'application/json'}), ...opts};
   if(opts.body) init.body = JSON.stringify(opts.body);
   const r = await fetch(API + path, init);
   const ct = r.headers.get('content-type')||'';
+  if (r.status === 401 && !path.startsWith('/api/auth/')) {
+    clearAuth();
+    showAuthPanel('login');
+    toast('登录已过期，请重新登录');
+    throw new Error('unauthorized');
+  }
+  if (r.status === 403 && ct.includes('json')) {
+    const data = await r.json();
+    if (data.detail && data.detail.error === 'parent_required') {
+      showAuthPanel('bind');
+      toast('请先绑定家长');
+      throw new Error('parent_required');
+    }
+    return data;
+  }
   return ct.includes('json') ? r.json() : r.text();
 }
+
+async function apiOk(path, opts = {}) {
+  const init = { headers: authHeaders({ 'Content-Type': 'application/json' }), ...opts };
+  if (opts.body) init.body = JSON.stringify(opts.body);
+  const r = await fetch(API + path, init);
+  const ct = r.headers.get('content-type') || '';
+  const data = ct.includes('json') ? await r.json() : {};
+  if (r.status === 401 && !path.startsWith('/api/auth/')) {
+    clearAuth();
+    showAuthPanel('login');
+    toast('登录已过期，请重新登录');
+    throw new Error('unauthorized');
+  }
+  if (r.status === 403 && data.detail && data.detail.error === 'parent_required') {
+    showAuthPanel('bind');
+    toast('请先绑定家长');
+    throw new Error('parent_required');
+  }
+  if (!r.ok) throw new Error(authErrorMessage(data));
+  return data;
+}
+
 const sleep = ms => new Promise(res=>setTimeout(res,ms));
 async function apiForm(path, formData){
-  const r = await fetch(API + path, {method:'POST', body:formData});
+  const r = await fetch(API + path, {method:'POST', headers: authHeaders(), body: formData});
   const ct = r.headers.get('content-type')||'';
   return ct.includes('json') ? r.json() : r.text();
 }
@@ -617,7 +914,7 @@ function speakDict(){
 // 播放后端 TTS：真实 provider 返回音频字节则转 blob 播放，fake 回退浏览器合成
 async function playTts(text){
   try{
-    const r = await fetch(`${API}/api/tts/synthesize?text=${encodeURIComponent(text)}`);
+    const r = await fetch(`${API}/api/tts/synthesize?text=${encodeURIComponent(text)}`, {headers: authHeaders()});
     const ct = r.headers.get('content-type')||'';
     if(ct.includes('audio')){
       const blob = await r.blob();
@@ -2407,7 +2704,7 @@ async function chatAsk(preset){
   try{
     const resp = await fetch(API + '/api/ask/stream', {
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers: authHeaders({'Content-Type':'application/json'}),
       body: JSON.stringify(body),
     });
     const reader = resp.body.getReader();
@@ -2473,7 +2770,7 @@ async function pollRenderTask(taskId, msgIndex){
   };
   for(let i = 0; i < 160; i++){  // 最多 160 × 3s = 480s（LLM 生成代码约 3-4 分钟，必须等够）
     try{
-      const r = await fetch(API + '/api/render/' + taskId);
+      const r = await fetch(API + '/api/render/' + taskId, {headers: authHeaders()});
       const d = await r.json();
       if(d.status === 'done' && d.video_url){
         renderCard('done', d.video_url);
@@ -3684,7 +3981,7 @@ async function testAiConnection(){
 async function testVoice(){
   toast('正在合成试听语音…');
   try{
-    const r = await fetch(`${API}/api/tts/synthesize?text=${encodeURIComponent('你好，这是语音合成测试')}`);
+    const r = await fetch(`${API}/api/tts/synthesize?text=${encodeURIComponent('你好，这是语音合成测试')}`, {headers: authHeaders()});
     const ct = r.headers.get('content-type')||'';
     if(ct.includes('audio')){
       const blob = await r.blob();
@@ -3700,23 +3997,21 @@ async function testVoice(){
 }
 
 // ===== 初始化 =====
-async function init(){
-  // 登录默认孩子
-  const u = await api('/api/auth/login', {method:'POST', body:{name:'金同学'}});
-  uid = u.id;
-  document.getElementById('userName').textContent = u.name;
+async function bootApp(){
+  hideAuthGate();
   await loadPoints();
   await loadCenter();
   dictWords = await api(`/api/dictation/words?user_id=${uid}`);
-  // 预载 AI 配置，让模型 chip 显示真实默认模型（失败不影响其它功能）
-  try{ await loadConfig(); }catch(e){}
-  // 点击别处关闭模型/模式下拉
+  try { await loadConfig(); } catch (e) {}
+  renderNav();
+  render();
+}
+
+function setupGlobalUiHandlers(){
   document.addEventListener('click', (e)=>{
     if(chatMenu && !e.target.closest('.im-chips')){ chatMenu = null; renderImmersiveChips(); }
   });
-  // 沉浸页面板拖拽：分隔条用 Pointer Events + setPointerCapture，拖拽中直接改
-  // grid 列宽（不触发整体 render），松手后持久化到 localStorage。
-  let drag = null;  // {side, pointerId, startX, startW, grid}
+  let drag = null;
   document.addEventListener('pointerdown', (e)=>{
     const sep = e.target.closest && e.target.closest('.im-sep');
     if(!sep || e.button !== 0) return;
@@ -3761,7 +4056,17 @@ async function init(){
   };
   document.addEventListener('pointerup', endDrag);
   document.addEventListener('pointercancel', endDrag);
-  renderNav(); render();
+}
+
+async function init(){
+  setupGlobalUiHandlers();
+  const ready = await tryRestoreSession();
+  if (!ready) {
+    if (!document.getElementById('auth-gate').hidden) return;
+    showAuthPanel('login');
+    return;
+  }
+  await bootApp();
 }
 async function loadPoints(){
   const d = await api(`/api/points/balance?user_id=${uid}`);

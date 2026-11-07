@@ -14,6 +14,7 @@ import '../features/home/ui/home_page.dart';
 import '../features/knowledge_review/ui/knowledge_page.dart';
 import '../features/math_exercise/ui/math_page.dart';
 import '../features/profile/ui/profile_page.dart';
+import '../features/reader/ui/pdf_reader_spike_page.dart';
 import '../features/reader/ui/reader_home_page.dart';
 import '../features/reader/ui/reader_view_page.dart';
 import '../features/shell/app_shell.dart';
@@ -49,7 +50,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           path == '/knowledge' ||
           path == '/dictation' ||
           path == '/reader' ||
-          path == '/reader/view') {
+          path == '/reader/view' ||
+          path == '/reader/spike') {
         return null;
       }
       return '/home';
@@ -64,7 +66,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/knowledge', builder: (_, _) => const KnowledgePage()),
       GoRoute(path: '/dictation', builder: (_, _) => const DictationPage()),
       GoRoute(path: '/reader', builder: (_, _) => const ReaderHomePage()),
-      GoRoute(path: '/reader/view', builder: (_, _) => const ReaderViewPage()),
+      GoRoute(
+        path: '/reader/view',
+        builder: (_, state) => ReaderViewPage(
+          initialLessonId: int.tryParse(state.uri.queryParameters['lesson'] ?? ''),
+        ),
+      ),
+      GoRoute(
+        path: '/reader/spike',
+        builder: (_, _) => const PdfReaderSpikePage(),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => AppShell(navigationShell: shell),
         branches: [

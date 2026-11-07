@@ -2,7 +2,12 @@ import os
 from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from ..core.access import ensure_user_access, resolve_target_user_id
+from ..core.access import (
+    ensure_pdf_document_access,
+    ensure_user_access,
+    require_learning_user,
+    resolve_target_user_id,
+)
 from ..core.deps import get_current_user, require_role
 from ..database import get_db, SessionLocal
 from ..models import User
@@ -56,13 +61,20 @@ async def upload_pdf(subject: str = Form(...), grade: int = Form(None),
 
 @router.get("/documents")
 def list_documents(user_id: int | None = None,
-                   user: User = Depends(require_role("parent", "admin")),
+                   user: User = Depends(require_learning_user),
                    db: Session = Depends(get_db)):
-    if user_id is not None:
+    """列出教材：家长/管理员可查全库或按 user_id 过滤已绑定；孩子仅能看到本人已绑定的文档。"""
+    if user.role == "child":
+        effective_user_id = user.id
+    elif user_id is not None:
         ensure_user_access(user, user_id, db)
+        effective_user_id = user_id
+    else:
+        effective_user_id = None
+
     q = db.query(PdfDocument)
-    if user_id is not None:
-        bound = db.query(UserDocument.document_id).filter_by(user_id=user_id)
+    if effective_user_id is not None:
+        bound = db.query(UserDocument.document_id).filter_by(user_id=effective_user_id)
         q = q.filter(PdfDocument.id.in_(bound))
     docs = q.all()
     out = []
@@ -79,11 +91,11 @@ def list_documents(user_id: int | None = None,
 
 
 @router.get("/documents/{document_id}/lessons")
-def list_document_lessons(document_id: int, _auth: User = Depends(require_role("parent", "admin")),
+def list_document_lessons(document_id: int, user: User = Depends(require_learning_user),
                           db: Session = Depends(get_db)):
-    doc = db.get(PdfDocument, document_id)
+    doc = ensure_pdf_document_access(user, document_id, db)
     # 页图缓存版本：document 创建时间戳（毫秒），前端拼 ?v= 使教材重渲染后缓存自然失效
-    doc_version = int(doc.created_at.timestamp() * 1000) if (doc and doc.created_at) else 0
+    doc_version = int(doc.created_at.timestamp() * 1000) if doc.created_at else 0
     lessons = db.query(Lesson).filter_by(document_id=document_id).order_by(Lesson.start_page).all()
     out = []
     for l in lessons:

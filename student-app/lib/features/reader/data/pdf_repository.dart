@@ -5,19 +5,27 @@ import '../../../core/providers.dart';
 
 /// 教材
 class PdfDoc {
-  const PdfDoc({required this.id, required this.filename, required this.subject, required this.lessonCount});
+  const PdfDoc({
+    required this.id,
+    required this.filename,
+    required this.subject,
+    required this.lessonCount,
+    this.storagePath = '',
+  });
 
   factory PdfDoc.fromJson(Map<String, dynamic> j) => PdfDoc(
         id: (j['id'] as num).toInt(),
         filename: '${j['filename'] ?? ''}',
         subject: '${j['subject'] ?? ''}',
         lessonCount: (j['lesson_count'] as num?)?.toInt() ?? 0,
+        storagePath: '${j['storage_path'] ?? ''}',
       );
 
   final int id;
   final String filename;
   final String subject;
   final int lessonCount;
+  final String storagePath;
 }
 
 /// 一课（含页面图片 + 课文文本）
@@ -70,19 +78,33 @@ class PdfPage {
 
 /// 标注
 class AnnotationItem {
-  const AnnotationItem({required this.id, required this.kind, required this.quote, required this.note});
+  const AnnotationItem({
+    required this.id,
+    required this.kind,
+    required this.quote,
+    required this.note,
+    this.color = 'yellow',
+    this.pageNumber = 1,
+    this.rects = '',
+  });
 
   factory AnnotationItem.fromJson(Map<String, dynamic> j) => AnnotationItem(
         id: (j['id'] as num).toInt(),
         kind: '${j['kind'] ?? ''}',
         quote: '${j['quote'] ?? ''}',
         note: '${j['note'] ?? ''}',
+        color: '${j['color'] ?? 'yellow'}',
+        pageNumber: (j['page_number'] as num?)?.toInt() ?? 1,
+        rects: '${j['rects'] ?? ''}',
       );
 
   final int id;
   final String kind; // highlight | underline | note | glossary
   final String quote;
   final String note;
+  final String color;
+  final int pageNumber;
+  final String rects;
 }
 
 class PdfRepository {
@@ -107,22 +129,84 @@ class PdfRepository {
   }
 
   /// 划词释义：选中词 → AI 查释义（落库为 glossary 标注）
-  Future<String> glossary({required int lessonId, required String quote, int? userId}) async {
+  Future<String> glossary({
+    required int lessonId,
+    required String quote,
+    int? userId,
+    int pageNumber = 1,
+    String rects = '',
+  }) async {
     final r = asMap(await _api.post('/api/annotations/glossary', body: {
       'lesson_id': lessonId,
       'quote': quote,
+      'page_number': pageNumber,
+      'rects': rects,
       'user_id': ?userId,
     }));
     return '${r['note'] ?? ''}';
   }
 
   /// 添加笔记
-  Future<void> addNote({required int lessonId, required String quote, required String note, int? userId}) async {
+  Future<void> addNote({
+    required int lessonId,
+    required String quote,
+    required String note,
+    int? userId,
+    String color = 'yellow',
+    int pageNumber = 1,
+    String rects = '',
+  }) async {
+    await createAnnotation(
+      lessonId: lessonId,
+      kind: 'note',
+      quote: quote,
+      note: note,
+      userId: userId,
+      color: color,
+      pageNumber: pageNumber,
+      rects: rects,
+    );
+  }
+
+  /// 划线 / 高亮（对齐 Web 标注）
+  Future<void> addHighlight({
+    required int lessonId,
+    required String quote,
+    String kind = 'highlight',
+    int? userId,
+    String color = 'yellow',
+    int pageNumber = 1,
+    String rects = '',
+  }) async {
+    await createAnnotation(
+      lessonId: lessonId,
+      kind: kind,
+      quote: quote,
+      userId: userId,
+      color: color,
+      pageNumber: pageNumber,
+      rects: rects,
+    );
+  }
+
+  Future<void> createAnnotation({
+    required int lessonId,
+    required String kind,
+    required String quote,
+    String note = '',
+    int? userId,
+    String color = 'yellow',
+    int pageNumber = 1,
+    String rects = '',
+  }) async {
     await _api.post('/api/annotations', body: {
       'lesson_id': lessonId,
-      'kind': 'note',
+      'kind': kind,
       'quote': quote,
       'note': note,
+      'color': color,
+      'page_number': pageNumber,
+      'rects': rects,
       'user_id': ?userId,
     });
   }

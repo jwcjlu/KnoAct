@@ -30,7 +30,17 @@ class ReaderHomePage extends ConsumerWidget {
               error: (_, _) => ErrorCard(message: '教材加载失败，请检查网络或后端服务', onRetry: ctl.loadDocuments),
               data: (docs) => docs.isEmpty
                   ? const Center(child: Text('暂无教材，请在家长端上传 PDF', style: TextStyle(color: AppColors.gray)))
-                  : _DocumentList(docs: docs, onSelect: ctl.loadLessons),
+                  : _DocumentList(
+                      docs: docs,
+                      onSelect: (doc) async {
+                        await ctl.loadLessons(doc.id, subject: doc.subject);
+                        final lessons = ref.read(readerControllerProvider).lessons;
+                        if (!context.mounted || lessons.isEmpty) return;
+                        await ctl.openLesson(lessons.first);
+                        if (!context.mounted) return;
+                        context.go('/reader/view');
+                      },
+                    ),
             ),
     );
   }
@@ -40,7 +50,7 @@ class _DocumentList extends StatelessWidget {
   const _DocumentList({required this.docs, required this.onSelect});
 
   final List<PdfDoc> docs;
-  final ValueChanged<int> onSelect;
+  final Future<void> Function(PdfDoc doc) onSelect;
 
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(20), children: [
@@ -56,7 +66,7 @@ class _DocumentList extends StatelessWidget {
               title: Text(d.filename),
               subtitle: Text('${d.subject} · ${d.lessonCount} 课'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => onSelect(d.id),
+              onTap: () => onSelect(d),
             ),
           ),
           const SizedBox(height: 8),

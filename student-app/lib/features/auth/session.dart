@@ -13,7 +13,10 @@ class SessionNotifier extends AsyncNotifier<Child?> {
   @override
   Future<Child?> build() async {
     final store = ref.read(sessionStoreProvider);
-    final cached = await store.load();
+    final cached = await store.load().timeout(
+      const Duration(seconds: 8),
+      onTimeout: () => null,
+    );
     if (cached == null) return null;
     // 账号体系升级前只存了 id/name，无 JWT：视为未登录，避免进首页后接口全 401
     if (await store.readAccessToken() == null) {

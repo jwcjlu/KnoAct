@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/text_utils.dart';
+import '../reader/reader_controller.dart';
 import 'data/ask_repository.dart';
 
 /// 对话的三种模式（对齐后端 capability：chat/visualize/solve）
@@ -73,9 +74,35 @@ class AskState {
 
 class AskController extends Notifier<AskState> {
   @override
-  AskState build() => const AskState();
+  AskState build() {
+    ref.listen<int?>(
+      readerControllerProvider.select((s) => s.currentLesson?.id),
+      (prev, next) {
+        if (next == null) return;
+        if (prev == next && state.lessonId == next) return;
+        _bindReaderLesson(prev != next);
+      },
+      fireImmediately: true,
+    );
+    return const AskState();
+  }
 
-  /// 从阅读页初始化（lessonId + 课文全文）
+  /// 个性化学习：课文随 [readerControllerProvider] 切换（在 Notifier 内 listen，避免 Widget build 期改 provider）
+  void _bindReaderLesson(bool lessonChanged) {
+    final lesson = ref.read(readerControllerProvider).currentLesson;
+    if (lesson == null) return;
+    final sentences = splitSentences(lesson.fullText);
+    final quote = sentences.isNotEmpty ? sentences.first : '';
+    state = AskState(
+      lessonId: lesson.id,
+      context: lesson.fullText,
+      selected: lessonChanged ? quote : (state.selected.isNotEmpty ? state.selected : quote),
+      mode: state.mode,
+      messages: lessonChanged ? const [] : state.messages,
+    );
+  }
+
+  /// 学习中心阅读材料等场景（无 reader 课文时手动绑定）
   void init({required int lessonId, required String context}) {
     state = AskState(lessonId: lessonId, context: context);
   }

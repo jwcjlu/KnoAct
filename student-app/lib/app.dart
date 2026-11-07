@@ -15,7 +15,18 @@ class StudentApp extends ConsumerWidget {
     if (!session.hasValue && !session.hasError) {
       return MaterialApp(
         theme: buildTheme(),
-        home: const Scaffold(body: Center(child: CircularProgressIndicator())),
+        home: const Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('正在加载…', style: TextStyle(color: AppColors.gray)),
+              ],
+            ),
+          ),
+        ),
       );
     }
     return MaterialApp.router(

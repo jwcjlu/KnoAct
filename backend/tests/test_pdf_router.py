@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from app.routers.pdf import router as pdf_router
 from app.database import SessionLocal
 from app.models import User
-from conftest import auth_headers, make_account
+from conftest import auth_headers, make_account, parent_child
 
 
 def _client():
@@ -202,3 +202,46 @@ def test_delete_document_cleans_bindings(setup_db):
     s = SessionLocal()
     assert s.query(UserDocument).count() == 0
     s.close()
+
+
+def test_child_list_documents_bound_only(setup_db):
+    """学生（已绑定家长）GET /documents 仅返回本人已绑定教材；GET .../lessons 仅绑定可读。"""
+    from app.models import Lesson, PdfDocument, UserDocument
+    s = SessionLocal()
+    parent, child, _, hc = parent_child(s, "pdf_child")
+    d1 = PdfDocument(filename="a.pdf", subject="语文", storage_path="uploads/a.pdf")
+    d2 = PdfDocument(filename="b.pdf", subject="数学", storage_path="uploads/b.pdf")
+    s.add_all([d1, d2]); s.flush()
+    s.add(Lesson(document_id=d1.id, subject="语文", title="第 1 课", start_page=1, end_page=1,
+                  extract_status="done", audit_status="approved"))
+    s.add(UserDocument(user_id=child.id, document_id=d1.id))
+    s.commit()
+    did1, did2 = d1.id, d2.id
+    s.close()
+
+    c = _client()
+    docs = c.get("/api/pdf/documents", headers=hc).json()
+    assert len(docs) == 1 and docs[0]["id"] == did1
+    assert c.get(f"/api/pdf/documents/{did1}/lessons", headers=hc).status_code == 200
+    r403 = c.get(f"/api/pdf/documents/{did2}/lessons", headers=hc)
+    assert r403.status_code == 403
+    assert r403.json()["detail"] == {"error": "forbidden"}
+
+
+def test_child_without_parent_cannot_read_pdf(setup_db):
+    from app.models import PdfDocument, User, UserDocument
+    s = SessionLocal()
+    child = User(name="孤儿孩", role="child", parent_id=None)
+    d = PdfDocument(filename="a.pdf", subject="语文", storage_path="uploads/a.pdf")
+    s.add_all([child, d]); s.flush()
+    s.add(UserDocument(user_id=child.id, document_id=d.id))
+    s.commit()
+    hid = child.id
+    did = d.id
+    s.close()
+    s = SessionLocal()
+    h = auth_headers(s.get(User, hid))
+    s.close()
+    c = _client()
+    assert c.get("/api/pdf/documents", headers=h).status_code == 403
+    assert c.get(f"/api/pdf/documents/{did}/lessons", headers=h).status_code == 403

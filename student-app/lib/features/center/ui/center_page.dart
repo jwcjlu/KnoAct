@@ -217,7 +217,10 @@ class _ReadingViewState extends ConsumerState<_ReadingView> {
   @override
   void initState() {
     super.initState();
-    _initAsk();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _initAsk();
+    });
   }
 
   void _initAsk() {

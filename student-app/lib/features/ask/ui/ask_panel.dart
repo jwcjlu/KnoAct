@@ -9,7 +9,11 @@ import '../mermaid_view.dart';
 
 /// 内嵌在阅读页里的对话栏：模式切换 + 快捷问题 + 消息列表 + 输入框
 class AskPanel extends ConsumerStatefulWidget {
-  const AskPanel({super.key});
+  const AskPanel({super.key, this.chatDisabled = false, this.chatDisabledHint});
+
+  /// 做作业等场景暂停对话（对齐 Web `chatDisabled`）
+  final bool chatDisabled;
+  final String? chatDisabledHint;
 
   @override
   ConsumerState<AskPanel> createState() => _AskPanelState();
@@ -35,7 +39,16 @@ class _AskPanelState extends ConsumerState<AskPanel> {
   Widget build(BuildContext context) {
     final s = ref.watch(askControllerProvider);
     final ctl = ref.read(askControllerProvider.notifier);
+    final disabled = widget.chatDisabled;
+    final disabledHint = widget.chatDisabledHint ??
+        '本课作业还没完成，AI 对话已暂停；完成作业或点「先不做了」后即可继续提问';
     final hasMessages = s.messages.isNotEmpty || s.busy;
+    if (disabled) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(disabledHint, style: const TextStyle(fontSize: 13, color: AppColors.gray, height: 1.45)),
+      );
+    }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       // 引用上下文
       if (s.selected.isNotEmpty) ...[
