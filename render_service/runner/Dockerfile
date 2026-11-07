@@ -16,7 +16,7 @@
 
 FROM python:3.11-slim
 
-ARG APT_MIRROR=mirrors.aliyun.com
+ARG APT_MIRROR=deb.debian.org
 
 # ----- manim 渲染依赖 -----------------------------------------------------
 # manim 渲染视频需要 ffmpeg；数学公式排版需要 LaTeX。texlive 装精简子集

@@ -5,9 +5,9 @@
 # 本镜像只需 ffmpeg 合成旁白音轨，不装 manim / LaTeX。
 FROM python:3.10-slim
 
-ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
-ARG APT_MIRROR=mirrors.aliyun.com
+ARG PIP_INDEX_URL=https://pypi.org/simple/
+ARG PIP_TRUSTED_HOST=pypi.org
+ARG APT_MIRROR=deb.debian.org
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -29,7 +29,10 @@ RUN set -eux; \
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --upgrade pip setuptools wheel \
-    && pip install -r backend/requirements.txt
+    && pip install -r backend/requirements.txt \
+    || ( [ "$PIP_INDEX_URL" = "https://pypi.org/simple/" ] && exit 1; \
+        PIP_INDEX_URL=https://pypi.org/simple/ PIP_TRUSTED_HOST=pypi.org \
+        pip install -r backend/requirements.txt )
 
 COPY backend/app backend/app
 COPY render_service render_service

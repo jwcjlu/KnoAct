@@ -19,8 +19,8 @@
 #   docker compose up -d --build backend        # 仅重建后端（改 API 时常用，避免连编全部前端）
 #   编 student-app 前建议 df -h 根分区剩余 ≥15GB；不足时 sh scripts/docker-free-disk.sh
 #   docker compose --profile render up -d --build   # 连同动画渲染一起起
-# 国内机：backend 默认阿里云 PyPI；拉 mysql/nginx 等 Hub 镜像慢 → 配置 daemon 加速器（见 scripts/docker-aliyun-mirror.sh）
-# 首次：docker compose pull && docker compose up -d --build   日常改代码：只 build 改动的服务，勿每次 --build 全栈
+# 构建/拉取加速：统一在 .env 配置（默认官方源）；Hub 可多镜像 → scripts/docker-registry-mirrors.sh
+# 首次：docker compose pull && docker compose up -d --build   日常：只 build 改动的服务
 # 访问：学生端（Flutter）http://<服务器IP>:${KNOACT_STUDENT_PORT:-8082}，旧版学生端 :${KNOACT_HTTP_PORT:-8080}，家长端 :${KNOACT_PARENT_PORT:-8081}
 # ============================================
 
@@ -55,9 +55,9 @@ services:
     build:
       context: ./backend
       args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
-        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.org}
+        APT_MIRROR: ${APT_MIRROR:-deb.debian.org}
     image: knoact-backend:latest
     restart: unless-stopped
     environment:
@@ -110,7 +110,14 @@ services:
         condition: service_healthy
 
   student-app:
-    build: ./student-app
+    build:
+      context: ./student-app
+      args:
+        APT_MIRROR: ${APT_MIRROR:-deb.debian.org}
+        PUB_HOSTED_URL: ${PUB_HOSTED_URL:-https://pub.dev}
+        FLUTTER_STORAGE_BASE_URL: ${FLUTTER_STORAGE_BASE_URL:-https://storage.googleapis.com}
+        PUB_FALLBACK_URL: ${PUB_FALLBACK_URL:-https://pub.dev}
+        FLUTTER_FALLBACK_STORAGE: ${FLUTTER_FALLBACK_STORAGE:-https://storage.googleapis.com}
     image: knoact-student-app:latest
     restart: unless-stopped
     ports:

@@ -1,14 +1,18 @@
 # KnoAct Flutter 学生端（Web）
 # 构建上下文为 student-app/：docker build -t knoact-student-app ./student-app
 FROM --platform=linux/amd64 debian:bookworm-slim AS build
-ARG APT_MIRROR=mirrors.aliyun.com
+ARG APT_MIRROR=deb.debian.org
+ARG PUB_HOSTED_URL=https://pub.dev
+ARG FLUTTER_STORAGE_BASE_URL=https://storage.googleapis.com
+ARG PUB_FALLBACK_URL=https://pub.dev
+ARG FLUTTER_FALLBACK_STORAGE=https://storage.googleapis.com
 ARG FLUTTER_VERSION=3.47.9
 ARG FLUTTER_SHA256=25ed8c3c29d51a7353f2a944310b478af8214920639524b19c50a19e6c044c5a
 ARG FLUTTER_USER=flutter
 ARG FLUTTER_UID=10001
 
-ENV PUB_HOSTED_URL=https://pub.flutter-io.cn \
-    FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn \
+ENV PUB_HOSTED_URL=${PUB_HOSTED_URL} \
+    FLUTTER_STORAGE_BASE_URL=${FLUTTER_STORAGE_BASE_URL} \
     PATH=/opt/flutter/bin:$PATH \
     CI=true
 
@@ -45,8 +49,9 @@ ENV HOME=/home/${FLUTTER_USER} \
 COPY --chown=10001:10001 pubspec.yaml pubspec.lock ./
 RUN flutter --version \
     && (flutter pub get --enforce-lockfile \
-        || (echo "pub mirror miss, retry pub.dev..." \
-            && PUB_HOSTED_URL=https://pub.dev FLUTTER_STORAGE_BASE_URL=https://storage.googleapis.com flutter pub get --enforce-lockfile))
+        || (echo "pub mirror miss, retry fallback..." \
+            && PUB_HOSTED_URL=${PUB_FALLBACK_URL} FLUTTER_STORAGE_BASE_URL=${FLUTTER_FALLBACK_STORAGE} \
+               flutter pub get --enforce-lockfile))
 
 COPY --chown=10001:10001 . .
 # API_BASE=""：Web 编译期标记已定义、值为空，走 nginx 同源 /api
