@@ -35,7 +35,11 @@ RUN curl -fL --retry 3 -o /tmp/flutter.tar.xz \
 
 WORKDIR /app
 COPY pubspec.yaml pubspec.lock ./
-RUN flutter pub get --enforce-lockfile
+# flutter-io.cn 偶发缺版本会与 lockfile 冲突；失败时回退 pub.dev（海外慢但全）
+RUN flutter --version \
+    && (flutter pub get --enforce-lockfile \
+        || (echo "pub mirror miss, retry pub.dev..." \
+            && PUB_HOSTED_URL=https://pub.dev FLUTTER_STORAGE_BASE_URL=https://storage.googleapis.com flutter pub get --enforce-lockfile))
 COPY . .
 # API_BASE 置空：Web 走同源，经 nginx 反代 /api、/uploads 到后端；
 # --no-web-resources-cdn 把 CanvasKit 打进产物，运行时不再访问 www.gstatic.com
