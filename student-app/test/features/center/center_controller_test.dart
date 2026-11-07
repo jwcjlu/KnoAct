@@ -70,6 +70,9 @@ class FakeTaskRepository implements HomeRepository {
   }
 
   @override
+  Future<void> uploadTaskPhoto(int taskId, List<int> bytes, {String filename = 'dictation.jpg'}) async {}
+
+  @override
   Future<HomeSnapshot> snapshot(int userId, String subject) {
     homeLoads++;
     throw UnimplementedError();

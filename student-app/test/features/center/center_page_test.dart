@@ -39,6 +39,9 @@ class FakeHomeRepository implements HomeRepository {
   bool failSubmit = false;
 
   @override
+  @override
+  Future<void> uploadTaskPhoto(int taskId, List<int> bytes, {String filename = 'dictation.jpg'}) async {}
+
   Future<void> submitTask(int taskId) async {
     if (failSubmit) throw Exception('submit failed');
     submitted.add(taskId);

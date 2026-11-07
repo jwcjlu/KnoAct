@@ -61,6 +61,9 @@ class ControllableHomeRepository implements HomeRepository {
 
   @override
   Future<void> submitTask(int taskId) async {}
+
+  @override
+  Future<void> uploadTaskPhoto(int taskId, List<int> bytes, {String filename = 'dictation.jpg'}) async {}
 }
 
 Future<ProviderContainer> makeContainer(ControllableHomeRepository repo) async {

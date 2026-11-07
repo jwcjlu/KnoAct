@@ -60,6 +60,9 @@ class FakeHomeRepository implements HomeRepository {
 
   @override
   Future<void> submitTask(int taskId) async {}
+
+  @override
+  Future<void> uploadTaskPhoto(int taskId, List<int> bytes, {String filename = 'dictation.jpg'}) async {}
 }
 
 Future<void> pumpHome(WidgetTester tester, FakeHomeRepository repo, {Size size = const Size(420, 900)}) async {

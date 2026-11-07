@@ -70,6 +70,8 @@ class ApiClient {
 
   Future<dynamic> post(String path, {Object? body}) => _send(() => _dio.post<dynamic>(path, data: body));
 
+  Future<dynamic> postMultipart(String path, FormData form) => _send(() => _dio.post<dynamic>(path, data: form));
+
   Future<dynamic> patch(String path, {Object? body}) => _send(() => _dio.patch<dynamic>(path, data: body));
 
   Future<({List<int> bytes, String contentType})> getBytes(String path, {Map<String, dynamic>? query}) async {

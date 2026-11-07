@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api_client.dart';
@@ -38,6 +39,12 @@ class HomeRepository {
   Future<void> submitTask(int taskId) async {
     final d = asMap(await _api.post('/api/tasks/$taskId/submit'));
     if (d['ok'] != true) throw ApiException('提交任务失败');
+  }
+
+  Future<void> uploadTaskPhoto(int taskId, List<int> bytes, {String filename = 'dictation.jpg'}) async {
+    final form = FormData.fromMap({'file': MultipartFile.fromBytes(bytes, filename: filename)});
+    final d = asMap(await _api.postMultipart('/api/tasks/$taskId/upload-photo', form));
+    if (d['ok'] != true) throw ApiException('上传打卡照失败');
   }
 }
 
