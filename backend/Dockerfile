@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.4
 # KnoAct 后端（FastAPI）
 # 构建上下文为 backend/：docker build -t knoact-backend ./backend
 # 国内服务器默认走阿里云 PyPI 镜像；海外可：--build-arg PIP_INDEX_URL=https://pypi.org/simple
@@ -19,9 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
 
 WORKDIR /app
 COPY requirements.txt .
-# BuildKit 缓存：二次构建不再全量从 PyPI 拉取（需 DOCKER_BUILDKIT=1）
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip setuptools wheel \
+# requirements.txt 未变时 Docker 层缓存会跳过本步；勿加 docker/dockerfile 前端镜像（国内拉 Hub 很慢）
+RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements.txt
 
 COPY app ./app

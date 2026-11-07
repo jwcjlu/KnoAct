@@ -3,7 +3,6 @@
 #   docker build -f render_service/Dockerfile -t knoact-render .
 # manim 代码统一转发到 sandbox-runner 容器执行（KNOACT_RENDER_SANDBOX=docker），
 # 本镜像只需 ffmpeg 合成旁白音轨，不装 manim / LaTeX。
-# syntax=docker/dockerfile:1.4
 FROM python:3.10-slim
 
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
@@ -20,8 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tzdata \
 
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip setuptools wheel \
+RUN pip install --upgrade pip setuptools wheel \
     && pip install -r backend/requirements.txt
 
 COPY backend/app backend/app
