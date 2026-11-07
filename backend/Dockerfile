@@ -1,10 +1,16 @@
+# syntax=docker/dockerfile:1.4
 # KnoAct 后端（FastAPI）
 # 构建上下文为 backend/：docker build -t knoact-backend ./backend
+# 国内服务器默认走阿里云 PyPI 镜像；海外可：--build-arg PIP_INDEX_URL=https://pypi.org/simple
 FROM python:3.10-slim
+
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     TZ=Asia/Shanghai
 
 # tzdata：每日任务调度（03:00）与 date.today() 按北京时间计算
@@ -13,7 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+# BuildKit 缓存：二次构建不再全量从 PyPI 拉取（需 DOCKER_BUILDKIT=1）
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel \
+    && pip install -r requirements.txt
 
 COPY app ./app
 COPY migrate_model_catalog.py .

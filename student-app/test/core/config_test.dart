@@ -2,8 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:student_app/core/config.dart';
 
 void main() {
-  test('未定义 API_BASE 时连本地开发后端', () {
+  test('未定义 API_BASE 时 Web 连本地、移动端连默认生产', () {
     expect(resolveApiBase(hasDefine: false, defined: '', isWeb: true), 'http://127.0.0.1:8010');
+    expect(resolveApiBase(hasDefine: false, defined: '', isWeb: false), defaultProdApiBase);
   });
   test('定义了非空 API_BASE 时原样使用', () {
     expect(resolveApiBase(hasDefine: true, defined: 'http://10.0.2.2:8010', isWeb: false), 'http://10.0.2.2:8010');
@@ -14,8 +15,8 @@ void main() {
       'https://kid.example.com:8082',
     );
   });
-  test('非 Web 上 API_BASE 为空串时回落本地开发后端', () {
-    expect(resolveApiBase(hasDefine: true, defined: '', isWeb: false), 'http://127.0.0.1:8010');
+  test('非 Web 上 API_BASE 为空串时回落默认生产后端', () {
+    expect(resolveApiBase(hasDefine: true, defined: '', isWeb: false), defaultProdApiBase);
   });
   test('Web 上空 API_BASE 且 flutter 随机端口：静态资源直连本地后端', () {
     expect(
