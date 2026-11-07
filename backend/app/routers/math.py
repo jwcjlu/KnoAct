@@ -84,14 +84,68 @@ def math_grade(req: GradeReq, user: User = Depends(require_learning_user),
 
 class TaskGradeReq(BaseModel):
     user_id: int
-    answers: list[str]  # 按题目顺序
+    answers: list[str]  # 按 calc 题目顺序（仅计算题）
+
+
+def _child_calc_material(calc: list[dict]) -> list[dict]:
+    out = []
+    for i, c in enumerate(calc):
+        row = {
+            "index": i,
+            "question": c.get("question", ""),
+        }
+        if c.get("id"):
+            row["id"] = c["id"]
+        if "your_answer" in c:
+            row["your_answer"] = c.get("your_answer")
+        if "is_correct" in c:
+            row["is_correct"] = c.get("is_correct")
+        out.append(row)
+    return out
+
+
+def _child_word_material(word: list[dict]) -> list[dict]:
+    out = []
+    for i, w in enumerate(word):
+        row = {
+            "index": i,
+            "question": w.get("question", ""),
+        }
+        if w.get("id"):
+            row["id"] = w["id"]
+        else:
+            row["id"] = f"w{i + 1}"
+        for key in ("photo_path", "ai_status", "parent_status"):
+            if key in w and w[key] is not None:
+                row[key] = w[key]
+        out.append(row)
+    return out
+
+
+@router.get("/task/{task_id}/material")
+def math_task_material(task_id: int, user: User = Depends(require_learning_user),
+                       db: Session = Depends(get_db)):
+    """每日数学任务题目：calc 供屏上作答；word 不下发标准答案。"""
+    from ..services.math_gen import parse_math_task_content
+    task = db.get(Task, task_id)
+    if not task or task.task_type != "math":
+        return {"ok": False, "error": "任务不存在"}
+    ensure_user_access(user, task.user_id, db)
+    parsed = parse_math_task_content(task.content or "")
+    return {
+        "ok": True,
+        "title": task.title,
+        "detail": task.detail,
+        "calc": _child_calc_material(parsed["calc"]),
+        "word": _child_word_material(parsed["word"]),
+    }
 
 
 @router.post("/task/{task_id}/grade")
 def math_task_grade(task_id: int, req: TaskGradeReq, user: User = Depends(require_learning_user),
                     db: Session = Depends(get_db)):
-    """首页「数学练习」任务判分：题目来自 Task.content（[{question, answer}]）。"""
-    from ..services.math_gen import grade_math_answer
+    """首页「数学练习」任务判分：仅判 calc 段；兼容旧 flat content。"""
+    from ..services.math_gen import grade_math_answer, parse_math_task_content
     from ..services.bucket_guard import resolve_bucket_id
     ensure_user_access(user, req.user_id, db)
     bid = resolve_bucket_id(db, req.user_id, None)
@@ -101,22 +155,29 @@ def math_task_grade(task_id: int, req: TaskGradeReq, user: User = Depends(requir
     ensure_user_access(user, task.user_id, db)
     if task.submit_status == "approved":
         return {"ok": False, "error": "家长已确认，不能再修改"}
+    raw = task.content or ""
+    legacy_list = False
     try:
-        questions = json.loads(task.content or "[]")
+        loaded = json.loads(raw) if raw.strip() else []
+        legacy_list = isinstance(loaded, list)
     except ValueError:
-        questions = []
+        legacy_list = False
+    parsed = parse_math_task_content(raw)
+    calc = parsed["calc"]
     results = []
-    for i, q in enumerate(questions):
+    for i, q in enumerate(calc):
         user_ans = req.answers[i] if i < len(req.answers) else ""
         is_correct = grade_math_answer(user_ans, q.get("answer", ""))
         results.append({"is_correct": is_correct, "correct_answer": q.get("answer", "")})
-        # 作答写回任务快照，家长确认前可重新打开修改
         q["your_answer"] = user_ans
         q["is_correct"] = is_correct
         if not is_correct:
             _record_mistake(db, req.user_id, q.get("question", ""), user_ans, q.get("answer", ""),
                             bucket_id=bid)
-    task.content = json.dumps(questions, ensure_ascii=False)
+    if legacy_list:
+        task.content = json.dumps(calc, ensure_ascii=False)
+    else:
+        task.content = json.dumps(parsed, ensure_ascii=False)
     db.commit()
     return {"ok": True, "results": results,
-            "correct": sum(1 for r in results if r["is_correct"]), "total": len(results)}
+            "correct": sum(1 for r in results if r["is_correct"]), "total": len(calc)}

@@ -3,24 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/text_utils.dart';
 import '../reader/reader_controller.dart';
 import 'data/ask_repository.dart';
-
-/// 对话的三种模式（对齐后端 capability：chat/visualize/solve）
-enum AskMode {
-  chat('对话'),
-  visualize('可视化'),
-  solve('解题');
-
-  const AskMode(this.label);
-
-  final String label;
-
-  String get id => name;
-}
+import 'data/read_ask_cards_repository.dart';
 
 class AskState {
   const AskState({
     this.messages = const [],
-    this.mode = AskMode.chat,
+    this.modeId = 'chat',
+    this.chatModel,
     this.busy = false,
     this.toolHint,
     this.answer = '',
@@ -30,7 +19,12 @@ class AskState {
   });
 
   final List<AskMessage> messages;
-  final AskMode mode;
+
+  /// Web `chatMode`：chat / visualize / solve 等
+  final String modeId;
+
+  /// Web `chatModel`：空表示用服务端默认
+  final String? chatModel;
   final bool busy;
 
   /// 当前 tool_call 的占位提示（如「正在查词…」）；非空时显示
@@ -52,7 +46,8 @@ class AskState {
 
   AskState copyWith({
     List<AskMessage>? messages,
-    AskMode? mode,
+    String? modeId,
+    String? Function()? chatModel,
     bool? busy,
     String? Function()? toolHint,
     String? answer,
@@ -62,7 +57,8 @@ class AskState {
   }) =>
       AskState(
         messages: messages ?? this.messages,
-        mode: mode ?? this.mode,
+        modeId: modeId ?? this.modeId,
+        chatModel: chatModel != null ? chatModel() : this.chatModel,
         busy: busy ?? this.busy,
         toolHint: toolHint != null ? toolHint() : this.toolHint,
         answer: answer ?? this.answer,
@@ -82,9 +78,24 @@ class AskController extends Notifier<AskState> {
         if (prev == next && state.lessonId == next) return;
         _bindReaderLesson(prev != next);
       },
-      fireImmediately: true,
     );
-    return const AskState();
+    return _stateFromReader();
+  }
+
+  AskState _stateFromReader() {
+    final lesson = ref.read(readerControllerProvider).currentLesson;
+    if (lesson == null) return const AskState();
+    final sentences = splitSentences(lesson.fullText);
+    final quote = sentences.isNotEmpty ? sentences.first : '';
+    return AskState(lessonId: lesson.id, context: lesson.fullText, selected: quote);
+  }
+
+  /// 首屏或 provider 重建后补绑课文（避免 send 时 lessonId 为空、Network 无请求）
+  void ensureReaderBound() {
+    if (state.lessonId != null) return;
+    final fresh = _stateFromReader();
+    if (fresh.lessonId == null) return;
+    state = state.copyWith(lessonId: fresh.lessonId, context: fresh.context, selected: fresh.selected);
   }
 
   /// 个性化学习：课文随 [readerControllerProvider] 切换（在 Notifier 内 listen，避免 Widget build 期改 provider）
@@ -97,7 +108,8 @@ class AskController extends Notifier<AskState> {
       lessonId: lesson.id,
       context: lesson.fullText,
       selected: lessonChanged ? quote : (state.selected.isNotEmpty ? state.selected : quote),
-      mode: state.mode,
+      modeId: state.modeId,
+      chatModel: state.chatModel,
       messages: lessonChanged ? const [] : state.messages,
     );
   }
@@ -107,14 +119,54 @@ class AskController extends Notifier<AskState> {
     state = AskState(lessonId: lessonId, context: context);
   }
 
-  void setMode(AskMode mode) => state = state.copyWith(mode: mode);
+  void setModeId(String modeId) => state = state.copyWith(modeId: modeId);
+
+  void setChatModel(String? model) => state = state.copyWith(chatModel: () => model);
 
   /// 设置/清除选中的引用句子
   void setSelected(String sentence) => state = state.copyWith(selected: sentence);
 
+  void pushAiMessage(String text, {String mode = 'chat', List<int> citations = const []}) {
+    state = state.copyWith(
+      messages: [...state.messages, AskMessage(role: 'ai', text: text, citations: citations, mode: mode)],
+    );
+  }
+
+  /// Web `submitAskReplies` → `/api/ask/reply`
+  Future<void> submitDiagnosticReplies({
+    required int lessonId,
+    required String context,
+    required Map<String, String> replies,
+  }) async {
+    if (state.busy) return;
+    state = state.copyWith(
+      messages: [...state.messages, const AskMessage(role: 'user', text: '（回答了诊断性问题）')],
+      busy: true,
+      toolHint: () => null,
+      answer: '',
+    );
+    String answer = '抱歉，回答出错了。';
+    List<int> citations = const [];
+    try {
+      final r = await ref.read(readAskCardsRepositoryProvider).askReply(
+            lessonId: lessonId,
+            context: context,
+            replies: replies,
+          );
+      answer = r.answer.isNotEmpty ? r.answer : '（暂无回答）';
+      citations = r.citations;
+    } catch (_) {}
+    if (!ref.mounted) return;
+    state = state.copyWith(
+      messages: [...state.messages, AskMessage(role: 'ai', text: answer, citations: citations, mode: 'chat')],
+      busy: false,
+    );
+  }
+
   Future<void> send(String question) async {
     final q = question.trim();
     if (q.isEmpty || state.busy) return;
+    ensureReaderBound();
     final lessonId = state.lessonId;
     if (lessonId == null) return;
 
@@ -126,7 +178,7 @@ class AskController extends Notifier<AskState> {
     );
 
     final repo = ref.read(askRepositoryProvider);
-    final mode = state.mode;
+    final mode = state.modeId;
     // 引用优先，否则用课文全文
     final ctx = state.selected.isNotEmpty ? state.selected : state.context;
     final sentences = splitSentences(ctx);
@@ -134,13 +186,30 @@ class AskController extends Notifier<AskState> {
     String answer = '';
     List<int> citations = const [];
     String? toolHint;
+    var gotFinal = false;
+
+    Future<void> applySyncFallback() async {
+      final sync = await repo.askOnce(
+        lessonId: lessonId,
+        question: q,
+        context: ctx,
+        mode: mode,
+        model: state.chatModel,
+        sentences: sentences,
+      );
+      answer = sync.answer.isNotEmpty ? sync.answer : '（暂无回答）';
+      citations = sync.citations;
+      gotFinal = true;
+      if (ref.mounted) state = state.copyWith(answer: answer, toolHint: () => null);
+    }
 
     try {
       await for (final event in repo.askStream(
         lessonId: lessonId,
         question: q,
         context: ctx,
-        mode: mode.id,
+        mode: mode,
+        model: state.chatModel,
         sentences: sentences,
       )) {
         if (!ref.mounted) return;
@@ -151,23 +220,30 @@ class AskController extends Notifier<AskState> {
           case 'tool_result':
             break;
           case 'final':
+            gotFinal = true;
             answer = '${event.data['answer'] ?? ''}';
             final c = event.data['citations'];
             if (c is List) citations = c.whereType<num>().map((n) => n.toInt()).toList();
             state = state.copyWith(answer: answer, toolHint: () => null);
           case 'error':
+            gotFinal = true;
             answer = '抱歉，回答出错：${event.data['error'] ?? '未知错误'}';
             state = state.copyWith(answer: answer, toolHint: () => null);
         }
       }
+      if (!gotFinal) await applySyncFallback();
     } catch (_) {
       if (!ref.mounted) return;
-      answer = '抱歉，网络异常，请稍后重试';
+      try {
+        await applySyncFallback();
+      } catch (_) {
+        answer = '抱歉，网络异常，请稍后重试';
+      }
     }
 
     if (!ref.mounted) return;
     state = state.copyWith(
-      messages: [...state.messages, AskMessage(role: 'ai', text: answer, citations: citations, mode: mode.id)],
+      messages: [...state.messages, AskMessage(role: 'ai', text: answer, citations: citations, mode: mode)],
       busy: false,
       answer: '',
       toolHint: () => null,

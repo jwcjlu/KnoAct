@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, date, timedelta
 from app.database import SessionLocal, Base, engine
-from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question, UserDocument
+from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question, UserDocument, ChildConfig
 from app.services.task_gen import generate_tasks_for_user, _current_lesson
 
 
@@ -105,7 +105,13 @@ def test_generate_tasks_creates_listening_for_english():
         user_id=uid, subject="英语", date=date.today(), task_type="listening").all()
     assert len(listening) == 1
     content = json.loads(listening[0].content)
-    assert "dialogue" in content and "question" in content and "answer" in content
+    assert "dialogue" in content
+    assert "questions" in content and len(content["questions"]) >= 3
+    qrow = db.query(Question).filter_by(
+        user_id=uid, subject="英语", date=date.today(), task_type="listening",
+    ).first()
+    assert qrow is not None
+    assert qrow.question == content["questions"][0]["question"]
     db.close()
 
 
@@ -241,6 +247,54 @@ def test_generated_questions_attach_bucket_and_user():
     for q in qs:
         assert q.bucket_id == bucket.id
         assert q.user_id == uid
+    db.close()
+
+
+def _setup_math(db):
+    """数学教材 + 课文正文，孩子已绑定。"""
+    db.query(WordMastery).delete()
+    db.query(WordBank).delete()
+    db.query(KnowledgePoint).delete()
+    db.query(Text).delete()
+    db.query(Lesson).delete()
+    db.query(PdfDocument).delete()
+    db.query(Task).delete()
+    db.query(User).delete()
+    db.query(UserDocument).delete()
+    db.query(ChildConfig).delete()
+    db.commit()
+    u = User(name="数学测试孩子", role="child")
+    db.add(u)
+    db.flush()
+    doc = PdfDocument(filename="数学.pdf", subject="数学", storage_path="")
+    db.add(doc)
+    db.flush()
+    l1 = Lesson(document_id=doc.id, subject="数学", title="第1单元", start_page=1, end_page=2,
+                extract_status="done", audit_status="approved")
+    db.add(l1)
+    db.flush()
+    db.add(Text(lesson_id=l1.id, content="认识加法：3+5=8，凑十法与简单应用。"))
+    db.add(UserDocument(user_id=u.id, document_id=doc.id))
+    db.commit()
+    return u.id, l1.id
+
+
+def test_generate_tasks_math_respects_calc_and_word_counts():
+    db = SessionLocal()
+    uid, _ = _setup_math(db)
+    db.add(ChildConfig(user_id=uid, key="task_math_calc_count", value="2"))
+    db.add(ChildConfig(user_id=uid, key="task_math_word_count", value="1"))
+    db.commit()
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(
+        user_id=uid, subject="数学", date=date.today(), task_type="math",
+    ).first()
+    assert t is not None
+    content = json.loads(t.content)
+    assert isinstance(content, dict)
+    assert len(content.get("calc") or []) == 2
+    assert len(content.get("word") or []) == 1
+    assert "计算 2 道" in t.detail and "应用 1 道" in t.detail
     db.close()
 
 

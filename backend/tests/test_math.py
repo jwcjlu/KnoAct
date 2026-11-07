@@ -27,6 +27,19 @@ def test_generate_math_questions_fallback(setup_db):
     s.close()
 
 
+def test_generate_math_questions_split_respects_counts(setup_db):
+    from app.services.math_gen import generate_math_questions_split
+    from app.database import SessionLocal
+    s = SessionLocal()
+    split = generate_math_questions_split(s, "认识加法", n_calc=2, n_word=1)
+    assert set(split.keys()) == {"calc", "word"}
+    assert len(split["calc"]) == 2
+    assert len(split["word"]) == 1
+    for q in split["calc"] + split["word"]:
+        assert q["question"] and str(q["answer"]).strip()
+    s.close()
+
+
 def test_math_material_endpoint(setup_db):
     from app.models import User, Lesson, Text, UserDocument
     from app.database import SessionLocal
@@ -54,6 +67,97 @@ def test_math_material_endpoint(setup_db):
     assert len(d["questions"]) == 3
     for q in d["questions"]:
         assert q["id"] and q["question"] and q["answer"]
+
+
+def test_grade_math_work_photo_fake_branches(setup_db):
+    from app.services.math_gen import grade_math_work_photo, CONFIDENCE_THRESHOLD
+    from app.database import SessionLocal
+    s = SessionLocal()
+    ok = grade_math_work_photo(s, b"\x89PNG", "小明有几个？", "5")
+    for key in ("final_answer", "steps_plausible", "confidence", "reason", "ai_status", "ai_correct"):
+        assert key in ok
+    assert ok["ai_status"] == "ok"
+    assert ok["confidence"] >= CONFIDENCE_THRESHOLD
+    pending = grade_math_work_photo(s, b"__FORCE_PENDING__", "题", "5")
+    assert pending["ai_status"] == "pending_review"
+    failed = grade_math_work_photo(s, b"__FORCE_FAIL__", "题", "5")
+    assert failed["ai_status"] == "failed"
+    s.close()
+
+
+def test_parse_math_task_content_legacy_list():
+    from app.services.math_gen import parse_math_task_content
+    import json
+    raw = json.dumps([{"question": "1+1", "answer": "2"}], ensure_ascii=False)
+    parsed = parse_math_task_content(raw)
+    assert len(parsed["calc"]) == 1 and parsed["word"] == []
+
+
+def test_math_task_material_hides_word_answer(setup_db):
+    import json
+    from datetime import date
+    from app.models import User, Task
+    from app.database import SessionLocal
+    from app.routers.math import router as math_router
+    s = SessionLocal()
+    p = make_account(s, "p_mtm", "parent")
+    make_account(s, "晨晨", "child", parent=p)
+    s.commit()
+    uid = s.query(User).filter_by(name="晨晨").first().id
+    content = {
+        "calc": [{"question": "3+5=？", "answer": "8"}],
+        "word": [{"id": "w1", "question": "还剩几个？", "answer": "5"}],
+    }
+    t = Task(user_id=uid, date=date.today(), subject="数学", task_type="math", title="数学",
+             content=json.dumps(content, ensure_ascii=False), points=20, content_status="published")
+    s.add(t); s.commit()
+    tid = t.id
+    s.close()
+
+    app = FastAPI()
+    app.include_router(math_router)
+    c = TestClient(app)
+    r = c.get(f"/api/math/task/{tid}/material", headers=bound_child_headers(uid))
+    d = r.json()
+    assert d["ok"] is True
+    assert "answer" not in d["calc"][0]
+    assert "answer" not in d["word"][0]
+    assert d["word"][0]["question"] == "还剩几个？"
+
+
+def test_math_task_grade_split_calc_only(setup_db):
+    import json
+    from datetime import date
+    from app.models import User, Task
+    from app.database import SessionLocal
+    from app.routers.math import router as math_router
+    s = SessionLocal()
+    p = make_account(s, "p_mtg2", "parent")
+    make_account(s, "晨晨", "child", parent=p)
+    s.commit()
+    uid = s.query(User).filter_by(name="晨晨").first().id
+    content = {
+        "calc": [{"question": "3+5=？", "answer": "8"}],
+        "word": [{"question": "应用", "answer": "5"}],
+    }
+    t = Task(user_id=uid, date=date.today(), subject="数学", task_type="math", title="数学",
+             content=json.dumps(content, ensure_ascii=False), points=20, content_status="published")
+    s.add(t); s.commit()
+    tid = t.id
+    s.close()
+
+    app = FastAPI()
+    app.include_router(math_router)
+    c = TestClient(app)
+    h = bound_child_headers(uid)
+    r = c.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["8"]}, headers=h)
+    d = r.json()
+    assert d["ok"] is True and d["total"] == 1
+    s2 = SessionLocal()
+    saved = json.loads(s2.get(Task, tid).content)
+    assert saved["calc"][0]["is_correct"] is True
+    assert "is_correct" not in saved["word"][0]
+    s2.close()
 
 
 def test_math_task_grade_endpoint(setup_db):

@@ -4,9 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
-import '../../ask/ask_controller.dart';
-import '../../ask/ui/ask_panel.dart';
-import '../../assignment/assignment_controller.dart';
 import '../../reader/reader_controller.dart';
 import '../center_controller.dart';
 import '../center_logic.dart';
@@ -41,43 +38,44 @@ class CenterPage extends ConsumerWidget {
           },
         ),
       ),
-      const SizedBox(height: 12),
-      SegmentedButton<CenterTab>(
-        segments: [
-          for (final t in CenterTab.values)
-            ButtonSegment(
-              value: t,
-              label: Text(t.label),
-              icon: Icon(t == CenterTab.listening ? Icons.headphones : Icons.menu_book),
-            ),
-        ],
-        selected: {s.tab},
-        onSelectionChanged: (v) => ctl.selectTab(v.first),
-      ),
       const SizedBox(height: 16),
-      s.material.when(
-        loading: () => const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator())),
-        error: (_, _) => ErrorCard(message: '材料加载失败，请检查网络或后端服务', onRetry: ctl.reload),
-        data: (m) => m.isEmpty ? _Empty(tab: s.tab) : _MaterialView(state: s, material: m),
-      ),
+      if (s.pending == null)
+        const _HubHint()
+      else
+        s.material.when(
+          loading: () => const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator())),
+          error: (_, _) => ErrorCard(message: '材料加载失败，请检查网络或后端服务', onRetry: ctl.reload),
+          data: (m) => m.isEmpty ? const _ListeningEmpty() : _MaterialView(state: s, material: m),
+        ),
     ]);
   }
 }
 
-class _Empty extends StatelessWidget {
-  const _Empty({required this.tab});
-
-  final CenterTab tab;
+class _HubHint extends StatelessWidget {
+  const _HubHint();
 
   @override
   Widget build(BuildContext context) => SectionCard(
         child: Column(children: [
-          Icon(tab == CenterTab.listening ? Icons.headphones : Icons.menu_book, size: 32, color: AppColors.gray),
+          const Icon(Icons.home, size: 32, color: AppColors.gray),
           const SizedBox(height: 8),
-          Text(
-            tab == CenterTab.listening ? '暂无听力材料，AI 将根据学习进度生成对话' : '暂无阅读材料，请在家长端导入教材',
-            style: const TextStyle(color: AppColors.gray),
+          const Text(
+            '英语听力练习请从「学习首页」点击今日的「听力理解」任务进入。',
+            style: TextStyle(color: AppColors.gray, height: 1.5),
           ),
+        ]),
+      );
+}
+
+class _ListeningEmpty extends StatelessWidget {
+  const _ListeningEmpty();
+
+  @override
+  Widget build(BuildContext context) => SectionCard(
+        child: Column(children: [
+          const Icon(Icons.headphones, size: 32, color: AppColors.gray),
+          const SizedBox(height: 8),
+          const Text('暂无听力材料，请让家长重新生成本日任务', style: TextStyle(color: AppColors.gray)),
         ]),
       );
 }
@@ -90,32 +88,31 @@ class _MaterialView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final listening = state.tab == CenterTab.listening;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SectionCard(
-        child: listening
-            ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('听力对话', style: TextStyle(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                FilledButton.icon(
-                  onPressed: () => ref.read(speechPlayerProvider).speak(material.text).catchError((Object _) {
-                    if (context.mounted) showMessage(context, '播放失败，请稍后重试');
-                  }),
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('播放对话'),
-                ),
-                const SizedBox(height: 6),
-                const Text('认真听，不要看文本哦', style: TextStyle(color: AppColors.gray)),
-              ])
-            : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('阅读课文', style: TextStyle(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                _ReadingView(material: material),
-              ]),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('听力对话', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: () => ref.read(speechPlayerProvider).speak(material.text).catchError((Object _) {
+              if (context.mounted) showMessage(context, '播放失败，请稍后重试');
+            }),
+            icon: const Icon(Icons.play_arrow),
+            label: const Text('播放对话'),
+          ),
+          const SizedBox(height: 6),
+          const Text('认真听，不要看文本哦', style: TextStyle(color: AppColors.gray)),
+        ]),
       ),
       const SizedBox(height: 12),
       for (var i = 0; i < material.questions.length; i++) ...[
-        _QuestionCard(index: i, question: material.questions[i], result: state.results[i], input: state.inputs[i]),
+        _QuestionCard(
+          index: i,
+          question: material.questions[i],
+          result: state.results[i],
+          input: state.inputs[i],
+          listeningMode: true,
+        ),
         const SizedBox(height: 12),
       ],
       if (_canRetrySubmit)
@@ -130,165 +127,108 @@ class _MaterialView extends ConsumerWidget {
   bool get _canRetrySubmit =>
       state.submitFailed &&
       !state.submitting &&
-      state.pending?.tab == state.tab &&
+      state.pending != null &&
       state.results.isNotEmpty &&
       state.results.every((r) => r != null);
 }
 
 class _QuestionCard extends ConsumerStatefulWidget {
-  const _QuestionCard({required this.index, required this.question, required this.result, required this.input});
+  const _QuestionCard({
+    required this.index,
+    required this.question,
+    required this.result,
+    required this.input,
+    this.listeningMode = false,
+  });
 
   final int index;
   final CenterQuestion question;
   final bool? result;
   final String input;
+  final bool listeningMode;
 
   @override
   ConsumerState<_QuestionCard> createState() => _QuestionCardState();
 }
 
 class _QuestionCardState extends ConsumerState<_QuestionCard> {
-  late final TextEditingController _ctl = TextEditingController(text: widget.input);
+  TextEditingController? _ctl;
+
+  TextEditingController get _textCtl => _ctl ??= TextEditingController(text: widget.input);
 
   @override
   void dispose() {
-    _ctl.dispose();
+    _ctl?.dispose();
     super.dispose();
   }
 
-  void _submit() {
-    if (_ctl.text.trim().isEmpty) return;
-    ref.read(centerControllerProvider.notifier).answer(widget.index, _ctl.text);
+  void _submitText() {
+    if (_textCtl.text.trim().isEmpty) return;
+    ref.read(centerControllerProvider.notifier).answer(widget.index, text: _textCtl.text);
+  }
+
+  void _pickOption(int i) {
+    ref.read(centerControllerProvider.notifier).answer(widget.index, selectedIndex: i);
+  }
+
+  String get _revealedAnswer {
+    final q = widget.question;
+    if (q.isMultipleChoice && q.correctIndex != null) return q.options[q.correctIndex!];
+    return q.answer;
   }
 
   @override
   Widget build(BuildContext context) {
     final q = widget.question;
+    final mc = widget.listeningMode ? q.options.length >= 4 : q.isMultipleChoice;
     return SectionCard(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('${widget.index + 1}. ${q.question}', style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         if (widget.result == null)
-          Row(children: [
-            Expanded(
-              child: TextField(
-                key: ValueKey('answer-${widget.index}'),
-                controller: _ctl,
-                decoration: const InputDecoration(hintText: '输入你的答案', isDense: true, border: OutlineInputBorder()),
-                textInputAction: TextInputAction.done,
-                onChanged: (v) => ref.read(centerControllerProvider.notifier).setInput(widget.index, v),
-                onSubmitted: (_) => _submit(),
+          if (mc)
+            Column(
+              children: [
+                for (var i = 0; i < q.options.length; i++)
+                  RadioListTile<int>(
+                    key: ValueKey('option-${widget.index}-$i'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(q.options[i]),
+                    value: i,
+                    groupValue: null,
+                    onChanged: (_) => _pickOption(i),
+                  ),
+              ],
+            )
+          else
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  key: ValueKey('answer-${widget.index}'),
+                  controller: _textCtl,
+                  decoration: const InputDecoration(hintText: '输入你的答案', isDense: true, border: OutlineInputBorder()),
+                  textInputAction: TextInputAction.done,
+                  onChanged: (v) => ref.read(centerControllerProvider.notifier).setInput(widget.index, v),
+                  onSubmitted: (_) => _submitText(),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: _ctl,
-              builder: (context, v, _) => FilledButton(
-                key: ValueKey('submit-${widget.index}'),
-                onPressed: v.text.trim().isEmpty ? null : _submit,
-                child: const Text('提交'),
+              const SizedBox(width: 8),
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _textCtl,
+                builder: (context, v, _) => FilledButton(
+                  key: ValueKey('submit-${widget.index}'),
+                  onPressed: v.text.trim().isEmpty ? null : _submitText,
+                  child: const Text('提交'),
+                ),
               ),
-            ),
-          ])
+            ])
         else
           Text(
-            '${widget.result! ? '✓' : '✗'} 答案：${q.answer}',
+            '${widget.result! ? '✓' : '✗'} 答案：$_revealedAnswer',
             style: TextStyle(color: widget.result! ? AppColors.green : Colors.red, fontWeight: FontWeight.w600),
           ),
       ]),
     );
-  }
-}
-
-class _ReadingView extends ConsumerStatefulWidget {
-  const _ReadingView({required this.material});
-
-  final CenterMaterial material;
-
-  @override
-  ConsumerState<_ReadingView> createState() => _ReadingViewState();
-}
-
-class _ReadingViewState extends ConsumerState<_ReadingView> {
-  int? _selected;
-  bool _chatOpen = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _initAsk();
-    });
-  }
-
-  void _initAsk() {
-    final lessonId = widget.material.lessonId;
-    if (lessonId == null) return;
-    ref.read(askControllerProvider.notifier).init(lessonId: lessonId, context: widget.material.text);
-  }
-
-  void _select(int i, List<String> sentences) {
-    setState(() {
-      _selected = _selected == i ? null : i;
-      final sentence = _selected == null ? '' : sentences[i];
-      ref.read(askControllerProvider.notifier).setSelected(sentence);
-      // 选中句子即展开对话栏，就地提问
-      _chatOpen = true;
-    });
-  }
-
-  void _doAssignment() {
-    final lessonId = widget.material.lessonId;
-    if (lessonId == null) return;
-    ref.read(assignmentControllerProvider.notifier).init(lessonId: lessonId, subject: '语文');
-    context.go('/assignment');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final sentences = splitSentences(widget.material.text);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      // 课文文本（点句选中，成为对话引用）
-      Text.rich(
-        TextSpan(
-          children: [
-            for (var i = 0; i < sentences.length; i++)
-              WidgetSpan(
-                child: GestureDetector(
-                  onTap: () => _select(i, sentences),
-                  child: Text(
-                    sentences[i],
-                    style: TextStyle(
-                      height: 1.7,
-                      backgroundColor: _selected == i ? AppColors.blueSoft : null,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 4),
-      const Text('点选句子，可就它提问', style: TextStyle(color: AppColors.gray, fontSize: 12)),
-      const SizedBox(height: 12),
-      if (_chatOpen)
-        const AskPanel()
-      else
-        FilledButton.icon(
-          key: const ValueKey('open-ask'),
-          onPressed: () => setState(() => _chatOpen = true),
-          icon: const Icon(Icons.auto_awesome, size: 18),
-          label: const Text('问问 AI'),
-        ),
-      const SizedBox(height: 12),
-      OutlinedButton.icon(
-        key: const ValueKey('do-assignment'),
-        onPressed: _doAssignment,
-        icon: const Icon(Icons.edit_note, size: 18),
-        label: const Text('本课作业'),
-      ),
-    ]);
   }
 }

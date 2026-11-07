@@ -126,10 +126,23 @@ def _gen_listening(db, lesson, user_id=None, bucket_id=None):
     from ..models import Question
     ctx = UnifiedContext(user_id=0, lesson_id=lesson.id, question="")
     result = generate_listening.run({"words": words, "knowledge_points": kps}, ctx)
+    questions = result.get("questions") or []
+    q0 = questions[0] if questions else {}
+    stem = (q0.get("question") or "").strip()
+    opts = q0.get("options") or []
+    try:
+        ci = int(q0.get("correct_index", 0))
+    except (TypeError, ValueError):
+        ci = 0
+    if opts:
+        ci = max(0, min(len(opts) - 1, ci))
+        answer_text = opts[ci]
+    else:
+        answer_text = ""
     db.add(Question(
         lesson_id=lesson.id, qtype="listening",
-        question=result.get("question") or "",
-        answer=result.get("answer") or "",
+        question=stem,
+        answer=answer_text,
         subject=lesson.subject, date=datetime.utcnow().date(),
         status="pending", task_type="listening",
         user_id=user_id, bucket_id=bucket_id,
@@ -145,29 +158,42 @@ def _gen_listening(db, lesson, user_id=None, bucket_id=None):
 
 
 def _gen_math_practice(db, lesson, user_id=None, bucket_id=None):
-    """数学练习：基于本课正文出计算/应用题，content 存题目 JSON。"""
-    from .math_gen import generate_math_questions
+    """数学练习：基于本课正文出计算/应用题，content 存 {"calc":[...], "word":[...]}。"""
+    from .math_gen import generate_math_questions_split
     from ..models import Question
     text = db.query(Text).filter_by(lesson_id=lesson.id).first()
     if not text or not text.content.strip():
         return None
-    qs = generate_math_questions(db, text.content, n=3)
-    if not qs:
+    n_calc = _default_count(db, "task_math_calc_count", 2, child_id=user_id)
+    n_word = _default_count(db, "task_math_word_count", 2, child_id=user_id)
+    if n_calc <= 0 and n_word <= 0:
         return None
-    for q in qs:
-        db.add(Question(
-            lesson_id=lesson.id, qtype="math",
-            question=q.get("question") or q.get("q") or "",
-            answer=str(q.get("answer") or q.get("ans") or ""),
-            subject=lesson.subject, date=datetime.utcnow().date(),
-            status="pending", task_type="math",
-            user_id=user_id, bucket_id=bucket_id,
-            extra=json.dumps({k: q.get(k) for k in q if k not in ("question", "answer", "q", "ans")}, ensure_ascii=False),
-        ))
+    split = generate_math_questions_split(db, text.content, n_calc=n_calc, n_word=n_word)
+    calc_qs = split.get("calc") or []
+    word_qs = split.get("word") or []
+    if not calc_qs and not word_qs:
+        return None
+
+    def _persist_questions(qs):
+        for q in qs:
+            db.add(Question(
+                lesson_id=lesson.id, qtype="math",
+                question=q.get("question") or q.get("q") or "",
+                answer=str(q.get("answer") or q.get("ans") or ""),
+                subject=lesson.subject, date=datetime.utcnow().date(),
+                status="pending", task_type="math",
+                user_id=user_id, bucket_id=bucket_id,
+                extra=json.dumps({k: q.get(k) for k in q if k not in ("question", "answer", "q", "ans")},
+                                 ensure_ascii=False),
+            ))
+
+    _persist_questions(calc_qs)
+    _persist_questions(word_qs)
+    total = len(calc_qs) + len(word_qs)
     return Task(
         task_type="math", subject=lesson.subject, title=f"{lesson.title} 数学练习",
-        detail=f"今日练习 · {len(qs)} 道计算/应用题",
-        content=json.dumps(qs, ensure_ascii=False),
+        detail=f"今日练习 · 计算 {len(calc_qs)} 道 + 应用 {len(word_qs)} 道（共 {total} 道）",
+        content=json.dumps(split, ensure_ascii=False),
         points=20,
         content_status="published",
     )

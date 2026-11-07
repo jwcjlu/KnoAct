@@ -21,41 +21,153 @@ def _get_db_session():
     return SessionLocal()
 
 
+_MIN_LISTENING_QUESTIONS = 3
+_MAX_LISTENING_QUESTIONS = 5
+
+_LISTENING_MC_SCHEMA = (
+    '{"dialogue":"short English dialogue","questions":['
+    '{"id":"q1","question":"question in English","options":["A","B","C","D"],"correct_index":0}'
+    "]}"
+)
+
+_LISTENING_FALLBACK_DIALOGUE = "A: What can you do? B: I can sing. A: That is great!"
+
+_LISTENING_TEMPLATE_QUESTIONS = [
+    {
+        "id": "q1",
+        "question": "What can B do?",
+        "options": ["Sing", "Dance", "Run", "Jump"],
+        "correct_index": 0,
+    },
+    {
+        "id": "q2",
+        "question": "Who asks about skills?",
+        "options": ["A", "B", "Tom", "Lily"],
+        "correct_index": 0,
+    },
+    {
+        "id": "q3",
+        "question": "How does A respond?",
+        "options": ["That is great", "I am tired", "Go away", "Not now"],
+        "correct_index": 0,
+    },
+    {
+        "id": "q4",
+        "question": "What is the topic of the dialogue?",
+        "options": ["Abilities", "Food", "Weather", "Travel"],
+        "correct_index": 0,
+    },
+    {
+        "id": "q5",
+        "question": "Which line is from B?",
+        "options": ["I can sing.", "What can you do?", "That is great!", "See you."],
+        "correct_index": 0,
+    },
+]
+
+
+def _normalize_question_item(q: dict, index: int) -> dict | None:
+    if not isinstance(q, dict):
+        return None
+    question_text = (q.get("question") or q.get("prompt") or "").strip()
+    if not question_text:
+        question_text = "What is the main idea of the dialogue?"
+    raw_options = q.get("options") or q.get("choices") or []
+    if not isinstance(raw_options, list):
+        raw_options = []
+    options = [str(o).strip() for o in raw_options if str(o).strip()]
+    while len(options) < 4:
+        options.append(f"Option {len(options) + 1}")
+    options = options[:4]
+    try:
+        ci = int(q.get("correct_index", 0))
+    except (TypeError, ValueError):
+        ci = 0
+    ci = max(0, min(3, ci))
+    qid = (q.get("id") or f"q{index + 1}")
+    if isinstance(qid, str):
+        qid = qid.strip() or f"q{index + 1}"
+    else:
+        qid = f"q{index + 1}"
+    return {
+        "id": qid,
+        "question": question_text,
+        "options": options,
+        "correct_index": ci,
+    }
+
+
+def normalize_listening(raw: dict) -> dict:
+    """Pad/truncate listening material to 3–5 MC questions, 4 options each."""
+    dialogue = (raw.get("dialogue") or "").strip() or _LISTENING_FALLBACK_DIALOGUE
+    raw_questions = raw.get("questions") or []
+    if not isinstance(raw_questions, list):
+        raw_questions = []
+
+    questions: list[dict] = []
+    for i, item in enumerate(raw_questions):
+        if len(questions) >= _MAX_LISTENING_QUESTIONS:
+            break
+        normalized = _normalize_question_item(item, i)
+        if normalized:
+            questions.append(normalized)
+
+    tpl_i = 0
+    while len(questions) < _MIN_LISTENING_QUESTIONS:
+        tpl = _LISTENING_TEMPLATE_QUESTIONS[tpl_i % len(_LISTENING_TEMPLATE_QUESTIONS)]
+        questions.append({
+            **tpl,
+            "id": f"q{len(questions) + 1}",
+        })
+        tpl_i += 1
+
+    return {"dialogue": dialogue, "questions": questions[:_MAX_LISTENING_QUESTIONS]}
+
+
+def _listening_fake_fallback() -> dict:
+    return normalize_listening({
+        "dialogue": _LISTENING_FALLBACK_DIALOGUE,
+        "questions": _LISTENING_TEMPLATE_QUESTIONS[:_MIN_LISTENING_QUESTIONS],
+    })
+
+
 class GenerateListeningTool(BaseTool):
     name = "generate_listening"
-    description = "用小学生已学单词编一段英语对话，并出一道理解题"
+    description = "用小学生已学单词编一段英语对话，并出 3～5 道英文四选一理解题"
     parameters = []
 
     def run(self, args, ctx: UnifiedContext) -> dict:
         provider = _get_provider(ctx)
         words = args.get("words") or []
         kps = args.get("knowledge_points") or []
+        system = (
+            "You are an elementary English teacher. "
+            "Write a short English dialogue and 3 to 5 multiple-choice comprehension questions. "
+            "All dialogue and questions MUST be in English. "
+            f"Return JSON only: {_LISTENING_MC_SCHEMA}"
+        )
         try:
             if words or kps:
-                word_s = "、".join(words)
-                kp_s = "、".join(kps)
+                word_s = ", ".join(str(w) for w in words)
+                kp_s = ", ".join(str(k) for k in kps)
                 prompt = (
-                    f"用以下已学单词编一段 3 句的英语对话，并出 1 道理解题。\n"
-                    f"已学单词：{word_s}\n"
-                    f"知识点：{kp_s}\n"
-                    '只返回 JSON，格式：{"dialogue":"对话内容","question":"题目","answer":"答案"}'
+                    f"Create a short English dialogue (4–6 lines) for elementary students.\n"
+                    f"Use these learned words: {word_s}\n"
+                    f"Related topics: {kp_s}\n"
+                    f"Then write 3 to 5 multiple-choice questions about the dialogue (4 options each).\n"
+                    f"Return JSON only: {_LISTENING_MC_SCHEMA}"
                 )
             else:
-                prompt = ('用小学生已学单词编一段 3 句的英语对话，并出 1 道理解题。'
-                          '只返回 JSON，格式：{"dialogue":"对话内容","question":"题目","answer":"答案"}')
-            text = provider.generate(prompt=prompt, system="你是英语老师。", json_mode=True)
+                prompt = (
+                    "Create a short English dialogue (4–6 lines) for elementary students "
+                    "using common learned words, then write 3 to 5 multiple-choice "
+                    f"comprehension questions (4 options each). Return JSON only: {_LISTENING_MC_SCHEMA}"
+                )
+            text = provider.generate(prompt=prompt, system=system, json_mode=True)
             data = json.loads(text)
-            return {
-                "dialogue": (data.get("dialogue") or "").strip(),
-                "question": (data.get("question") or "").strip(),
-                "answer": (data.get("answer") or "").strip(),
-            }
+            return normalize_listening(data if isinstance(data, dict) else {})
         except Exception:
-            return {
-                "dialogue": "A: What can you do? B: I can sing.",
-                "question": "对话里 B 会做什么？",
-                "answer": "唱歌",
-            }
+            return _listening_fake_fallback()
 
 
 class GenerateQuizQuestionsTool(BaseTool):

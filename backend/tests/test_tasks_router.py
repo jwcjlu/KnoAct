@@ -315,6 +315,119 @@ def test_dictation_submit_ok_on_screen_without_photo():
     assert client.post(f"/api/tasks/{tid}/submit", headers=_h(uid)).json() == {"ok": True}
 
 
+def _math_task_content():
+    import json
+    return json.dumps({
+        "calc": [{"question": "3+5=？", "answer": "8"}],
+        "word": [{"id": "w1", "question": "小明有 8 个苹果吃了 3 个", "answer": "5"}],
+    }, ensure_ascii=False)
+
+
+def test_math_upload_photo_word_index_writes_content():
+    import json
+    import os
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "math",
+        "title": "数学练习", "content": _math_task_content(),
+    }, headers=_parent_h(uid))
+    tid = r.json()["id"]
+    png = b"\x89PNG\x0d\x0a\x1a\x0a" + b"x" * 32
+    resp = client.post(
+        f"/api/tasks/{tid}/upload-photo",
+        data={"word_index": "0"},
+        files={"file": ("work.png", png, "image/png")},
+        headers=_h(uid),
+    )
+    assert resp.json()["ok"] is True
+    db = SessionLocal()
+    saved = json.loads(db.get(Task, tid).content)
+    assert saved["word"][0]["photo_path"]
+    assert saved["word"][0]["ai_status"] in ("ok", "pending_review", "failed")
+    assert db.get(Task, tid).photo_path in (None, "")
+    db.close()
+    path = saved["word"][0]["photo_path"]
+    if os.path.isfile(path):
+        os.remove(path)
+
+
+def test_math_submit_requires_calc_graded_and_word_photos():
+    import json
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "math",
+        "title": "数学练习", "content": _math_task_content(),
+    }, headers=_parent_h(uid))
+    tid = r.json()["id"]
+    blocked = client.post(f"/api/tasks/{tid}/submit", headers=_h(uid))
+    assert blocked.status_code == 400
+    assert blocked.json()["detail"]["error"] == "calc_not_graded"
+
+
+def test_math_submit_ok_after_calc_and_word():
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "math",
+        "title": "数学练习", "content": _math_task_content(),
+    }, headers=_parent_h(uid))
+    tid = r.json()["id"]
+    png = b"\x89PNG" + b"z" * 40
+    client.post(
+        f"/api/tasks/{tid}/upload-photo",
+        data={"word_index": "0"},
+        files={"file": ("w.png", png, "image/png")},
+        headers=_h(uid),
+    )
+    gr = client.post(f"/api/math/task/{tid}/grade",
+                     json={"user_id": uid, "answers": ["8"]}, headers=_h(uid))
+    assert gr.json()["ok"] is True
+    assert client.post(f"/api/tasks/{tid}/submit", headers=_h(uid)).json() == {"ok": True}
+
+
+def test_math_confirm_without_task_photo_path():
+    import json
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "math",
+        "title": "数学练习", "content": _math_task_content(), "points": 25,
+    }, headers=_parent_h(uid))
+    tid = r.json()["id"]
+    png = b"\x89PNG" + b"a" * 40
+    client.post(f"/api/tasks/{tid}/upload-photo", data={"word_index": "0"},
+                files={"file": ("w.png", png, "image/png")}, headers=_h(uid))
+    client.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["8"]}, headers=_h(uid))
+    client.post(f"/api/tasks/{tid}/submit", headers=_h(uid))
+    conf = client.post(f"/api/tasks/{tid}/confirm", headers=_parent_h(uid))
+    assert conf.json()["ok"] is True
+    db = SessionLocal()
+    assert not (db.get(Task, tid).photo_path or "").strip()
+    db.close()
+
+
+def test_math_reject_resets_submit_and_word_photo():
+    import json
+    uid = _seed()
+    r = client.post("/api/tasks", json={
+        "user_id": uid, "date": str(date.today()), "task_type": "math",
+        "title": "数学练习", "content": _math_task_content(),
+    }, headers=_parent_h(uid))
+    tid = r.json()["id"]
+    png = b"\x89PNG" + b"b" * 40
+    client.post(f"/api/tasks/{tid}/upload-photo", data={"word_index": "0"},
+                files={"file": ("w.png", png, "image/png")}, headers=_h(uid))
+    client.post(f"/api/math/task/{tid}/grade", json={"user_id": uid, "answers": ["8"]}, headers=_h(uid))
+    client.post(f"/api/tasks/{tid}/submit", headers=_h(uid))
+    assert client.post(f"/api/tasks/{tid}/reject", json={"scope": "task"}, headers=_parent_h(uid)).json()["ok"] is True
+    db = SessionLocal()
+    t = db.get(Task, tid)
+    assert t.submit_status == "not_started"
+    word = json.loads(t.content)["word"][0]
+    assert word.get("parent_status") == "rejected"
+    assert not word.get("photo_path")
+    assert "ai_status" not in word
+    db.close()
+
+
 def test_dictation_confirm_rejects_paper_without_photo():
     uid = _seed()
     db = SessionLocal()

@@ -18,16 +18,36 @@ import 'package:student_app/features/wrongbook/data/bucket_models.dart';
 
 import '../auth/session_test.dart' show FakeAuthRepository;
 
+const _mcOpts = ['a', 'b', 'c', 'd'];
+const _childJin = '\u91d1\u540c\u5b66';
+const _childLi = '\u674e\u540c\u5b66';
+const _msgWrong = '\u7b54\u9519\u4e86\uff0c\u5df2\u6536\u5f55\u8fdb\u9519\u9898\u672c';
+const _msgSubmitted = '\u5df2\u63d0\u4ea4\uff0c\u7b49\u5f85\u5bb6\u957f\u786e\u8ba4';
+const _msgNoMaterial = '\u6682\u65e0\u6750\u6599\uff0c\u6682\u65f6\u65e0\u6cd5\u5b8c\u6210\u8be5\u4efb\u52a1';
+const _msgSubmitFail = '\u63d0\u4ea4\u4efb\u52a1\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5';
+const _msgWrongAndSubmitted =
+    '\u7b54\u9519\u4e86\uff0c\u5df2\u6536\u5f55\u8fdb\u9519\u9898\u672c\uff1b\u4efb\u52a1\u5df2\u63d0\u4ea4\uff0c\u7b49\u5f85\u5bb6\u957f\u786e\u8ba4';
+const _msgWrongAndSubmitFail =
+    '\u7b54\u9519\u4e86\uff0c\u5df2\u6536\u5f55\u8fdb\u9519\u9898\u672c\uff1b\u63d0\u4ea4\u4efb\u52a1\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5';
+const _msgWrongFailAndSubmitted =
+    '\u7b54\u9519\u4e86\uff08\u6536\u5f55\u9519\u9898\u672c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\uff09\uff1b\u4efb\u52a1\u5df2\u63d0\u4ea4\uff0c\u7b49\u5f85\u5bb6\u957f\u786e\u8ba4';
+const _msgSubmitFailRestart =
+    '\u63d0\u4ea4\u4efb\u52a1\u5931\u8d25\uff0c\u8bf7\u56de\u9996\u9875\u91cd\u65b0\u5f00\u59cb\u8be5\u4efb\u52a1';
+
 class FakeCenterRepository implements CenterRepository {
-  CenterMaterial readingMaterial = const CenterMaterial(text: '课文', questions: [CenterQuestion('Q1', 'A1'), CenterQuestion('Q2', 'A2')]);
-  CenterMaterial listeningMaterial = const CenterMaterial(text: 'Hi', questions: [CenterQuestion('L1', 'yes')]);
+  CenterMaterial readingMaterial = const CenterMaterial(text: '\u8bfe\u6587', questions: [CenterQuestion('Q1', 'A1')]);
+  CenterMaterial listeningMaterial = const CenterMaterial(
+    text: 'Hi',
+    questions: [
+      CenterQuestion('L1', 'b', options: _mcOpts, correctIndex: 1),
+      CenterQuestion('L2', 'd', options: _mcOpts, correctIndex: 3),
+    ],
+  );
   final wrong = <String>[];
 
-  /// 非空时 submitWrong 等待它完成后才返回
   Completer<void>? wrongGate;
   bool failWrong = false;
 
-  /// 非空时拉取材料等待它完成后才返回
   Completer<void>? materialGate;
   int loads = 0;
 
@@ -45,7 +65,13 @@ class FakeCenterRepository implements CenterRepository {
   Future<CenterMaterial> reading(int userId) => _material(readingMaterial);
 
   @override
-  Future<void> submitWrong({required int userId, required String question, required String yourAnswer, required String correctAnswer, required String sourceType}) async {
+  Future<void> submitWrong({
+    required int userId,
+    required String question,
+    required String yourAnswer,
+    required String correctAnswer,
+    required String sourceType,
+  }) async {
     wrong.add('$sourceType:$question:$yourAnswer');
     final gate = wrongGate;
     if (gate != null) await gate.future;
@@ -56,7 +82,6 @@ class FakeCenterRepository implements CenterRepository {
 class FakeTaskRepository implements HomeRepository {
   final submitted = <int>[];
 
-  /// 非空时 submitTask 等待它完成后才返回
   Completer<void>? submitGate;
   bool failSubmit = false;
   int homeLoads = 0;
@@ -77,12 +102,16 @@ class FakeTaskRepository implements HomeRepository {
     homeLoads++;
     throw UnimplementedError();
   }
+
   @override
   Future<List<StudyTask>> tasks(int userId, String date) => throw UnimplementedError();
+
   @override
   Future<int> balance(int userId, {int? bucketId}) => throw UnimplementedError();
+
   @override
   Future<List<BucketInfo>> buckets(int userId) async => const [];
+
   @override
   Future<bool> redeem(int userId, String device, int minutes) => throw UnimplementedError();
 }
@@ -102,17 +131,16 @@ class FakeSpeechPlayer implements SpeechPlayer {
 
 late FakeSpeechPlayer speech;
 
-/// 与 [switchChild] 测试一致：`jin`→金同学、`li`→李同学
 class CenterFlowAuth extends FakeAuthRepository {
-  CenterFlowAuth() : super(const Child(4, '金同学', loginName: 'jin'));
+  CenterFlowAuth() : super(Child(4, _childJin, loginName: 'jin'));
 
   @override
   Future<AuthSession> login(String loginName, String password) async {
     lastLoginName = loginName;
     lastPassword = password;
     final child = loginName == 'li'
-        ? const Child(5, '李同学', loginName: 'li')
-        : const Child(4, '金同学', loginName: 'jin');
+        ? Child(5, _childLi, loginName: 'li')
+        : Child(4, _childJin, loginName: 'jin');
     return AuthSession(child, accessToken: 'acc-1', refreshToken: 'ref-1');
   }
 }
@@ -120,7 +148,7 @@ class CenterFlowAuth extends FakeAuthRepository {
 Future<(ProviderContainer, FakeCenterRepository, FakeTaskRepository)> setup() async {
   SharedPreferences.setMockInitialValues({
     'knoact_child_id': 4,
-    'knoact_child_name': '金同学',
+    'knoact_child_name': _childJin,
     SessionStore.accessTokenKey: 'tok',
     SessionStore.refreshTokenKey: 'ref',
   });
@@ -142,110 +170,109 @@ Future<(ProviderContainer, FakeCenterRepository, FakeTaskRepository)> setup() as
 }
 
 void main() {
-  test('进入时加载当前 Tab 材料并清空作答', () async {
-    final (c, _, _) = await setup();
+  test('?????????????', () async {
+    final (c, center, _) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
     await ctl.enter();
     final s = c.read(centerControllerProvider);
     expect(s.tab, CenterTab.listening);
-    expect(s.material.value!.questions.length, 1);
-    expect(s.results, [null]);
+    expect(s.material.value!.isEmpty, isTrue);
+    expect(center.loads, 0);
   });
 
-  test('答错收录错题本并提示，答对提示正确', () async {
-    final (c, center, _) = await setup();
-    final ctl = c.read(centerControllerProvider.notifier);
-    await ctl.selectTab(CenterTab.reading);
-    await ctl.answer(0, 'x');
-    expect(center.wrong, ['reading:Q1:x']);
-    expect(c.read(centerControllerProvider).message, '答错了，已收录进错题本');
-    await ctl.answer(1, ' A2 ');
-    expect(c.read(centerControllerProvider).message, '回答正确！');
-    expect(c.read(centerControllerProvider).results, [false, true]);
-  });
-
-  test('从任务进入：在任务对应 Tab 全部作答后自动提交一次', () async {
-    final (c, _, tasks) = await setup();
-    final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
-    await ctl.enter();
-    expect(c.read(centerControllerProvider).tab, CenterTab.reading);
-    await ctl.answer(0, 'A1');
-    expect(tasks.submitted, isEmpty);
-    await ctl.answer(1, 'A2');
-    expect(tasks.submitted, [85]);
-    expect(c.read(centerControllerProvider).message, '已提交，等待家长确认');
-    expect(c.read(centerControllerProvider).pending, isNull);
-  });
-
-  test('切到别的 Tab 后清除待提交任务', () async {
-    final (c, _, tasks) = await setup();
-    final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
-    await ctl.enter();
-    await ctl.selectTab(CenterTab.listening);
-    expect(c.read(centerControllerProvider).pending, isNull);
-    await ctl.selectTab(CenterTab.reading);
-    await ctl.answer(0, 'A1');
-    await ctl.answer(1, 'A2');
-    expect(tasks.submitted, isEmpty);
-  });
-
-  test('离开学习中心清除待提交任务', () async {
+  test('????????????', () async {
     final (c, _, _) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
+    ctl.openForTask(85);
+    await ctl.enter();
+    final s = c.read(centerControllerProvider);
+    expect(s.material.value!.questions.length, 2);
+    expect(s.results, [null, null]);
+  });
+
+  test('?????????????????', () async {
+    final (c, center, _) = await setup();
+    final ctl = c.read(centerControllerProvider.notifier);
+    ctl.openForTask(85);
+    await ctl.enter();
+    await ctl.answer(0, selectedIndex: 0);
+    expect(center.wrong, ['listening:L1:a']);
+    expect(c.read(centerControllerProvider).message, _msgWrong);
+    expect(c.read(centerControllerProvider).results, [false, null]);
+    await ctl.answer(0, selectedIndex: 1);
+    expect(center.wrong.length, 1);
+  });
+
+  test('?????????????????', () async {
+    final (c, _, tasks) = await setup();
+    final ctl = c.read(centerControllerProvider.notifier);
+    ctl.openForTask(85);
+    await ctl.enter();
+    expect(c.read(centerControllerProvider).tab, CenterTab.listening);
+    await ctl.answer(0, selectedIndex: 1);
+    expect(tasks.submitted, isEmpty);
+    await ctl.answer(1, selectedIndex: 3);
+    expect(tasks.submitted, [85]);
+    expect(c.read(centerControllerProvider).message, _msgSubmitted);
+    expect(c.read(centerControllerProvider).pending, isNull);
+  });
+
+  test('?????????????', () async {
+    final (c, _, _) = await setup();
+    final ctl = c.read(centerControllerProvider.notifier);
+    ctl.openForTask(85);
     await ctl.enter();
     ctl.leave();
     expect(c.read(centerControllerProvider).pending, isNull);
   });
 
-  test('材料为空时不提交并提示', () async {
+  test('???????????', () async {
     final (c, center, tasks) = await setup();
-    center.readingMaterial = CenterMaterial.empty;
+    center.listeningMaterial = CenterMaterial.empty;
     final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
+    ctl.openForTask(85);
     await ctl.enter();
-    expect(c.read(centerControllerProvider).message, '暂无材料，暂时无法完成该任务');
+    expect(c.read(centerControllerProvider).message, _msgNoMaterial);
     expect(tasks.submitted, isEmpty);
   });
 
-  test('同一题只能作答一次', () async {
+  test('?????????', () async {
     final (c, center, _) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
-    await ctl.selectTab(CenterTab.reading);
-    await ctl.answer(0, 'x');
-    await ctl.answer(0, 'y');
+    ctl.openForTask(85);
+    await ctl.enter();
+    await ctl.answer(0, selectedIndex: 0);
+    await ctl.answer(0, selectedIndex: 2);
     expect(center.wrong.length, 1);
   });
 
-  test('最后一题答错后立即离开，任务仍会提交', () async {
+  test('??????????????????', () async {
     final (c, center, tasks) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
+    ctl.openForTask(85);
     await ctl.enter();
-    await ctl.answer(0, 'A1');
+    await ctl.answer(0, selectedIndex: 1);
     final gate = center.wrongGate = Completer<void>();
-    final answering = ctl.answer(1, 'x');
+    final answering = ctl.answer(1, selectedIndex: 0);
     ctl.leave();
     gate.complete();
     await answering;
     expect(tasks.submitted, [85]);
   });
 
-  test('旧任务提交完成时不清除新任务，且新任务随后自动提交', () async {
+  test('?????????????????????????', () async {
     final (c, _, tasks) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
+    ctl.openForTask(85);
     await ctl.enter();
-    await ctl.answer(0, 'A1');
+    await ctl.answer(0, selectedIndex: 1);
     final gate = tasks.submitGate = Completer<void>();
-    final first = ctl.answer(1, 'A2');
+    final first = ctl.answer(1, selectedIndex: 3);
     tasks.submitGate = null;
-    ctl.openForTask(86, CenterTab.reading);
+    ctl.openForTask(86);
     await ctl.enter();
-    await ctl.answer(0, 'A1');
-    await ctl.answer(1, 'A2');
+    await ctl.answer(0, selectedIndex: 1);
+    await ctl.answer(1, selectedIndex: 3);
     expect(tasks.submitted, isEmpty);
     gate.complete();
     await first;
@@ -253,12 +280,13 @@ void main() {
     expect(c.read(centerControllerProvider).pending, isNull);
   });
 
-  test('从任务进入时清空旧材料与作答', () async {
+  test('??????????????', () async {
     final (c, _, _) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
+    ctl.openForTask(85);
     await ctl.enter();
-    await ctl.answer(0, 'yes');
-    ctl.openForTask(85, CenterTab.reading);
+    await ctl.answer(0, selectedIndex: 0);
+    ctl.openForTask(86);
     final s = c.read(centerControllerProvider);
     expect(s.material.isLoading, isTrue);
     expect(s.material.hasValue, isFalse);
@@ -266,49 +294,51 @@ void main() {
     expect(s.inputs, isEmpty);
   });
 
-  test('任务提交成功后刷新首页', () async {
+  test('???????????', () async {
     final (c, _, tasks) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
+    ctl.openForTask(85);
     await ctl.enter();
-    await ctl.answer(0, 'A1');
+    await ctl.answer(0, selectedIndex: 1);
     expect(tasks.homeLoads, 0);
-    await ctl.answer(1, 'A2');
+    await ctl.answer(1, selectedIndex: 3);
     expect(tasks.submitted, [85]);
     expect(tasks.homeLoads, greaterThan(0));
   });
 
-  test('切换 Tab 后，过期的错题收录结果不再提示', () async {
+  test('reload ??????????????', () async {
     final (c, center, _) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
-    await ctl.selectTab(CenterTab.reading);
+    ctl.openForTask(85);
+    await ctl.enter();
     final gate = center.wrongGate = Completer<void>();
-    final answering = ctl.answer(0, 'x');
-    await ctl.selectTab(CenterTab.listening);
+    final answering = ctl.answer(0, selectedIndex: 0);
+    await ctl.reload();
     gate.complete();
     await answering;
-    expect(c.read(centerControllerProvider).message, isNot('答错了，已收录进错题本'));
+    expect(c.read(centerControllerProvider).message, isNot(_msgWrong));
   });
 
-  test('setInput 忽略越界下标', () async {
+  test('setInput ??????', () async {
     final (c, _, _) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
+    ctl.openForTask(85);
     await ctl.enter();
     ctl.setInput(5, 'x');
     ctl.setInput(-1, 'x');
-    expect(c.read(centerControllerProvider).inputs, ['']);
+    expect(c.read(centerControllerProvider).inputs, ['', '']);
   });
 
-  test('任务提交失败可重试', () async {
+  test('?????????', () async {
     final (c, _, tasks) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
+    ctl.openForTask(85);
     await ctl.enter();
     tasks.failSubmit = true;
-    await ctl.answer(0, 'A1');
-    await ctl.answer(1, 'A2');
+    await ctl.answer(0, selectedIndex: 1);
+    await ctl.answer(1, selectedIndex: 3);
     var s = c.read(centerControllerProvider);
-    expect(s.message, '提交任务失败，请稍后重试');
+    expect(s.message, _msgSubmitFail);
     expect(s.submitFailed, isTrue);
     expect(s.pending?.taskId, 85);
     tasks.failSubmit = false;
@@ -319,14 +349,13 @@ void main() {
     expect(s.pending, isNull);
   });
 
-  test('离开学习中心或切到阅读时停止朗读', () async {
+  test('???????????', () async {
     final (c, _, _) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
+    ctl.openForTask(85);
     await ctl.enter();
     ctl.leave();
     expect(speech.stops, 1);
-    await ctl.selectTab(CenterTab.reading);
-    expect(speech.stops, 2);
   });
 
   Future<void> switchChild(ProviderContainer c) async {
@@ -334,11 +363,11 @@ void main() {
     await c.read(sessionProvider.notifier).login('li', 'pw123456');
   }
 
-  test('切换孩子：状态重置并停止朗读，上一个孩子的在途材料不写入', () async {
+  test('????????????????????????????', () async {
     final (c, center, _) = await setup();
     c.listen(centerControllerProvider, (_, _) {});
     final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
+    ctl.openForTask(85);
     final gate = center.materialGate = Completer<void>();
     final loading = ctl.enter();
     await switchChild(c);
@@ -351,20 +380,21 @@ void main() {
     expect(s.results, isEmpty);
   });
 
-  test('切换孩子后，上一个孩子的错题收录提示不再出现', () async {
+  test('??????????????????????', () async {
     final (c, center, _) = await setup();
     c.listen(centerControllerProvider, (_, _) {});
     final ctl = c.read(centerControllerProvider.notifier);
-    await ctl.selectTab(CenterTab.reading);
+    ctl.openForTask(85);
+    await ctl.enter();
     final gate = center.wrongGate = Completer<void>();
-    final answering = ctl.answer(0, 'x');
+    final answering = ctl.answer(0, selectedIndex: 0);
     await switchChild(c);
     gate.complete();
     await answering;
     expect(c.read(centerControllerProvider).message, isNull);
   });
 
-  test('未登录时进入学习中心不请求也不报错', () async {
+  test('?????????????????', () async {
     final (c, center, _) = await setup();
     await c.read(sessionProvider.notifier).logout();
     await c.read(centerControllerProvider.notifier).enter();
@@ -375,16 +405,16 @@ void main() {
   Future<(ProviderContainer, FakeCenterRepository, FakeTaskRepository, CenterController)> lastQuestionPending() async {
     final (c, center, tasks) = await setup();
     final ctl = c.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
+    ctl.openForTask(85);
     await ctl.enter();
-    await ctl.answer(0, 'A1');
+    await ctl.answer(0, selectedIndex: 1);
     return (c, center, tasks, ctl);
   }
 
-  test('最后一题答错：提交返回即解除提交中并刷新首页，提示合并为一条', () async {
+  test('??????????????????????????????', () async {
     final (c, center, tasks, ctl) = await lastQuestionPending();
     final gate = center.wrongGate = Completer<void>();
-    final answering = ctl.answer(1, 'x');
+    final answering = ctl.answer(1, selectedIndex: 0);
     await pumpEventQueue();
     var s = c.read(centerControllerProvider);
     expect(tasks.submitted, [85]);
@@ -394,35 +424,38 @@ void main() {
     gate.complete();
     await answering;
     s = c.read(centerControllerProvider);
-    expect(s.message, '答错了，已收录进错题本；任务已提交，等待家长确认');
+    expect(s.message, _msgWrongAndSubmitted);
   });
 
-  test('最后一题答错且提交失败：合并提示并可重新提交', () async {
+  test('??????????????????????', () async {
     final (c, _, tasks, ctl) = await lastQuestionPending();
     tasks.failSubmit = true;
-    await ctl.answer(1, 'x');
+    await ctl.answer(1, selectedIndex: 0);
     final s = c.read(centerControllerProvider);
-    expect(s.message, '答错了，已收录进错题本；提交任务失败，请稍后重试');
+    expect(s.message, _msgWrongAndSubmitFail);
     expect(s.submitFailed, isTrue);
   });
 
-  test('最后一题答错且收录失败、提交成功：合并提示', () async {
+  test('?????????????????????', () async {
     final (c, center, _, ctl) = await lastQuestionPending();
     center.failWrong = true;
-    await ctl.answer(1, 'x');
-    expect(c.read(centerControllerProvider).message, '答错了（收录错题本失败，请稍后重试）；任务已提交，等待家长确认');
+    await ctl.answer(1, selectedIndex: 0);
+    expect(
+      c.read(centerControllerProvider).message,
+      _msgWrongFailAndSubmitted,
+    );
   });
 
-  test('旧任务提交失败时提示回首页重新开始该任务', () async {
+  test('????????????????????', () async {
     final (c, _, tasks, ctl) = await lastQuestionPending();
     final gate = tasks.submitGate = Completer<void>();
     tasks.failSubmit = true;
-    final first = ctl.answer(1, 'A2');
-    ctl.openForTask(86, CenterTab.reading);
+    final first = ctl.answer(1, selectedIndex: 3);
+    ctl.openForTask(86);
     gate.complete();
     await first;
     final s = c.read(centerControllerProvider);
-    expect(s.message, '提交任务失败，请回首页重新开始该任务');
+    expect(s.message, _msgSubmitFailRestart);
     expect(s.submitFailed, isFalse);
     expect(s.pending?.taskId, 86);
   });

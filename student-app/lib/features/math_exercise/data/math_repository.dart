@@ -1,67 +1,51 @@
-import 'dart:convert';
-
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/providers.dart';
-
-/// 数学题（来自任务 content 的 JSON）
-class MathQuestion {
-  const MathQuestion({required this.question, required this.answer, this.yourAnswer = '', this.isCorrect});
-
-  factory MathQuestion.fromJson(Map<String, dynamic> j) => MathQuestion(
-        question: '${j['question'] ?? ''}',
-        answer: '${j['answer'] ?? ''}',
-        yourAnswer: '${j['your_answer'] ?? ''}',
-        isCorrect: j['is_correct'] is bool ? j['is_correct'] as bool : null,
-      );
-
-  final String question;
-  final String answer;
-  final String yourAnswer;
-  final bool? isCorrect;
-}
-
-/// 解析任务 content（JSON 字符串）为数学题列表
-List<MathQuestion> parseMathContent(String content) {
-  if (content.isEmpty) return const [];
-  try {
-    final list = jsonDecode(content);
-    if (list is! List) return const [];
-    return [for (final q in list.whereType<Map>()) MathQuestion.fromJson(Map<String, dynamic>.from(q))];
-  } catch (_) {
-    return const [];
-  }
-}
-
-class MathGradeResult {
-  const MathGradeResult({required this.correct, required this.total, required this.results});
-
-  final int correct;
-  final int total;
-  final List<bool> results;
-
-  factory MathGradeResult.fromJson(Map<String, dynamic> j) => MathGradeResult(
-        correct: (j['correct'] as num?)?.toInt() ?? 0,
-        total: (j['total'] as num?)?.toInt() ?? 0,
-        results: [
-          if (j['results'] is List)
-            for (final r in (j['results'] as List).whereType<Map>()) r['is_correct'] == true,
-        ],
-      );
-}
+import 'math_models.dart';
 
 class MathRepository {
   MathRepository(this._api);
 
   final ApiClient _api;
 
-  Future<MathGradeResult> grade({required int userId, required int taskId, required List<String> answers}) async {
+  Future<MathTaskMaterial> fetchMaterial(int taskId) async {
+    final r = asMap(await _api.get('/api/math/task/$taskId/material'));
+    if (r['ok'] != true) throw ApiException('${r['error'] ?? '加载数学题失败'}');
+    return MathTaskMaterial.fromJson(r);
+  }
+
+  Future<MathGradeResult> gradeCalc({required int userId, required int taskId, required List<String> answers}) async {
     final r = asMap(await _api.post('/api/math/task/$taskId/grade', body: {
       'user_id': userId,
       'answers': answers,
     }));
+    if (r['ok'] == false) throw ApiException('${r['error'] ?? '判分失败'}');
     return MathGradeResult.fromJson(r);
+  }
+
+  /// 应用题单题拍照；[wordIndex] 为题序（与 material `word[].index` 一致）。
+  Future<MathWordItem> uploadWordPhoto(
+    int taskId,
+    int wordIndex,
+    List<int> bytes, {
+    String filename = 'math_word.jpg',
+  }) async {
+    final form = FormData.fromMap({
+      'file': MultipartFile.fromBytes(bytes, filename: filename),
+      'word_index': wordIndex,
+    });
+    final r = asMap(await _api.postMultipart('/api/tasks/$taskId/upload-photo', form));
+    if (r['ok'] != true) throw ApiException('${r['error'] ?? '上传照片失败'}');
+    final grade = r['grade'] is Map ? Map<String, dynamic>.from(r['grade'] as Map) : <String, dynamic>{};
+    return MathWordItem(
+      index: (r['word_index'] as num?)?.toInt() ?? wordIndex,
+      question: '',
+      photoPath: r['path'] == null ? null : '${r['path']}',
+      aiStatus: grade['ai_status'] == null ? null : '${grade['ai_status']}',
+      parentStatus: 'none',
+    );
   }
 }
 

@@ -6,7 +6,6 @@ import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
 import '../../auth/session.dart';
 import '../../center/center_controller.dart';
-import '../../center/center_logic.dart';
 import '../../dictation/dictation_controller.dart';
 import '../../knowledge_review/knowledge_controller.dart';
 import '../../math_exercise/math_controller.dart';
@@ -30,13 +29,13 @@ class _HomePageState extends ConsumerState<HomePage> {
   void _onTask(StudyTask t) {
     switch (taskAction(t)) {
       case TaskAction.openReading:
-        ref.read(centerControllerProvider.notifier).openForTask(t.id, CenterTab.reading);
-        context.go('/center');
+        ref.read(readerControllerProvider.notifier).loadDocuments();
+        context.go('/reader');
       case TaskAction.openListening:
-        ref.read(centerControllerProvider.notifier).openForTask(t.id, CenterTab.listening);
+        ref.read(centerControllerProvider.notifier).openForTask(t.id);
         context.go('/center');
       case TaskAction.openMath:
-        ref.read(mathControllerProvider.notifier).init(taskId: t.id, title: t.title, content: t.content);
+        ref.read(mathControllerProvider.notifier).init(taskId: t.id, title: t.title, content: t.content); // content 作 material 失败兜底
         context.go('/math');
       case TaskAction.openKnowledge:
         ref.read(knowledgeControllerProvider.notifier).init(taskId: t.id, title: t.title, content: t.content);

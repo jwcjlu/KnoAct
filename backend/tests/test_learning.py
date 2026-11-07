@@ -128,6 +128,17 @@ def test_listening_material(setup_db):
     assert "text" in data and "questions" in data
 
 
+def test_listening_material_returns_mc_fields(setup_db):
+    uid = _seed_user()
+    data = _client().get(
+        f"/api/listening/material?user_id={uid}", headers=bound_child_headers(uid)
+    ).json()
+    for q in data["questions"]:
+        assert len(q["options"]) == 4
+        assert "correct_index" in q
+        assert 0 <= q["correct_index"] <= 3
+
+
 def test_listening_material_updates_empty_pregenerated_task(setup_db):
     import json
     from datetime import date
@@ -161,20 +172,81 @@ def test_listening_material_reads_pregenerated_task(setup_db):
     from datetime import date
     from app.models import Task
     from app.database import SessionLocal
+    stored = {
+        "dialogue": "A: Hi B: Hello",
+        "questions": [
+            {
+                "id": "q1",
+                "question": "What did B say?",
+                "options": ["Hello", "Hi", "Bye", "Thanks"],
+                "correct_index": 0,
+            },
+            {
+                "id": "q2",
+                "question": "Who said Hi first?",
+                "options": ["A", "B", "C", "D"],
+                "correct_index": 0,
+            },
+            {
+                "id": "q3",
+                "question": "Is this a greeting?",
+                "options": ["Yes", "No", "Maybe", "Unknown"],
+                "correct_index": 0,
+            },
+        ],
+    }
     s = SessionLocal()
     p = make_account(s, "p_lm_r", "parent")
     uid = make_account(s, "k_lm_r", "child", parent=p).id
     s.add(Task(
         user_id=uid, subject="英语", date=date.today(), task_type="listening",
         title="英语听力练习", content_status="published",
-        content=json.dumps({"dialogue": "A: Hi B: Hello", "question": "B 说了什么？", "answer": "Hello"}, ensure_ascii=False),
+        content=json.dumps(stored, ensure_ascii=False),
     ))
     s.commit(); s.close()
 
     resp = _client().get(f"/api/listening/material?user_id={uid}", headers=bound_child_headers(uid))
     data = resp.json()
     assert data["text"] == "A: Hi B: Hello"
-    assert data["questions"][0]["answer"] == "Hello"
+    assert data["questions"][0]["correct_index"] == 0
+    assert data["questions"][0]["options"] == ["Hello", "Hi", "Bye", "Thanks"]
+
+
+def test_listening_material_regenerates_legacy_content(setup_db):
+    import json
+    from datetime import date
+    from app.models import Task
+    from app.database import SessionLocal
+    s = SessionLocal()
+    p = make_account(s, "p_lm_l", "parent")
+    uid = make_account(s, "k_lm_l", "child", parent=p).id
+    s.add(Task(
+        user_id=uid, subject="英语", date=date.today(), task_type="listening",
+        title="英语听力练习", content_status="published",
+        content=json.dumps(
+            {"dialogue": "A: Hi B: Hello", "question": "B 说了什么？", "answer": "Hello"},
+            ensure_ascii=False,
+        ),
+    ))
+    s.commit(); s.close()
+
+    resp = _client().get(f"/api/listening/material?user_id={uid}", headers=bound_child_headers(uid))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "answer" not in body
+    for q in body["questions"]:
+        assert "options" in q and len(q["options"]) == 4
+        assert "correct_index" in q
+
+    s = SessionLocal()
+    row = s.query(Task).filter_by(
+        user_id=uid, subject="英语", date=date.today(), task_type="listening"
+    ).first()
+    saved = json.loads(row.content)
+    assert isinstance(saved.get("questions"), list)
+    assert len(saved["questions"]) >= 3
+    assert "answer" not in saved
+    s.close()
 
 
 def test_reading_material(setup_db):

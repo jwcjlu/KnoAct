@@ -36,14 +36,17 @@ class AskRepository {
     required String context,
     required String mode,
     required List<String> sentences,
+    String? model,
   }) async* {
-    final stream = await _api.postStream('/api/ask/stream', body: {
+    final body = <String, dynamic>{
       'lesson_id': lessonId,
       'question': question,
       'context': context,
       'mode': mode,
       'sentences': sentences,
-    });
+    };
+    if (model != null && model.isNotEmpty) body['model'] = model;
+    final stream = await _api.postStream('/api/ask/stream', body: body);
 
     final buffer = StringBuffer();
     await for (final chunk in stream) {
@@ -63,6 +66,33 @@ class AskRepository {
       final event = _parseBlock(buffer.toString());
       if (event != null) yield event;
     }
+  }
+
+  /// 非流式兜底（Dio SSE 在部分 Web 环境异常时与 Web 端行为对齐）
+  Future<({String answer, List<int> citations, String mode})> askOnce({
+    required int lessonId,
+    required String question,
+    required String context,
+    required String mode,
+    required List<String> sentences,
+    String? model,
+  }) async {
+    final body = <String, dynamic>{
+      'lesson_id': lessonId,
+      'question': question,
+      'context': context,
+      'mode': mode,
+      'sentences': sentences,
+    };
+    if (model != null && model.isNotEmpty) body['model'] = model;
+    final raw = await _api.post('/api/ask', body: body);
+    final m = asMap(raw);
+    final c = m['citations'];
+    return (
+      answer: '${m['answer'] ?? ''}',
+      citations: c is List ? c.whereType<num>().map((n) => n.toInt()).toList() : <int>[],
+      mode: '${m['mode'] ?? mode}',
+    );
   }
 
   AskStreamEvent? _parseBlock(String block) {

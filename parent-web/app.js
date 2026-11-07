@@ -616,8 +616,62 @@ async function loadParentTasks(){
 }
 const TASK_TYPE_LABEL = {
   dictation:'听写', knowledge:'基础练习', review:'复习',
-  reading:'阅读理解', listening:'听力理解', custom:'自由任务'
+  reading:'阅读理解', listening:'听力理解', custom:'自由任务', math:'数学练习'
 };
+function parseMathTaskContent(raw){
+  const s = (raw || '').trim();
+  if(!s) return {calc:[], word:[]};
+  try{
+    const data = JSON.parse(s);
+    if(Array.isArray(data)) return {calc:data, word:[]};
+    if(data && typeof data === 'object'){
+      return {calc:[...(data.calc||[])], word:[...(data.word||[])]};
+    }
+  }catch(e){ /* legacy / corrupt */ }
+  return {calc:[], word:[]};
+}
+const MATH_AI_STATUS_LABEL = {
+  ok:'AI 已通过',
+  pending_review:'待家长确认',
+  failed:'批改失败'
+};
+function mathAiStatusLabel(st){
+  const k = (st || '').trim();
+  return MATH_AI_STATUS_LABEL[k] || (k ? k : '未批改');
+}
+function mathCalcSummaryHtml(calc){
+  if(!calc.length) return '<span style="font-size:12px;color:#5c6761">计算题：无</span>';
+  let ok = 0;
+  calc.forEach(c => {
+    const v = c.is_correct !== undefined ? c.is_correct : c.user_correct;
+    if(v === true) ok++;
+  });
+  return `<span style="font-size:12px;color:#5c6761">计算题：${ok}/${calc.length} 对</span>`;
+}
+function mathWordThumbsHtml(word){
+  if(!word.length) return '';
+  const items = word.map((w, i) => {
+    const p = (w.photo_path || '').replace(/^\/+/, '');
+    const lab = mathAiStatusLabel(w.ai_status);
+    const thumb = p
+      ? `<a href="${API}/${p}" target="_blank" rel="noopener" title="应用题 ${i + 1}">
+           <img src="${API}/${p}" alt="应用题 ${i + 1}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line3);display:block"/>
+         </a>`
+      : `<span style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px dashed #c5cbc7;font-size:10px;color:#8e9691;background:#f7f8f7">无图</span>`;
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;max-width:72px">
+      ${thumb}
+      <span style="font-size:10px;color:#78817b;text-align:center;line-height:1.2">题${i + 1}<br/>${lab}</span>
+    </div>`;
+  }).join('');
+  return `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">${items}</div>`;
+}
+function renderMathSubmittedDetail(t){
+  const {calc, word} = parseMathTaskContent(t.content);
+  return `<div class="math-task-review" style="margin-top:6px">
+    ${mathCalcSummaryHtml(calc)}
+    ${word.length ? `<div style="font-size:12px;color:#5c6761;margin-top:6px">应用题照片</div>${mathWordThumbsHtml(word)}` : ''}
+  </div>`;
+}
 function renderTaskTab(){
   const typeChip = tt => `<span style="font-size:11px;font-weight:600;color:#5c6761;background:#eef0ed;border-radius:6px;padding:2px 8px">${TASK_TYPE_LABEL[tt]||tt||'任务'}</span>`;
   const rows = parentTasks.map(t=>{
@@ -631,6 +685,9 @@ function renderTaskTab(){
       const photoHint = (t.task_type==='dictation' && !t.photo_path)
         ? `<span style="font-size:11px;color:#c05b4a">未上传打卡照</span>` : '';
       actions = `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="confirmTask(${t.id})">确认完成</button>` +
+        (t.task_type==='math'
+          ? `<button class="btn-ghost" style="color:#c05b4a;padding:6px 14px;font-size:12px" onclick="rejectTask(${t.id})">打回重做</button>`
+          : '') +
         (t.photo_path ? `<a href="${API}/${t.photo_path}" target="_blank" style="font-size:12px;color:#3158e8;text-decoration:none;align-self:center">查看照片</a>` : '') +
         photoHint;
     } else if(t.submit_status==='approved'){
@@ -643,10 +700,13 @@ function renderTaskTab(){
       t.detail||'',
       (t.points!==undefined && t.points!==null) ? `${t.points} 积分` : ''
     ].filter(Boolean).join(' · ');
+    const mathDetail = (t.task_type==='math' && t.submit_status==='submitted')
+      ? renderMathSubmittedDetail(t) : '';
     return `<div class="goal-item" style="display:flex;align-items:center;gap:12px">
       <div style="flex:1;min-width:0">
         <div class="g-top"><span class="g-name">${t.title||'(无标题)'}</span>${status}</div>
         ${meta?`<div class="g-meta">${meta}</div>`:''}
+        ${mathDetail}
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">${actions}<button class="btn-ghost" style="color:#c05b4a" onclick="deleteTask(${t.id})">删除</button></div>
     </div>`;
@@ -679,6 +739,11 @@ async function generateTodayTasks(){
 async function approveAllTasks(){ if(!uid) return; await api(`/api/tasks/approve-all`,{method:'POST',body:{user_id:uid,date:parentTaskDate}}); await loadParentTasks(); render(); }
 async function deleteTask(id){ await api(`/api/tasks/${id}`,{method:'DELETE'}); await loadParentTasks(); render(); }
 async function confirmTask(id){ await api(`/api/tasks/${id}/confirm`,{method:'POST'}); toast('已确认，积分已发放'); await loadParentTasks(); render(); }
+async function rejectTask(id){
+  await api(`/api/tasks/${id}/reject`, {method:'POST', body:{scope:'task'}});
+  toast('已打回，孩子可重新提交');
+  await loadParentTasks(); render();
+}
 async function showAddTask(){
   if(!uid) return;
   const title = prompt('任务标题');
@@ -1529,6 +1594,8 @@ function renderLearningConfigTab(){
           </div>
           ${num('task_dictation_count_语文','7','语文每日听写量','每天听写几个语文生词')}
           ${num('task_dictation_count_英语','7','英语每日听写量','每天听写几个英语单词')}
+          ${num('task_math_calc_count','2','数学每日计算题数','每天几道屏上计算题（0–10）','0','10')}
+          ${num('task_math_word_count','2','数学每日应用题数','每天几道纸上应用题，一题一照（0–10）','0','10')}
           ${num('task_new_ratio','5','新/旧比例（新名额）','每日任务里「当天新课」的名额，旧=总量-新')}
           ${num('assignment_question_count','4','作业题数','个性化学习每次作业几道题')}
           ${num('assignment_pass_threshold','0.6','通过正确率','0~1，例如 0.6 表示 60%','0','1','0.1')}
@@ -1536,8 +1603,9 @@ function renderLearningConfigTab(){
           ${sel('difficulty_英语','中等','英语出题难度',['简单','中等','困难'])}
           ${sel('difficulty_数学','中等','数学出题难度',['简单','中等','困难'])}
           ${chk('personalized_disable_chat','禁用个性化学习 AI 对话','勾选 = 禁用，不勾选 = 开放（默认）；孩子做作业期间始终暂停对话')}
+          ${!uid ? `<div class="lc-hint" style="color:#c05b4a;margin-top:8px">请先选择当前孩子</div>` : ''}
           <div style="margin-top:16px">
-            <button class="btn-primary" onclick="saveLearningConfig()">保存配置</button>
+            <button class="btn-primary" ${uid ? 'onclick="saveLearningConfig()"' : 'disabled'} style="${uid ? '' : 'opacity:0.5;cursor:not-allowed;'}">保存配置</button>
           </div>
         </div>
       </div>
@@ -1545,6 +1613,7 @@ function renderLearningConfigTab(){
 }
 
 async function saveLearningConfig(){
+  if(!uid){ toast('请先选择当前孩子'); return; }
   // 收集所有 [data-key] 输入框/下拉/勾选框的当前值
   const inputs = document.querySelectorAll('[data-key]');
   let dictMode = null;

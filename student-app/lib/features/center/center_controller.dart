@@ -98,49 +98,59 @@ class CenterController extends Notifier<CenterState> {
   /// 请求返回时孩子已切换或材料已重新加载
   bool _stale(int token, int uid) => !ref.mounted || token != _loadToken || _uid != uid;
 
-  /// 首页点阅读/听力任务时调用，随后跳转到学习中心
-  void openForTask(int taskId, CenterTab tab) {
+  /// 首页点英语听力任务时调用，随后跳转到学习中心作答
+  void openForTask(int taskId) {
     _loadToken++;
     state = state.copyWith(
-      tab: tab,
+      tab: CenterTab.listening,
       material: const AsyncLoading(),
       inputs: const [],
       results: const [],
-      pending: () => PendingTask(taskId, tab),
+      pending: () => PendingTask(taskId, CenterTab.listening),
       submitFailed: false,
     );
   }
 
-  /// 进入学习中心：重新拉取当前 Tab 材料并清空作答
-  Future<void> enter() => _load(state.tab);
+  /// 进入学习中心：仅有待提交听力任务时拉材料；否则展示阅读入口引导
+  Future<void> enter() async {
+    if (state.pending != null) {
+      await _loadListening();
+      return;
+    }
+    state = state.copyWith(
+      tab: CenterTab.listening,
+      material: const AsyncData(CenterMaterial.empty),
+      inputs: const [],
+      results: const [],
+      submitFailed: false,
+    );
+  }
 
   void leave() {
     state = state.copyWith(pending: () => null, submitFailed: false);
     unawaited(ref.read(speechPlayerProvider).stop());
   }
 
-  Future<void> selectTab(CenterTab tab) {
-    if (state.pending != null && state.pending!.tab != tab) {
-      state = state.copyWith(pending: () => null, submitFailed: false);
-    }
-    if (tab == CenterTab.reading) unawaited(ref.read(speechPlayerProvider).stop());
-    return _load(tab);
+  Future<void> reload() async {
+    if (state.pending == null) return;
+    await _loadListening();
   }
-
-  Future<void> reload() => _load(state.tab);
 
   Future<void> retrySubmit() => _submitAndReport();
 
-  Future<void> _load(CenterTab tab) async {
+  Future<void> _loadListening() async {
     final uid = _uid;
     if (uid == null) return;
-    // 先读写 state（可能触发换孩子后的 build 并自增 _loadToken），再取本次 token
-    state = state.copyWith(tab: tab, material: const AsyncLoading(), inputs: const [], results: const [], submitFailed: false);
+    state = state.copyWith(
+      tab: CenterTab.listening,
+      material: const AsyncLoading(),
+      inputs: const [],
+      results: const [],
+      submitFailed: false,
+    );
     final token = ++_loadToken;
     final repo = ref.read(centerRepositoryProvider);
-    final result = await AsyncValue.guard(
-      () => tab == CenterTab.listening ? repo.listening(uid) : repo.reading(uid),
-    );
+    final result = await AsyncValue.guard(() => repo.listening(uid));
     if (_stale(token, uid)) return;
     final count = result.value?.questions.length ?? 0;
     state = state.copyWith(
@@ -149,7 +159,7 @@ class CenterController extends Notifier<CenterState> {
       results: List<bool?>.filled(count, null),
     );
     final m = result.value;
-    if (m != null && m.isEmpty && state.pending?.tab == tab) {
+    if (m != null && m.isEmpty && state.pending != null) {
       state = state.withMessage('暂无材料，暂时无法完成该任务');
     }
   }
@@ -161,30 +171,50 @@ class CenterController extends Notifier<CenterState> {
     state = state.copyWith(inputs: inputs);
   }
 
-  Future<void> answer(int index, String input) async {
+  Future<void> answer(int index, {String? text, int? selectedIndex}) async {
     final uid = _uid;
     final m = state.material.value;
     if (uid == null || m == null || index >= m.questions.length || state.results[index] != null) return;
     final q = m.questions[index];
-    final ok = isCorrectAnswer(input, q.answer);
+    final bool ok;
+    final String stored;
+    final String yourAnswer;
+    final String correctAnswer;
+    final mcListening = state.tab == CenterTab.listening && q.options.length >= 4;
+    if ((q.isMultipleChoice || mcListening) && selectedIndex != null) {
+      final ci = q.correctIndex ?? 0;
+      if (ci < 0 || ci >= q.options.length) return;
+      if (selectedIndex < 0 || selectedIndex >= q.options.length) return;
+      ok = isCorrectListening(selectedIndex, ci);
+      stored = q.options[selectedIndex];
+      yourAnswer = stored;
+      correctAnswer = q.options[ci];
+    } else if (text != null) {
+      ok = isCorrectAnswer(text, q.answer);
+      stored = text;
+      yourAnswer = text;
+      correctAnswer = q.answer;
+    } else {
+      return;
+    }
     final results = [...state.results]..[index] = ok;
-    final inputs = [...state.inputs]..[index] = input;
+    final inputs = [...state.inputs]..[index] = stored;
     state = state.copyWith(results: results, inputs: inputs);
     if (ok) state = state.withMessage('回答正确！');
     // 与错题收录同时发起提交：收录期间离开/切 Tab 不能清掉已完成任务的提交
-    await _submitAndReport(wrong: ok ? null : _recordWrong(q, input, uid));
+    await _submitAndReport(wrong: ok ? null : _recordWrong(q, yourAnswer, correctAnswer, uid));
   }
 
   /// 返回提示文案；结果已过期（切 Tab / 换孩子）时返回 null
-  Future<String?> _recordWrong(CenterQuestion q, String input, int uid) async {
+  Future<String?> _recordWrong(CenterQuestion q, String yourAnswer, String correctAnswer, int uid) async {
     final token = _loadToken;
     String msg;
     try {
       await ref.read(centerRepositoryProvider).submitWrong(
             userId: uid,
             question: q.question,
-            yourAnswer: input,
-            correctAnswer: q.answer,
+            yourAnswer: yourAnswer,
+            correctAnswer: correctAnswer,
             sourceType: state.tab.sourceType,
           );
       msg = '答错了，已收录进错题本';

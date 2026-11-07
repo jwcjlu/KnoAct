@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme.dart';
-import '../../../core/widgets.dart';
 import '../assignment_controller.dart';
 import '../data/assignment_models.dart';
 
@@ -16,13 +15,11 @@ class AssignmentSidebar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final s = ref.watch(assignmentControllerProvider);
     final ctl = ref.read(assignmentControllerProvider.notifier);
-    return SectionCard(
-      padding: const EdgeInsets.all(14),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          const Icon(Icons.edit_note, size: 18, color: AppColors.blue),
+          const Icon(Icons.edit_note, size: 14, color: AppColors.blue),
           const SizedBox(width: 6),
-          const Text('本课作业', style: TextStyle(fontWeight: FontWeight.w700)),
+          const Text('本课作业', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: Color(0xFF2B332E))),
           if (s.round > 0) ...[
             const SizedBox(width: 8),
             Text('第 ${s.round} 组', style: const TextStyle(fontSize: 12, color: AppColors.gray)),
@@ -54,25 +51,42 @@ class AssignmentSidebar extends ConsumerWidget {
         else if (s.questions.isNotEmpty)
           _QuestionsBlock(state: s, ctl: ctl)
         else
-          _IdleBlock(onStart: ctl.generate),
-      ]),
+          _IdleBlock(onStart: () => ctl.generate(), error: s.errorMessage),
+      ],
     );
   }
 }
 
 class _IdleBlock extends StatelessWidget {
-  const _IdleBlock({required this.onStart});
+  const _IdleBlock({required this.onStart, this.error});
 
   final VoidCallback onStart;
+  final String? error;
 
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const Text(
           '读完课文后做几道理解题，正确率达到及格线才算学完本课。',
-          style: TextStyle(fontSize: 13, color: AppColors.gray, height: 1.45),
+          style: TextStyle(fontSize: 12, color: Color(0xFF8E9691), height: 1.5),
         ),
+        if (error != null) ...[
+          const SizedBox(height: 8),
+          Text(error!, style: const TextStyle(fontSize: 12, color: Colors.red)),
+        ],
         const SizedBox(height: 12),
-        FilledButton(onPressed: onStart, child: const Text('去做作业')),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.blue,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: onStart,
+            child: const Text('去做作业', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+        ),
       ]);
 }
 
@@ -93,7 +107,11 @@ class _QuestionsBlock extends ConsumerWidget {
         const SizedBox(height: 6),
         TextField(
           key: ValueKey('reader-assignment-$i'),
-          decoration: const InputDecoration(hintText: '写下你的回答…', isDense: true, border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+            hintText: '写下你的回答…',
+            isDense: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+          ),
           onChanged: (v) => ctl.setInput(i, v),
         ),
         const SizedBox(height: 10),

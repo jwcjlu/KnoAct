@@ -8,3 +8,9 @@ String? extractMermaid(String text) {
   }
   return null;
 }
+
+/// 去掉 ```mermaid 代码块，只留说明文字（避免与 [MermaidView] 重复撑高）
+String stripMermaidFence(String text) {
+  final stripped = text.replaceAll(RegExp(r'```mermaid\s*[\s\S]*?```', multiLine: true), '').trim();
+  return stripped.isEmpty ? text.trim() : stripped;
+}

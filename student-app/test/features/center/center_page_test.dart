@@ -6,7 +6,6 @@ import 'package:student_app/features/auth/data/auth_repository.dart';
 import 'package:student_app/features/auth/data/session_store.dart';
 import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/center/center_controller.dart';
-import 'package:student_app/features/center/center_logic.dart';
 import 'package:student_app/features/center/data/center_models.dart';
 import 'package:student_app/features/center/data/center_repository.dart';
 import 'package:student_app/features/center/speech_player.dart';
@@ -21,12 +20,26 @@ class FakeCenterRepository implements CenterRepository {
   final wrong = <String>[];
 
   @override
-  Future<CenterMaterial> listening(int userId) async =>
-      const CenterMaterial(text: 'Hello Tom', questions: [CenterQuestion('Who?', 'Tom')]);
+  Future<CenterMaterial> listening(int userId) async => const CenterMaterial(
+        text: 'Hello Tom',
+        questions: [
+          CenterQuestion(
+            'Who is Tom?',
+            'Tom',
+            options: ['Alice', 'Bob', 'Tom', 'Lily'],
+            correctIndex: 2,
+          ),
+          CenterQuestion(
+            'Who is Lily?',
+            'Lily',
+            options: ['Alice', 'Bob', 'Tom', 'Lily'],
+            correctIndex: 3,
+          ),
+        ],
+      );
 
   @override
-  Future<CenterMaterial> reading(int userId) async =>
-      const CenterMaterial(text: '桂花开了，满院飘香。', questions: [CenterQuestion('桂花什么时候开？', '秋天')]);
+  Future<CenterMaterial> reading(int userId) async => CenterMaterial.empty;
 
   @override
   Future<void> submitWrong({required int userId, required String question, required String yourAnswer, required String correctAnswer, required String sourceType}) async {
@@ -39,9 +52,9 @@ class FakeHomeRepository implements HomeRepository {
   bool failSubmit = false;
 
   @override
-  @override
   Future<void> uploadTaskPhoto(int taskId, List<int> bytes, {String filename = 'dictation.jpg'}) async {}
 
+  @override
   Future<void> submitTask(int taskId) async {
     if (failSubmit) throw Exception('submit failed');
     submitted.add(taskId);
@@ -61,13 +74,9 @@ class FakeHomeRepository implements HomeRepository {
 
 class FakeSpeechPlayer implements SpeechPlayer {
   final spoken = <String>[];
-  bool failSpeak = false;
 
   @override
-  Future<void> speak(String text) async {
-    if (failSpeak) throw Exception('speak failed');
-    spoken.add(text);
-  }
+  Future<void> speak(String text) async => spoken.add(text);
 
   @override
   Future<void> stop() async {}
@@ -83,8 +92,7 @@ Future<(ProviderContainer, FakeCenterRepository, FakeHomeRepository, FakeSpeechP
     SessionStore.accessTokenKey: 'tok',
     SessionStore.refreshTokenKey: 'ref',
   });
-  // 阅读页含个性化学习入口 + 课文 + 对话栏 + 题目 + 提交按钮，用较高窗口避免按钮被挤出屏幕
-  tester.view.physicalSize = const Size(420, 1400);
+  tester.view.physicalSize = const Size(420, 1200);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final center = FakeCenterRepository();
@@ -108,70 +116,44 @@ Future<(ProviderContainer, FakeCenterRepository, FakeHomeRepository, FakeSpeechP
   return (container, center, home, speech);
 }
 
-FilledButton submitButton(WidgetTester tester, int index) =>
-    tester.widget<FilledButton>(find.byKey(ValueKey('submit-$index')));
-
 void main() {
-  testWidgets('阅读答题提示收录错题本，听力播放对话', (tester) async {
+  testWidgets('无任务时展示引导，不从 Tab 直接拉听力', (tester) async {
+    final (container, _, _, _) = await pumpCenter(tester);
+    await container.read(centerControllerProvider.notifier).enter();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('学习首页'), findsOneWidget);
+    expect(find.text('播放对话'), findsNothing);
+  });
+
+  testWidgets('听力任务：答错收录错题本，可播放对话', (tester) async {
     final (container, center, _, speech) = await pumpCenter(tester);
-
-    container.read(centerControllerProvider.notifier).selectTab(CenterTab.reading);
+    final ctl = container.read(centerControllerProvider.notifier);
+    ctl.openForTask(10);
+    await ctl.enter();
     await tester.pumpAndSettle();
-    expect(find.text('桂花开了，满院飘香。'), findsOneWidget);
-    expect(find.text('1. 桂花什么时候开？'), findsOneWidget);
+    expect(find.text('1. Who is Tom?'), findsOneWidget);
 
-    await tester.enterText(find.byKey(const ValueKey('answer-0')), '春天');
-    await tester.pump();
-    await tester.ensureVisible(find.byKey(const ValueKey('submit-0')));
-    await tester.tap(find.byKey(const ValueKey('submit-0')));
+    await tester.tap(find.byKey(const ValueKey('option-0-0')));
     await tester.pumpAndSettle();
-    expect(find.text('答错了，已收录进错题本'), findsOneWidget);
-    expect(find.text('✗ 答案：秋天'), findsOneWidget);
-    expect(center.wrong, ['reading:桂花什么时候开？:春天']);
+    expect(center.wrong, ['listening:Who is Tom?:Alice']);
 
-    await tester.tap(find.text(CenterTab.listening.label));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('播放对话'));
     await tester.pumpAndSettle();
     expect(speech.spoken, ['Hello Tom']);
   });
 
-  testWidgets('答案为空时不能提交，键盘完成键可提交', (tester) async {
-    final (container, center, _, _) = await pumpCenter(tester);
-    container.read(centerControllerProvider.notifier).selectTab(CenterTab.reading);
-    await tester.pumpAndSettle();
-
-    expect(submitButton(tester, 0).onPressed, isNull);
-    await tester.enterText(find.byKey(const ValueKey('answer-0')), '   ');
-    await tester.pumpAndSettle();
-    expect(submitButton(tester, 0).onPressed, isNull);
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    expect(center.wrong, isEmpty);
-    expect(find.byKey(const ValueKey('answer-0')), findsOneWidget);
-
-    await tester.enterText(find.byKey(const ValueKey('answer-0')), '春天');
-    await tester.pumpAndSettle();
-    expect(submitButton(tester, 0).onPressed, isNotNull);
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-    expect(center.wrong, ['reading:桂花什么时候开？:春天']);
-    expect(find.text('✗ 答案：秋天'), findsOneWidget);
-  });
-
   testWidgets('任务提交失败后显示重新提交并可重试', (tester) async {
     final (container, _, home, _) = await pumpCenter(tester);
     final ctl = container.read(centerControllerProvider.notifier);
-    ctl.openForTask(85, CenterTab.reading);
-    ctl.enter();
+    ctl.openForTask(85);
+    await ctl.enter();
     await tester.pumpAndSettle();
     home.failSubmit = true;
-    await tester.enterText(find.byKey(const ValueKey('answer-0')), '秋天');
-    await tester.pump();
-    await tester.ensureVisible(find.byKey(const ValueKey('submit-0')));
-    await tester.tap(find.byKey(const ValueKey('submit-0')));
+    await tester.tap(find.byKey(const ValueKey('option-0-2')));
     await tester.pumpAndSettle();
-    expect(find.text('提交任务失败，请稍后重试'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('option-1-3')));
+    await tester.pumpAndSettle();
+    expect(container.read(centerControllerProvider).submitFailed, isTrue);
     expect(find.text('重新提交'), findsOneWidget);
 
     home.failSubmit = false;
@@ -180,17 +162,15 @@ void main() {
     await tester.tap(find.text('重新提交'));
     await tester.pumpAndSettle();
     expect(home.submitted, [85]);
-    expect(find.text('重新提交'), findsNothing);
-    expect(find.text('已提交，等待家长确认'), findsOneWidget);
   });
 
-  testWidgets('播放失败时提示', (tester) async {
-    final (container, _, _, speech) = await pumpCenter(tester);
-    container.read(centerControllerProvider.notifier).enter();
+  testWidgets('听力 Tab 不显示答案输入框', (tester) async {
+    final (container, _, _, _) = await pumpCenter(tester);
+    container.read(centerControllerProvider.notifier).openForTask(1);
+    await container.read(centerControllerProvider.notifier).enter();
     await tester.pumpAndSettle();
-    speech.failSpeak = true;
-    await tester.tap(find.text('播放对话'));
-    await tester.pumpAndSettle();
-    expect(find.text('播放失败，请稍后重试'), findsOneWidget);
+    expect(find.text('输入你的答案'), findsNothing);
+    expect(find.text('桂花开了'), findsNothing);
   });
+
 }

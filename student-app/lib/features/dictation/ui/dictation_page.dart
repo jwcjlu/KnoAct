@@ -21,7 +21,11 @@ class DictationPage extends ConsumerWidget {
         appBar: AppBar(title: Text(base.title.isEmpty ? '生词听写' : base.title), backgroundColor: AppColors.bg),
         body: const Center(child: CircularProgressIndicator()),
       ),
-      error: (_, __) => const DictationOnScreenView(),
+      // 偏好拉取失败时与后端默认一致：纸上听写（勿回落屏写）
+      error: (_, __) => DictationPaperFlow(
+        base: base,
+        modeLabel: DictationInputMode.paperPhoto.label,
+      ),
       data: (mode) {
         if (mode == DictationInputMode.onScreen) {
           return const DictationOnScreenView();

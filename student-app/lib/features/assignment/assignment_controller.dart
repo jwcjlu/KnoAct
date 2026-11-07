@@ -16,6 +16,7 @@ class AssignmentState {
     this.busyLabel,
     this.previousQuestions = const [],
     this.round = 0,
+    this.errorMessage,
   });
 
   final int? lessonId;
@@ -34,6 +35,9 @@ class AssignmentState {
   final List<String> previousQuestions;
   final int round;
 
+  /// 出题/批改失败提示（对齐 Web toast）
+  final String? errorMessage;
+
   AssignmentState copyWith({
     int? lessonId,
     String? subject,
@@ -44,6 +48,7 @@ class AssignmentState {
     String? Function()? busyLabel,
     List<String>? previousQuestions,
     int? round,
+    String? Function()? errorMessage,
   }) =>
       AssignmentState(
         lessonId: lessonId ?? this.lessonId,
@@ -55,6 +60,7 @@ class AssignmentState {
         busyLabel: busyLabel != null ? busyLabel() : this.busyLabel,
         previousQuestions: previousQuestions ?? this.previousQuestions,
         round: round ?? this.round,
+        errorMessage: errorMessage != null ? errorMessage() : this.errorMessage,
       );
 }
 
@@ -63,18 +69,26 @@ class AssignmentController extends Notifier<AssignmentState> {
 
   @override
   AssignmentState build() {
-    ref.watch(currentChildIdProvider);
-    ref.listen<int?>(
-      readerControllerProvider.select((s) => s.currentLesson?.id),
-      (prev, next) {
-        if (next == null) return;
-        if (prev == next && state.lessonId == next) return;
-        final subject = ref.read(readerControllerProvider).documentSubject;
-        state = AssignmentState(lessonId: next, subject: subject);
-      },
-      fireImmediately: true,
+    // 勿 watch 会话：childId 变化会整段 rebuild 并清空题目。首屏 lessonId 从阅读器读出，切换课时时 listen 只改绑定字段。
+    ref.listen(readerControllerProvider, (prev, next) {
+      final id = next.currentLesson?.id;
+      if (id == null) return;
+      if (state.lessonId == id && state.subject == next.documentSubject) return;
+      state = state.copyWith(lessonId: id, subject: next.documentSubject);
+    });
+    final reader = ref.read(readerControllerProvider);
+    return AssignmentState(
+      lessonId: reader.currentLesson?.id,
+      subject: reader.documentSubject,
     );
-    return const AssignmentState();
+  }
+
+  void _bindLessonFromReader() {
+    final reader = ref.read(readerControllerProvider);
+    final id = reader.currentLesson?.id;
+    if (id == null) return;
+    if (state.lessonId == id) return;
+    state = state.copyWith(lessonId: id, subject: reader.documentSubject);
   }
 
   /// 学习中心等场景手动绑定（`/assignment` 路由）
@@ -91,15 +105,24 @@ class AssignmentController extends Notifier<AssignmentState> {
 
   /// 出一组题；上一组未达标时带上错题
   Future<void> generate() async {
+    _bindLessonFromReader();
     final uid = _uid;
     final lessonId = state.lessonId;
-    if (uid == null || lessonId == null || state.busy) return;
+    if (uid == null) {
+      state = state.copyWith(errorMessage: () => '请先登录');
+      return;
+    }
+    if (lessonId == null) {
+      state = state.copyWith(errorMessage: () => '请先选择课程');
+      return;
+    }
+    if (state.busy) return;
 
     final wrong = state.result != null && !state.result!.passed
         ? [for (final r in state.result!.items) if (!r.isCorrect) r.question]
         : <String>[];
 
-    state = state.copyWith(busy: true, busyLabel: () => '正在出题…');
+    state = state.copyWith(busy: true, busyLabel: () => '正在出题…', errorMessage: () => null);
     List<AssignmentQuestion> qs;
     try {
       qs = await ref.read(assignmentRepositoryProvider).generate(
@@ -115,7 +138,7 @@ class AssignmentController extends Notifier<AssignmentState> {
     if (!ref.mounted || _uid != uid) return;
 
     if (qs.isEmpty) {
-      state = state.copyWith(busy: false, busyLabel: () => null);
+      state = state.copyWith(busy: false, busyLabel: () => null, errorMessage: () => '出题失败，请稍后再试');
       return;
     }
     state = state.copyWith(

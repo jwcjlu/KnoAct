@@ -276,55 +276,40 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
   }
 
   Widget _sidePanel(PdfLesson lesson, bool chatBlocked, List<AnnotationItem> annotations) {
+    final assigning = chatBlocked;
     return Container(
-      color: AppColors.bg,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(left: BorderSide(color: Color(0xFFEEF0ED))),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (annotations.isNotEmpty) ...[
-            const Text('我的标注', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-            const SizedBox(height: 6),
-            for (final a in annotations.take(12)) ...[
-              SectionCard(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      a.kind == 'glossary'
-                          ? '生词'
-                          : (a.kind == 'note' ? '笔记' : (a.kind == 'underline' ? '下划线' : '划线')),
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.blue),
-                    ),
-                    const SizedBox(height: 4),
-                    Text('「${a.quote}」', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
-                    if (a.note.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(a.note, style: const TextStyle(fontSize: 12, color: AppColors.gray)),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-            const SizedBox(height: 8),
-          ],
-          const Text('对话伴学', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-          const SizedBox(height: 2),
-          const Text('回答会指明原文出处', style: TextStyle(fontSize: 12, color: AppColors.gray)),
-          const SizedBox(height: 12),
-          AssignmentSidebar(lessonTitle: lesson.title),
-          const SizedBox(height: 12),
-          if (!chatBlocked && ref.watch(askControllerProvider).messages.isEmpty && !ref.watch(askControllerProvider).busy) ...[
-            const Text('边读边问，随时解惑', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            const Text(
-              '选中正文里任意一段，就能追问、解释或翻译它。',
-              style: TextStyle(fontSize: 12, color: AppColors.gray, height: 1.45),
+          Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            alignment: Alignment.centerLeft,
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFF0F2EF)))),
+            child: const Row(children: [
+              Text('对话伴学', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: Color(0xFF2B332E))),
+              SizedBox(width: 8),
+              Text('回答会指明原文出处', style: TextStyle(fontSize: 11, color: Color(0xFF8E9691))),
+            ]),
+          ),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: assigning ? 240 : 130),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: AssignmentSidebar(lessonTitle: lesson.title),
             ),
-            const SizedBox(height: 12),
-          ],
-          AskPanel(chatDisabled: chatBlocked),
+          ),
+          if (assigning) const Divider(height: 1, color: Color(0xFFF0F2EF)),
+          Expanded(
+            child: AskPanel(
+              chatDisabled: chatBlocked,
+              chatDisabledHint: '本课作业还没完成，AI 对话已暂停；完成作业或点「先不做了」后即可继续提问',
+            ),
+          ),
         ],
       ),
     );
@@ -363,6 +348,13 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
         ),
       );
     }
+
+    ref.listen<int?>(
+      readerControllerProvider.select((s) => s.currentLesson?.id),
+      (prev, next) {
+        if (next != null) ref.read(askControllerProvider.notifier).ensureReaderBound();
+      },
+    );
 
     final assignment = ref.watch(assignmentControllerProvider);
     final chatBlocked = assignmentBlocksChat(assignment);

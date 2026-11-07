@@ -95,7 +95,6 @@ class _DictationPaperFlowState extends ConsumerState<DictationPaperFlow> {
   Widget _listenBody(BuildContext context, PaperDictationState s, PaperDictationController ctl) {
     final total = s.rewriting ? s.wrong.length : s.words.length;
     final pos = s.rewriting ? s.rewriteIdx + 1 : s.idx + 1;
-    final wordLabel = s.rewriting ? s.wrong[s.rewriteIdx].word : s.words[s.idx].word;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -116,12 +115,15 @@ class _DictationPaperFlowState extends ConsumerState<DictationPaperFlow> {
               label: const Text('听发音'),
             ),
             const SizedBox(height: 8),
+            const Text(
+              '点击播放，在纸上写下你听到的词',
+              style: TextStyle(color: AppColors.gray, height: 1.5),
+            ),
+            const SizedBox(height: 8),
             if (ctl.hintText() != null)
-              Text(ctl.hintText()!, style: const TextStyle(color: AppColors.gray))
+              Text(ctl.hintText()!, style: const TextStyle(color: AppColors.blue, fontWeight: FontWeight.w600))
             else
               TextButton(onPressed: ctl.hint, child: const Text('看提示')),
-            const SizedBox(height: 8),
-            Text('请在纸上写出：$wordLabel', style: const TextStyle(fontWeight: FontWeight.w600)),
           ]),
         ),
         const SizedBox(height: 24),

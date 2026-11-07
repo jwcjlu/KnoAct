@@ -1425,7 +1425,7 @@ function playListening(){
 
 // 理解题作答：答错收录错题本，答对无操作
 let centerRevealed = {};  // 已揭晓答案的题（key: src:idx）
-let centerPick = {};      // 用户作答（key: src:idx）
+let centerPick = {};      // 用户作答（key: src:idx；听力为选项下标，阅读为文本）
 
 function centerKey(src, qi){ return src + ':' + qi; }
 async function centerAnswer(src, qi){
@@ -1434,11 +1434,25 @@ async function centerAnswer(src, qi){
   const q = (src==='listening' ? (listenMaterial?.questions||[]) : (readMaterial?.questions||[]))[qi];
   if(!q) return;
   centerRevealed[k] = true;
-  const wrong = (centerPick[k] || '').trim() !== (q.answer || '').trim();
+  let wrong;
+  let yourAnswer = '';
+  let correctAnswer = '';
+  if(src === 'listening'){
+    const opts = q.options || [];
+    const pick = Number(centerPick[k]);
+    const ci = Number(q.correct_index);
+    wrong = pick !== ci;
+    yourAnswer = (pick >= 0 && pick < opts.length) ? opts[pick] : '';
+    correctAnswer = (ci >= 0 && ci < opts.length) ? opts[ci] : '';
+  } else {
+    yourAnswer = centerPick[k] || '';
+    correctAnswer = q.answer || '';
+    wrong = yourAnswer.trim() !== correctAnswer.trim();
+  }
   if(wrong){
     await api('/api/review/submit', {method:'POST', body:{
-      user_id:uid, question:q.question, your_answer:centerPick[k]||'',
-      correct_answer:q.answer, source_type:src,
+      user_id:uid, question:q.question, your_answer:yourAnswer,
+      correct_answer:correctAnswer, source_type:src,
     }});
     toast('答错了，已收录进错题本');
   } else {
@@ -1446,7 +1460,9 @@ async function centerAnswer(src, qi){
   }
   render();
 }
-function centerInput(src, qi, v){ centerPick[centerKey(src, qi)] = v; }
+function centerInput(src, qi, v){
+  centerPick[centerKey(src, qi)] = src === 'listening' ? Number(v) : v;
+}
 
 async function renderCenter(){
   await loadCenter();
@@ -1463,15 +1479,26 @@ async function renderCenter(){
       const qs = (m.questions||[]).map((q,qi)=>{
         const k = centerKey('listening', qi);
         const revealed = centerRevealed[k];
-        const picked = centerPick[k]||'';
+        const picked = centerPick[k];
+        const opts = q.options || [];
+        const ci = Number(q.correct_index);
+        const ansText = (ci >= 0 && ci < opts.length) ? opts[ci] : '';
+        const isRight = Number(picked) === ci;
+        const choices = opts.map((opt, oi) =>
+          `<label style="display:flex;align-items:center;gap:10px;margin-top:10px;font-size:14px;cursor:${revealed?'default':'pointer'}">
+            <input type="radio" name="lq-${qi}" value="${oi}" ${Number(picked)===oi?'checked':''} ${revealed?'disabled':''}
+              onchange="centerInput('listening',${qi},${oi})"/>
+            ${escapeAttr(opt)}
+          </label>`
+        ).join('');
         return `<div class="center-question">
           <div class="cq-q">${qi+1}. ${q.question}</div>
           ${revealed
-            ? `<div class="cq-ans ${picked.trim()===q.answer.trim()?'right':'wrong'}">${icon('check',15)} 答案：${q.answer}</div>`
-            : `<div class="cq-form">
-                <input class="cq-input" placeholder="输入你的答案" value="${picked}" oninput="centerInput('listening',${qi}, this.value)"/>
+            ? `<div class="cq-ans ${isRight?'right':'wrong'}">${icon('check',15)} 答案：${escapeAttr(ansText)}</div>`
+            : `<div style="margin-top:8px">${choices}</div>
+               <div class="cq-form" style="margin-top:14px">
                 <button class="cq-btn" onclick="centerAnswer('listening',${qi})">提交</button>
-              </div>`}
+               </div>`}
         </div>`;
       }).join('');
       body = `

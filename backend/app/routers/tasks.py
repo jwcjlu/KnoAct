@@ -3,7 +3,7 @@ import json
 import os
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -61,6 +61,26 @@ def _raise_photo_required() -> None:
         status_code=400,
         detail={"error": "photo_required", "message": "请先上传听写打卡照片"},
     )
+
+
+def _math_submit_blocked(db: Session, t: Task) -> None:
+    if t.task_type != "math":
+        return
+    from ..services.math_gen import math_content_ready_to_submit, parse_math_task_content
+
+    parsed = parse_math_task_content(t.content or "")
+    ok, code = math_content_ready_to_submit(parsed)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": code, "message": "请先完成全部计算题判分并上传应用题照片"},
+        )
+
+
+_PHOTO_AI_KEYS = (
+    "final_answer", "steps_plausible", "confidence", "reason",
+    "ai_status", "ai_correct", "ai_notes",
+)
 
 
 def _to_dict(t: Task) -> dict:
@@ -186,6 +206,7 @@ def submit(task_id: int, user: User = Depends(require_learning_user),
     ensure_user_access(user, t.user_id, db)
     if _dictation_photo_required(db, t):
         _raise_photo_required()
+    _math_submit_blocked(db, t)
     if t.submit_status != "approved":
         t.submit_status = "submitted"
         db.commit()
@@ -234,9 +255,13 @@ def knowledge_review(task_id: int, req: KnowledgeReviewReq,
 
 
 @router.post("/{task_id}/upload-photo")
-async def upload_photo(task_id: int, file: UploadFile = File(...),
-                       user: User = Depends(require_learning_user),
-                       db: Session = Depends(get_db)):
+async def upload_photo(
+    task_id: int,
+    file: UploadFile = File(...),
+    word_index: int | None = Form(None),
+    user: User = Depends(require_learning_user),
+    db: Session = Depends(get_db),
+):
     t = db.get(Task, task_id)
     if not t:
         return {"ok": False}
@@ -248,12 +273,75 @@ async def upload_photo(task_id: int, file: UploadFile = File(...),
     if len(data) > MAX_BYTES:
         return {"ok": False, "error": "file too large"}
     os.makedirs("uploads/task_photos", exist_ok=True)
+
+    if t.task_type == "math" and word_index is not None:
+        from ..services.math_gen import grade_math_work_photo, parse_math_task_content
+
+        parsed = parse_math_task_content(t.content or "")
+        words = parsed.get("word") or []
+        if word_index < 0 or word_index >= len(words):
+            return {"ok": False, "error": "invalid word_index"}
+        path = f"uploads/task_photos/task_{task_id}_word_{word_index}{ext}"
+        with open(path, "wb") as f:
+            f.write(data)
+        item = words[word_index]
+        item["photo_path"] = path
+        grade = grade_math_work_photo(
+            db,
+            data,
+            item.get("question", ""),
+            str(item.get("answer", "")),
+        )
+        item["ai_notes"] = grade.get("reason") or ""
+        for k, v in grade.items():
+            item[k] = v
+        if not item.get("parent_status"):
+            item["parent_status"] = "none"
+        t.content = json.dumps(parsed, ensure_ascii=False)
+        db.commit()
+        return {"ok": True, "path": path, "word_index": word_index, "grade": grade}
+
     path = f"uploads/task_photos/task_{task_id}{ext}"
     with open(path, "wb") as f:
         f.write(data)
     t.photo_path = path
     db.commit()
     return {"ok": True, "path": path}
+
+
+class RejectReq(BaseModel):
+    scope: str = "task"
+
+
+@router.post("/{task_id}/reject")
+def reject_task(task_id: int, req: RejectReq | None = None,
+                user: User = Depends(require_role("parent", "admin")),
+                db: Session = Depends(get_db)):
+    """家长打回重做（MVP：整份 task）。"""
+    t = db.get(Task, task_id)
+    if not t:
+        return {"ok": False}
+    ensure_user_access(user, t.user_id, db)
+    scope = (req.scope if req else "task") or "task"
+    if scope != "task":
+        return {"ok": False, "error": "unsupported scope"}
+    if t.task_type == "math":
+        from ..services.math_gen import parse_math_task_content
+
+        parsed = parse_math_task_content(t.content or "")
+        for c in parsed.get("calc") or []:
+            c.pop("your_answer", None)
+            c.pop("is_correct", None)
+            c.pop("user_correct", None)
+        for w in parsed.get("word") or []:
+            w["parent_status"] = "rejected"
+            w.pop("photo_path", None)
+            for k in _PHOTO_AI_KEYS:
+                w.pop(k, None)
+        t.content = json.dumps(parsed, ensure_ascii=False)
+    t.submit_status = "not_started"
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/{task_id}/confirm")

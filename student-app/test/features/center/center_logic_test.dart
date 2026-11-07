@@ -3,16 +3,20 @@ import 'package:student_app/features/center/center_logic.dart';
 import 'package:student_app/features/center/data/center_models.dart';
 
 void main() {
-  bool check({CenterTab? taskTab = CenterTab.reading, CenterTab current = CenterTab.reading, int count = 2, int answered = 2, bool submitting = false}) =>
+  bool check({CenterTab? taskTab = CenterTab.listening, CenterTab current = CenterTab.listening, int count = 2, int answered = 2, bool submitting = false}) =>
       shouldAutoSubmit(taskTab: taskTab, currentTab: current, questionCount: count, answeredCount: answered, submitting: submitting);
 
   test('自动提交条件', () {
     expect(check(), isTrue);
     expect(check(taskTab: null), isFalse);
-    expect(check(current: CenterTab.listening), isFalse);
     expect(check(count: 0, answered: 0), isFalse);
     expect(check(answered: 1), isFalse);
     expect(check(submitting: true), isFalse);
+  });
+
+  test('听力选择题按下标判分', () {
+    expect(isCorrectListening(1, 1), isTrue);
+    expect(isCorrectListening(0, 1), isFalse);
   });
 
   test('答案比对去首尾空白后全等', () {

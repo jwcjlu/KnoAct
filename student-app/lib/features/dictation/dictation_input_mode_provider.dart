@@ -7,5 +7,9 @@ import 'data/dictation_preferences_repository.dart';
 final dictationInputModeProvider = FutureProvider.autoDispose<DictationInputMode>((ref) async {
   final uid = ref.watch(currentChildIdProvider);
   if (uid == null) return DictationInputMode.paperPhoto;
-  return ref.read(dictationPreferencesRepositoryProvider).fetch(uid);
+  try {
+    return await ref.read(dictationPreferencesRepositoryProvider).fetch(uid);
+  } catch (_) {
+    return DictationInputMode.paperPhoto;
+  }
 });

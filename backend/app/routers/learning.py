@@ -174,6 +174,53 @@ def review_submit(req: ReviewSubmitReq, user: User = Depends(require_learning_us
         db.commit()
     return {"ok": True}
 
+def _listening_payload_from_content(data: dict) -> dict:
+    """Map stored listening JSON (new schema) to API response."""
+    return {
+        "text": data["dialogue"],
+        "questions": [
+            {
+                "id": q.get("id") or f"q{i + 1}",
+                "question": q.get("question", ""),
+                "options": list(q.get("options") or []),
+                "correct_index": int(q.get("correct_index", 0)),
+            }
+            for i, q in enumerate(data.get("questions") or [])
+        ],
+    }
+
+
+def _listening_api_from_result(result: dict) -> dict:
+    return _listening_payload_from_content(result)
+
+
+def _listening_questions_are_mc(questions: list) -> bool:
+    if not questions:
+        return False
+    for q in questions:
+        if not isinstance(q, dict):
+            return False
+        opts = q.get("options") or []
+        if not isinstance(opts, list) or len(opts) < 4:
+            return False
+        try:
+            ci = int(q.get("correct_index", 0))
+        except (TypeError, ValueError):
+            return False
+        if ci < 0 or ci > 3:
+            return False
+    return True
+
+
+def _is_legacy_listening_content(data: dict) -> bool:
+    if not data.get("dialogue"):
+        return False
+    qs = data.get("questions")
+    if isinstance(qs, list) and qs and _listening_questions_are_mc(qs):
+        return False
+    return "question" in data or (isinstance(qs, list) and qs and not _listening_questions_are_mc(qs))
+
+
 @router.get("/api/listening/material")
 def listening_material(user_id: int = Depends(resolve_target_user_id),
                        _user: User = Depends(require_learning_user),
@@ -181,7 +228,7 @@ def listening_material(user_id: int = Depends(resolve_target_user_id),
     import json as _json
     from datetime import date as _date
     from ..models import Task
-    from ..tools.generation import generate_listening
+    from ..tools.generation import generate_listening, normalize_listening
     from ..core.context import UnifiedContext
 
     row = db.query(Task).filter_by(
@@ -190,16 +237,27 @@ def listening_material(user_id: int = Depends(resolve_target_user_id),
     if row and row.content:
         try:
             data = _json.loads(row.content)
-            if data.get("dialogue"):
-                return {
-                    "text": data["dialogue"],
-                    "questions": [{"question": data.get("question", ""), "answer": data.get("answer", "")}],
-                }
+            if (
+                data.get("dialogue")
+                and isinstance(data.get("questions"), list)
+                and data["questions"]
+                and _listening_questions_are_mc(data["questions"])
+            ):
+                return _listening_payload_from_content(data)
+            if _is_legacy_listening_content(data):
+                ctx = UnifiedContext(user_id=user_id, lesson_id=0, question="")
+                result = normalize_listening(generate_listening.run({}, ctx))
+                content = _json.dumps(result, ensure_ascii=False)
+                row.content = content
+                row.title = "英语听力练习"
+                row.content_status = "published"
+                db.commit()
+                return _listening_api_from_result(result)
         except Exception:
             pass
 
     ctx = UnifiedContext(user_id=user_id, lesson_id=0, question="")
-    result = generate_listening.run({}, ctx)
+    result = normalize_listening(generate_listening.run({}, ctx))
     content = _json.dumps(result, ensure_ascii=False)
     if row is not None:
         # 已存在当天 listening Task 但内容空/无法解析：原地更新，避免撞唯一约束
@@ -212,10 +270,7 @@ def listening_material(user_id: int = Depends(resolve_target_user_id),
             title="英语听力练习", content_status="published", content=content,
         ))
     db.commit()
-    return {
-        "text": result["dialogue"],
-        "questions": [{"question": result["question"], "answer": result["answer"]}],
-    }
+    return _listening_api_from_result(result)
 
 @router.get("/api/reading/material")
 def reading_material(lesson_id: int, user_id: int = Depends(resolve_target_user_id),
