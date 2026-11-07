@@ -16,11 +16,21 @@
 
 FROM python:3.11-slim
 
+ARG APT_MIRROR=mirrors.aliyun.com
+
 # ----- manim 渲染依赖 -----------------------------------------------------
 # manim 渲染视频需要 ffmpeg；数学公式排版需要 LaTeX。texlive 装精简子集
 # （texlive-latex-base + texlive-latex-recommended + texlive-fonts-recommended
 # 覆盖 manim 的 MathTex/Tex 需求，远小于 texlive-full）。
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN set -eux; \
+    if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+      elif [ -f /etc/apt/sources.list ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list; \
+      fi; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         texlive-latex-base \
         texlive-latex-recommended \

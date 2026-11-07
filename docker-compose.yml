@@ -55,6 +55,7 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
     image: knoact-backend:latest
     restart: unless-stopped
     environment:
