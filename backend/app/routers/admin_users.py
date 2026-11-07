@@ -1,5 +1,7 @@
 """管理员用户管理：搜索 / 创建 / 编辑 / 重置密码 / 归档。"""
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date as date_type
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -7,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..core.access import ensure_user_access
 from ..core.deps import get_current_user, require_role
 from ..database import get_db
-from ..models import RefreshToken, User
+from ..models import RefreshToken, Task, User
 from ..services.bucket_service import ensure_bucket
 from ..services.security import hash_password
 from ..services.user_factory import (
@@ -183,3 +185,54 @@ def unarchive(user_id: int, db: Session = Depends(get_db),
     child.status = "active"
     db.commit()
     return {"ok": True}
+
+
+@router.get("/dictation-checkins")
+def list_dictation_checkins(
+    d: date_type | None = None,
+    q: str | None = None,
+    submit_status: str | None = None,
+    subject: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """运营只读：按日查看孩子听写任务打卡情况。"""
+    day = d or date_type.today()
+    query = db.query(Task).filter(Task.task_type == "dictation", Task.date == day)
+    if submit_status:
+        query = query.filter(Task.submit_status == submit_status)
+    if subject:
+        query = query.filter(Task.subject == subject)
+    if q:
+        like = f"%{q.strip()}%"
+        child_ids = [
+            u.id for u in db.query(User).filter(
+                User.role == "child",
+                or_(User.login_name.like(like), User.display_name.like(like), User.name.like(like)),
+            ).all()
+        ]
+        if not child_ids:
+            return {"items": [], "total": 0}
+        query = query.filter(Task.user_id.in_(child_ids))
+    total = query.count()
+    tasks = query.order_by(Task.id.desc()).offset(offset).limit(limit).all()
+    items = []
+    for t in tasks:
+        child = db.get(User, t.user_id)
+        parent = db.get(User, child.parent_id) if child and child.parent_id else None
+        items.append({
+            "task_id": t.id,
+            "user_id": t.user_id,
+            "child_login_name": child.login_name if child else "",
+            "child_display_name": (child.display_name or child.name or "") if child else "",
+            "parent_display_name": (parent.display_name or parent.name or "") if parent else "",
+            "date": str(t.date),
+            "subject": t.subject,
+            "title": t.title,
+            "detail": t.detail,
+            "submit_status": t.submit_status,
+            "photo_path": t.photo_path,
+            "points": t.points,
+        })
+    return {"items": items, "total": total}

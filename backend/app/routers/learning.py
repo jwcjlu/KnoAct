@@ -10,6 +10,7 @@ from ..core.access import (
     require_learning_user,
     resolve_target_user_id,
 )
+from ..core.deps import require_role
 from ..database import get_db
 from ..models import Lesson, WordBank, Point, User
 from ..models import KnowledgePoint, Mistake, WordMastery, LearningProgress
@@ -398,4 +399,38 @@ def appeal(req: AppealReq, user: User = Depends(require_learning_user),
         bucket_id=bid,
     ))
     db.commit()
+    return {"ok": True}
+
+
+class PreferencesReq(BaseModel):
+    user_id: int
+    dictation_input_mode: str
+
+
+@router.get("/api/learning/preferences")
+def get_learning_preferences(
+    user_id: int = Depends(resolve_target_user_id),
+    user: User = Depends(require_learning_user),
+    db: Session = Depends(get_db),
+):
+    ensure_user_access(user, user_id, db)
+    from ..services.child_config import get_dictation_input_mode
+
+    return {"dictation_input_mode": get_dictation_input_mode(db, user_id)}
+
+
+@router.put("/api/learning/preferences")
+def put_learning_preferences(
+    req: PreferencesReq,
+    user: User = Depends(require_role("parent")),
+    db: Session = Depends(get_db),
+):
+    from ..services.child_config import VALID_DICTATION_MODES, set_child_config_str
+
+    child = db.get(User, req.user_id)
+    if child is None or child.role != "child" or child.parent_id != user.id:
+        raise HTTPException(status_code=404, detail={"error": "child_not_found"})
+    if req.dictation_input_mode not in VALID_DICTATION_MODES:
+        raise HTTPException(status_code=400, detail={"error": "invalid_mode"})
+    set_child_config_str(db, req.user_id, "dictation_input_mode", req.dictation_input_mode)
     return {"ok": True}

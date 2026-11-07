@@ -29,3 +29,31 @@ def test_falls_back_to_default(setup_db, db):
     db.commit()
     assert get_child_config_int(db, child.id, "nope", 7) == 7
     assert get_child_config_str(db, child.id, "nope", "默认") == "默认"
+
+
+def test_get_dictation_input_mode_defaults_without_row(setup_db, db):
+    child = _child(db)
+    db.commit()
+    from app.services.child_config import get_dictation_input_mode
+
+    assert get_dictation_input_mode(db, child.id) == "paper_photo"
+
+
+def test_get_dictation_input_mode_ignores_model_config(setup_db, db):
+    child = _child(db)
+    db.add(ModelConfig(key="dictation_input_mode", value="on_screen"))
+    db.commit()
+    from app.services.child_config import get_dictation_input_mode
+
+    assert get_dictation_input_mode(db, child.id) == "paper_photo"
+
+
+def test_set_child_config_str_upsert(setup_db, db):
+    child = _child(db)
+    db.commit()
+    from app.services.child_config import get_dictation_input_mode, set_child_config_str
+
+    set_child_config_str(db, child.id, "dictation_input_mode", "on_screen")
+    assert get_dictation_input_mode(db, child.id) == "on_screen"
+    set_child_config_str(db, child.id, "dictation_input_mode", "paper_photo")
+    assert get_dictation_input_mode(db, child.id) == "paper_photo"

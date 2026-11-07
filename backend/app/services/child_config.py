@@ -17,3 +17,22 @@ def get_child_config_int(db: Session, child_id: int, key: str, fallback: int) ->
         return int(val) if val else fallback
     except ValueError:
         return fallback
+
+
+VALID_DICTATION_MODES = frozenset({"paper_photo", "on_screen"})
+
+
+def set_child_config_str(db: Session, child_id: int, key: str, value: str) -> None:
+    row = db.query(ChildConfig).filter_by(user_id=child_id, key=key).first()
+    if row:
+        row.value = value
+    else:
+        db.add(ChildConfig(user_id=child_id, key=key, value=value))
+    db.commit()
+
+
+def get_dictation_input_mode(db: Session, child_id: int) -> str:
+    row = db.query(ChildConfig).filter_by(user_id=child_id, key="dictation_input_mode").first()
+    if row and row.value in VALID_DICTATION_MODES:
+        return row.value
+    return "paper_photo"

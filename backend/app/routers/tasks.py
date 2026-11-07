@@ -3,7 +3,7 @@ import json
 import os
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -44,6 +44,23 @@ class AddReq(BaseModel):
     detail: str = ""
     content: str = ""
     points: int = 20
+
+
+def _dictation_photo_required(db: Session, t: Task) -> bool:
+    if t.task_type != "dictation":
+        return False
+    from ..services.child_config import get_dictation_input_mode
+
+    if get_dictation_input_mode(db, t.user_id) != "paper_photo":
+        return False
+    return not (t.photo_path or "").strip()
+
+
+def _raise_photo_required() -> None:
+    raise HTTPException(
+        status_code=400,
+        detail={"error": "photo_required", "message": "请先上传听写打卡照片"},
+    )
 
 
 def _to_dict(t: Task) -> dict:
@@ -167,6 +184,8 @@ def submit(task_id: int, user: User = Depends(require_learning_user),
     if not t:
         return {"ok": False}
     ensure_user_access(user, t.user_id, db)
+    if _dictation_photo_required(db, t):
+        _raise_photo_required()
     if t.submit_status != "approved":
         t.submit_status = "submitted"
         db.commit()
@@ -246,6 +265,8 @@ def confirm(task_id: int, user: User = Depends(require_role("parent", "admin")),
     ensure_user_access(user, t.user_id, db)
     if t.submit_status == "approved":
         return {"ok": True, "points": t.points, "already": True}
+    if _dictation_photo_required(db, t):
+        _raise_photo_required()
     if t.submit_status != "submitted":
         return {"ok": False, "error": "任务尚未提交，无法确认"}
     t.submit_status = "approved"

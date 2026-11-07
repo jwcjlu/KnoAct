@@ -275,3 +275,58 @@ def test_knowledge_review_refused_after_approval():
                     json={"user_id": uid, "answers": [{"id": kp_id, "user_answer": "白鹭是鸟"}]},
                     headers=_h(uid)).json()
     assert d["ok"] is False
+
+
+def _add_dictation_task(uid):
+    r = client.post("/api/tasks", json={
+        "user_id": uid,
+        "date": str(date.today()),
+        "task_type": "dictation",
+        "subject": "语文",
+        "title": "听写",
+        "content": "[]",
+    }, headers=_parent_h(uid))
+    return r.json()["id"]
+
+
+def test_dictation_submit_requires_photo_in_paper_mode():
+    uid = _seed()
+    db = SessionLocal()
+    from app.models import ChildConfig
+
+    db.add(ChildConfig(user_id=uid, key="dictation_input_mode", value="paper_photo"))
+    db.commit()
+    db.close()
+    tid = _add_dictation_task(uid)
+    r = client.post(f"/api/tasks/{tid}/submit", headers=_h(uid))
+    assert r.status_code == 400
+    assert r.json()["detail"]["error"] == "photo_required"
+
+
+def test_dictation_submit_ok_on_screen_without_photo():
+    uid = _seed()
+    db = SessionLocal()
+    from app.models import ChildConfig
+
+    db.add(ChildConfig(user_id=uid, key="dictation_input_mode", value="on_screen"))
+    db.commit()
+    db.close()
+    tid = _add_dictation_task(uid)
+    assert client.post(f"/api/tasks/{tid}/submit", headers=_h(uid)).json() == {"ok": True}
+
+
+def test_dictation_confirm_rejects_paper_without_photo():
+    uid = _seed()
+    db = SessionLocal()
+    from app.models import ChildConfig, Task
+
+    db.add(ChildConfig(user_id=uid, key="dictation_input_mode", value="paper_photo"))
+    db.commit()
+    tid = _add_dictation_task(uid)
+    t = db.get(Task, tid)
+    t.submit_status = "submitted"
+    db.commit()
+    db.close()
+    r = client.post(f"/api/tasks/{tid}/confirm", headers=_parent_h(uid))
+    assert r.status_code == 400
+    assert r.json()["detail"]["error"] == "photo_required"
