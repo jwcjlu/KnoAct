@@ -17,6 +17,7 @@
 #   cp .env.example .env                        # 必须改 MySQL 密码，按需修改端口等
 #   docker compose up -d --build                # 只起基础服务
 #   docker compose up -d --build backend        # 仅重建后端（改 API 时常用，避免连编全部前端）
+#   编 student-app 前建议 df -h 根分区剩余 ≥15GB；不足时 sh scripts/docker-free-disk.sh
 #   docker compose --profile render up -d --build   # 连同动画渲染一起起
 # 国内机：backend 默认阿里云 PyPI（勿用 docker/dockerfile 语法镜像，Hub 很慢）
 # 访问：学生端（Flutter）http://<服务器IP>:${KNOACT_STUDENT_PORT:-8082}，旧版学生端 :${KNOACT_HTTP_PORT:-8080}，家长端 :${KNOACT_PARENT_PORT:-8081}

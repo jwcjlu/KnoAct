@@ -29,8 +29,8 @@ RUN curl -fL --retry 3 -o /tmp/flutter.tar.xz \
     && tar -xJf /tmp/flutter.tar.xz -C /opt \
     && rm /tmp/flutter.tar.xz \
     && git config --system --add safe.directory /opt/flutter \
-    && flutter config --no-analytics \
-    && flutter precache --web
+    && flutter config --no-analytics
+    # 不单独 precache --web，由 build web 按需拉引擎，降低解压后磁盘峰值
 
 RUN useradd -m -u "${FLUTTER_UID}" "${FLUTTER_USER}" \
     && chown -R "${FLUTTER_USER}:${FLUTTER_USER}" /opt/flutter
