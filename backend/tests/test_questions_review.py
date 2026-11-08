@@ -182,3 +182,75 @@ def test_add_question_with_passage_id(client, setup_db):
     db.close()
     assert q.passage_id == pid
     assert q.status == "pending"
+
+
+def test_review_groups_by_passage(client, setup_db):
+    db = SessionLocal()
+    parent = make_account(db, "rev_psg", "parent")
+    from datetime import date
+    today = date.today()
+    psg = ReadingPassage(user_id=parent.id, subject="语文", title="找妈妈",
+                         content="小蝌蚪游啊游。", status="pending")
+    db.add(psg)
+    db.flush()
+    q = Question(passage_id=psg.id, qtype="short_answer", qtype_category="subjective",
+                 question="谁在游？", answer="小蝌蚪", subject="语文",
+                 date=today, status="pending")
+    db.add(q)
+    db.commit()
+    pid, qid, hid = psg.id, q.id, parent.id
+    db.close()
+    h = _ph(hid)
+    r = client.get(f"/api/questions/review?d={today.isoformat()}", headers=h)
+    assert r.status_code == 200
+    groups = r.json()["groups"]
+    g = next(x for x in groups if x.get("passage_id") == pid)
+    assert g["lesson_title"] == "找妈妈"
+    assert g["passage"]["content"] == "小蝌蚪游啊游。"
+    assert g["questions"][0]["id"] == qid
+
+
+def test_approve_question_publishes_passage(client, setup_db):
+    db = SessionLocal()
+    parent = make_account(db, "appr_psg", "parent")
+    psg = ReadingPassage(user_id=parent.id, subject="语文", title="T", content="C", status="pending")
+    db.add(psg)
+    db.flush()
+    q = Question(passage_id=psg.id, qtype="short_answer", question="Q", answer="A",
+                 status="pending")
+    db.add(q)
+    db.commit()
+    qid, pid, hid = q.id, psg.id, parent.id
+    db.close()
+    r = client.post(f"/api/questions/{qid}/approve", headers=_ph(hid))
+    assert r.status_code == 200
+    db = SessionLocal()
+    assert db.get(ReadingPassage, pid).status == "published"
+    db.close()
+
+
+def test_approve_by_passage(client, setup_db):
+    from datetime import date
+    db = SessionLocal()
+    parent = make_account(db, "appr_by_psg", "parent")
+    today = date.today()
+    psg = ReadingPassage(user_id=parent.id, subject="语文", title="T", content="C", status="pending")
+    db.add(psg)
+    db.flush()
+    q1 = Question(passage_id=psg.id, qtype="short_answer", question="Q1", answer="A",
+                  date=today, status="pending")
+    q2 = Question(passage_id=psg.id, qtype="short_answer", question="Q2", answer="B",
+                  date=today, status="pending")
+    db.add_all([q1, q2])
+    db.commit()
+    pid, hid = psg.id, parent.id
+    db.close()
+    r = client.post("/api/questions/approve-by-passage",
+                    params={"passage_id": pid, "d": today.isoformat()},
+                    headers=_ph(hid))
+    assert r.status_code == 200
+    db = SessionLocal()
+    assert db.get(ReadingPassage, pid).status == "published"
+    qs = db.query(Question).filter_by(passage_id=pid).all()
+    assert all(x.status == "published" for x in qs)
+    db.close()

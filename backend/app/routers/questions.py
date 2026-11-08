@@ -122,6 +122,8 @@ def review_questions(d: date_type, subject: str = "",
     group_meta: dict[tuple, dict] = {}
 
     def _group_key(item: Question) -> tuple:
+        if item.passage_id:
+            return ("passage", item.passage_id)
         if item.lesson_id:
             return ("lesson", item.lesson_id)
         if item.bank_id:
@@ -137,10 +139,27 @@ def review_questions(d: date_type, subject: str = "",
             "options": json.loads(item.options or "[]"),
             "answer_json": json.loads(item.answer_json or "{}"),
             "bank_id": item.bank_id,
+            "passage_id": item.passage_id,
         })
         if gkey not in group_meta:
             subj = (item.subject or "").strip() or "未分类"
-            if gkey[0] == "lesson":
+            if gkey[0] == "passage":
+                psg = db.get(ReadingPassage, gkey[1])
+                title = psg.title if psg else f"阅读材料{gkey[1]}"
+                if psg and (psg.subject or "").strip():
+                    subj = psg.subject.strip()
+                group_meta[gkey] = {
+                    "subject": subj, "lesson_id": None,
+                    "bank_id": psg.bank_id if psg else None,
+                    "passage_id": gkey[1],
+                    "lesson_title": title,
+                    "passage": {
+                        "id": psg.id if psg else gkey[1],
+                        "title": title,
+                        "content": psg.content if psg else "",
+                    },
+                }
+            elif gkey[0] == "lesson":
                 lesson = db.get(Lesson, gkey[1])
                 title = lesson.title if lesson else f"课程{gkey[1]}"
                 group_meta[gkey] = {"subject": subj, "lesson_id": gkey[1], "bank_id": None, "lesson_title": title}
@@ -166,6 +185,10 @@ def approve_question(question_id: int, _auth: User = Depends(require_role("paren
     if not q:
         raise HTTPException(status_code=404, detail="题目不存在")
     q.status = "published"
+    if q.passage_id:
+        psg = db.get(ReadingPassage, q.passage_id)
+        if psg and psg.status != "published":
+            psg.status = "published"
     db.commit()
     return {"ok": True}
 
@@ -207,5 +230,18 @@ def approve_by_bank(bank_id: int, d: date_type,
                     db: Session = Depends(get_db)):
     db.query(Question).filter_by(bank_id=bank_id, date=d, status="pending").update(
         {"status": "published"}, synchronize_session=False)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/approve-by-passage")
+def approve_by_passage(passage_id: int, d: date_type,
+                       _auth: User = Depends(require_role("parent", "admin")),
+                       db: Session = Depends(get_db)):
+    db.query(Question).filter_by(passage_id=passage_id, date=d, status="pending").update(
+        {"status": "published"}, synchronize_session=False)
+    psg = db.get(ReadingPassage, passage_id)
+    if psg:
+        psg.status = "published"
     db.commit()
     return {"ok": True}
