@@ -62,21 +62,27 @@ def list_bank_questions(bank_id: int, _auth: User = Depends(get_current_user),
 @router.post("/submit")
 def submit_bank(req: BankSubmitReq, user: User = Depends(require_learning_user),
                 db: Session = Depends(get_db)):
-    qs = db.query(Question).filter(Question.id.in_([a.get("question_id") for a in req.answers])).all()
-    by_id = {q.id: q for q in qs}
+    qids = [a.get("question_id") for a in req.answers]
+    # 只判已发布的题，且给定 bank_id 时限定在该卷内；杜绝越权给草稿/他卷题目判分泄答案
+    q = db.query(Question).filter(Question.id.in_(qids), Question.status == "published")
+    if req.bank_id is not None:
+        q = q.filter(Question.bank_id == req.bank_id)
+    qs = q.all()
+    by_id = {x.id: x for x in qs}
     results = []
     for a in req.answers:
-        q = by_id.get(a.get("question_id"))
-        if q is None:
-            results.append({"question_id": a.get("question_id"), "is_correct": False})
+        qid = a.get("question_id")
+        qq = by_id.get(qid)
+        if qq is None:
+            results.append({"question_id": qid, "is_correct": False})
             continue
-        answer_json = json.loads(q.answer_json or "{}")
+        answer_json = json.loads(qq.answer_json or "{}")
         student = {k: a.get(k) for k in ("selected_index", "blanks", "pairs", "text") if a.get(k) is not None}
-        if q.qtype_category == "subjective":
+        if qq.qtype_category == "subjective":
             r = grade_subjective_with_ai(db, answer_json, student)
         else:
-            r = grade_question(q.qtype_category, answer_json, student)
-        results.append({"question_id": q.id, "is_correct": r["is_correct"],
+            r = grade_question(qq.qtype_category, answer_json, student)
+        results.append({"question_id": qq.id, "is_correct": r["is_correct"],
                         "correct_answer_text": r["correct_answer_text"], "detail": r["detail"]})
     score = sum(1 for r in results if r["is_correct"] is True)
     return {"answers": results, "score": score, "total": len(results)}
