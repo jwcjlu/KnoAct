@@ -69,3 +69,23 @@ def test_grade_subjective_empty_text(client, setup_db):
         db.close()
     assert r["is_correct"] is False
     assert r["detail"] == "empty"
+
+
+def test_grade_subjective_malformed_flag_returns_pending(client, setup_db, monkeypatch):
+    # is_correct 非严格布尔（如字符串 "maybe"）→ 不得硬判对/错，回落 pending
+    from app.database import SessionLocal
+    import app.services.ai as ai
+
+    class _FakeNonFake:
+        name = "openai"
+        def generate(self, prompt="", system="", json_mode=False):
+            return '{"is_correct": "maybe", "reason": "不确定"}'
+
+    monkeypatch.setattr(ai, "get_provider", lambda db: _FakeNonFake())
+    db = SessionLocal()
+    try:
+        r = grade_subjective_with_ai(db, {"rubric": "要点", "sample": "参考"}, {"text": "我的回答"})
+    finally:
+        db.close()
+    assert r["is_correct"] is None
+    assert r["detail"] == "pending"

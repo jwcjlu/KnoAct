@@ -87,8 +87,12 @@ def grade_subjective_with_ai(db, answer_json: dict, student_answer: dict) -> dic
     try:
         raw = provider.generate(prompt=prompt, system="你是小学老师，公正批改。", json_mode=True)
         data = json.loads(raw)
+        flag = data.get("is_correct")
+        if not isinstance(flag, bool):
+            # 解析成功但 is_correct 非严格布尔（缺失/字符串/null）→ 视同无法解析，待家长批改
+            return {"is_correct": None, "correct_answer_text": sample, "detail": "pending"}
         return {
-            "is_correct": bool(data.get("is_correct", False)),
+            "is_correct": flag,
             "correct_answer_text": sample,
             "detail": data.get("reason", ""),
         }
