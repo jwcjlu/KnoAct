@@ -99,15 +99,22 @@ class Question(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
-    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
-    qtype: Mapped[str] = mapped_column(String(16), default="reading")   # knowledge | listening | reading | math
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)  # 改 nullable：可独立成题
+    bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"), nullable=True)  # 归属的卷
+    qtype: Mapped[str] = mapped_column(String(16), default="reading")   # taxonomy 值（single_choice/fill_blank/...）
+    qtype_category: Mapped[str] = mapped_column(String(16), default="subjective")  # choice|blank|match|subjective
     question: Mapped[str] = mapped_column(LongText)
     answer: Mapped[str] = mapped_column(LongText, default="")
-    subject: Mapped[str] = mapped_column(String(16), default="")        # 学科：语文/英语/数学
-    date: Mapped[date] = mapped_column(Date, nullable=True)             # 题目归属日期（每日生成的题）
-    status: Mapped[str] = mapped_column(String(16), default="published") # pending | published | rejected
-    extra: Mapped[str] = mapped_column(LongText, default="")             # 附加数据 JSON
-    task_type: Mapped[str] = mapped_column(String(16), default="reading") # knowledge | listening | reading | math
+    answer_json: Mapped[str] = mapped_column(LongText, default="")       # 机器判分依据 JSON
+    options: Mapped[str] = mapped_column(LongText, default="")           # 选择/连线题选项 JSON
+    analysis: Mapped[str] = mapped_column(LongText, default="")          # 解析
+    difficulty: Mapped[str] = mapped_column(String(16), default="medium")  # easy|medium|hard
+    tags: Mapped[str] = mapped_column(LongText, default="")              # {grade, knowledge_points, source} JSON
+    subject: Mapped[str] = mapped_column(String(16), default="")         # 学科：语文/英语/数学
+    date: Mapped[date] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="published")
+    extra: Mapped[str] = mapped_column(LongText, default="")
+    task_type: Mapped[str] = mapped_column(String(16), default="reading")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class Note(Base):
@@ -442,3 +449,17 @@ class FamilyBindRequest(Base):
     child_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     parent_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | approved | rejected
+
+
+class QuestionBank(Base):
+    """家长自建的一册卷子/题库；一道题可挂卷、挂课、或都不挂只靠 tags 检索。"""
+    __tablename__ = "question_banks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    title: Mapped[str] = mapped_column(String(255))
+    subject: Mapped[str] = mapped_column(String(16), default="")
+    grade: Mapped[int] = mapped_column(Integer, nullable=True)
+    tags: Mapped[str] = mapped_column(LongText, default="")   # JSON 文本
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|photo|third_party
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active|archived
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

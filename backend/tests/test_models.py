@@ -1,5 +1,24 @@
 from app import models  # noqa: F401  ensure all models registered on Base.metadata
 from conftest import make_lesson
+from app.models import Question, QuestionBank
+from sqlalchemy import inspect
+
+
+def test_question_new_columns():
+    cols = {c.name for c in inspect(Question).columns}
+    for name in ("answer_json", "options", "analysis", "difficulty", "tags",
+                 "qtype_category", "bank_id"):
+        assert name in cols, f"Question 缺列 {name}"
+
+
+def test_question_lesson_id_nullable():
+    assert Question.__table__.c.lesson_id.nullable is True
+
+
+def test_question_bank_table():
+    cols = {c.name for c in inspect(QuestionBank).columns}
+    for name in ("user_id", "title", "subject", "grade", "tags", "source", "status"):
+        assert name in cols
 
 
 def test_create_all_tables():
