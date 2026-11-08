@@ -1,3 +1,4 @@
+import json
 from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,9 +20,16 @@ class GenerateReq(BaseModel):
 
 
 class AddReq(BaseModel):
-    lesson_id: int
+    lesson_id: int | None = None
+    bank_id: int | None = None
+    qtype: str = "short_answer"
     question: str
     answer: str = ""
+    options: list[dict] = []
+    answer_json: dict = {}
+    analysis: str = ""
+    difficulty: str = "medium"
+    tags: dict = {}
 
 
 @router.get("")
@@ -52,7 +60,22 @@ def add_question(req: AddReq, _auth: User = Depends(require_role("parent", "admi
     question = req.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="题目内容不能为空")
-    q = Question(lesson_id=req.lesson_id, qtype="reading", question=question, answer=req.answer.strip())
+    from ..core.question_types import CATEGORY_OF_QTYPE
+    category = CATEGORY_OF_QTYPE.get(req.qtype, "subjective")
+    q = Question(
+        lesson_id=req.lesson_id,
+        bank_id=req.bank_id,
+        qtype=req.qtype,
+        qtype_category=category,
+        question=question,
+        answer=req.answer.strip(),
+        answer_json=json.dumps(req.answer_json, ensure_ascii=False),
+        options=json.dumps(req.options, ensure_ascii=False),
+        analysis=req.analysis.strip(),
+        difficulty=req.difficulty,
+        tags=json.dumps(req.tags, ensure_ascii=False),
+        status="pending",  # 人工录入默认进审核队列
+    )
     db.add(q)
     db.commit()
     db.refresh(q)
