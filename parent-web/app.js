@@ -43,7 +43,7 @@ function icon(name, size=18){
 
 // ===== 通用状态 =====
 const PARENT_TABS = [
-  ['教材','book'],['知识点','brain'],['题目审核台','list'],['目标','star'],['报告','chart'],
+  ['教材','book'],['知识点','brain'],['题库管理','grid'],['题目审核台','list'],['目标','star'],['报告','chart'],
   ['任务','pen'],['规则','gift'],['学习配置','grid'],['屏幕时间','clock'],['设置','menu'],
   ['孩子管理','star']
 ];
@@ -389,6 +389,7 @@ function setParentTab(t){
   renderNav();
   if(t==='教材'){ loadPdfDocs().then(()=>render()); return; }
   if(t==='知识点'){ loadKnowledge().then(()=>render()); return; }
+  if(t==='题库管理'){ loadBankList().then(()=>render()); return; }
   if(t==='题目审核台'){ loadReviewQuestions().then(()=>render()); return; }
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
@@ -446,10 +447,195 @@ async function loadConfig(){
   ttsConfig.repeat = parseInt(configMap.tts_repeat || '2');
 }
 
+// ---- 题库管理 ----
+const BANK_QTYPE_LABEL = {
+  single_choice:'单选题', multi_choice:'多选题', true_false:'判断题',
+  fill_blank:'填空题', cloze:'完形填空', calculation:'计算题', matching:'连线题',
+  short_answer:'简答题', essay:'作文', application:'应用题', oral:'口语题',
+};
+const BANK_QTYPE_CATEGORY = {
+  single_choice:'choice', multi_choice:'choice', true_false:'choice',
+  fill_blank:'blank', cloze:'blank', calculation:'blank',
+  matching:'match',
+  short_answer:'subjective', essay:'subjective', application:'subjective', oral:'subjective',
+};
+const BANK_QTYPES = Object.keys(BANK_QTYPE_LABEL);
+let bankList = [];
+let bankSelectedId = null;
+let bankAddQtype = 'single_choice';
+
+async function loadBankList(){
+  const rows = await api('/api/banks');
+  bankList = Array.isArray(rows) ? rows : [];
+  if(bankSelectedId && !bankList.find(b=>b.id===bankSelectedId)) bankSelectedId = null;
+}
+async function createBankFromForm(){
+  const title = (document.getElementById('bankNewTitle')?.value||'').trim();
+  const subject = document.getElementById('bankNewSubject')?.value||'';
+  const gradeRaw = document.getElementById('bankNewGrade')?.value||'';
+  const grade = gradeRaw ? Number(gradeRaw) : null;
+  if(!title){ toast('请填写卷子标题'); return; }
+  const includeDaily = !!document.getElementById('bankIncludeDaily')?.checked;
+  const r = await api('/api/banks', {method:'POST', body:{title, subject, grade, tags:{include_daily_task:includeDaily}}});
+  if(r && r.id){ toast('卷子已创建'); await loadBankList(); bankSelectedId = r.id; render(); }
+  else toast(apiErrorMsg(r, '创建失败'));
+}
+function selectBank(id){ bankSelectedId = Number(id)||null; bankAddQtype = 'single_choice'; render(); }
+function setBankAddQtype(v){ bankAddQtype = v; render(); }
+
+function bankChoiceOptionsFromForm(){
+  const n = Math.max(2, Math.min(8, parseInt(document.getElementById('bankOptCount')?.value||'4', 10)||4));
+  const opts = [];
+  for(let i=0;i<n;i++){
+    const label = (document.getElementById(`bankOptLabel${i}`)?.value||'').trim() || `选项${String.fromCharCode(65+i)}`;
+    opts.push({label, value:i});
+  }
+  return opts;
+}
+function buildBankQuestionPayload(){
+  const qtype = bankAddQtype;
+  const question = (document.getElementById('bankQText')?.value||'').trim();
+  const analysis = (document.getElementById('bankAnalysis')?.value||'').trim();
+  const difficulty = document.getElementById('bankDifficulty')?.value||'medium';
+  const cat = BANK_QTYPE_CATEGORY[qtype]||'subjective';
+  let options = [], answer_json = {}, answer = '';
+  if(cat==='choice'){
+    options = bankChoiceOptionsFromForm();
+  if(qtype==='multi_choice'){
+      const checks = document.querySelectorAll('input[name="bankMultiCorrect"]:checked');
+      const idx = [...checks].map(el=>Number(el.value)).filter(n=>!Number.isNaN(n));
+      answer_json = {correct_index: idx.length?idx:[0]};
+      answer = idx.map(i=>options[i]?.label).filter(Boolean).join('、');
+    }else{
+      const picked = document.querySelector('input[name="bankSingleCorrect"]:checked');
+      const ci = picked ? Number(picked.value) : 0;
+      const correct = Number.isNaN(ci)?0:ci;
+      answer_json = {correct_index: correct};
+      answer = options[correct]?.label || '';
+    }
+  }else if(cat==='blank'){
+    const raw = (document.getElementById('bankBlanks')?.value||'').trim();
+    const blanks = raw.split(/[,，;；\n]+/).map(s=>s.trim()).filter(Boolean);
+    answer_json = {blanks};
+    answer = blanks.join('；');
+  }else if(cat==='match'){
+    const raw = (document.getElementById('bankPairs')?.value||'').trim();
+    const pairs = [];
+    raw.split('\n').forEach(line=>{
+      const p = line.split(/[→\-=]/).map(s=>s.trim()).filter(Boolean);
+      if(p.length>=2) pairs.push([p[0], p[1]]);
+    });
+    answer_json = {pairs};
+    answer = pairs.map(p=>p.join('→')).join('；');
+  }else{
+    answer = (document.getElementById('bankSubjAnswer')?.value||'').trim();
+    const rubric = (document.getElementById('bankRubric')?.value||'').trim();
+    answer_json = {sample: answer, rubric};
+  }
+  return {lesson_id:null, bank_id:bankSelectedId, qtype, question, answer, options, answer_json, analysis, difficulty, tags:{}};
+}
+async function submitBankQuestion(){
+  if(!bankSelectedId){ toast('请先选择一张卷子'); return; }
+  const body = buildBankQuestionPayload();
+  if(!body.question){ toast('请填写题干'); return; }
+  const r = await api('/api/questions', {method:'POST', body});
+  if(r && r.id){
+    toast('题目已提交审核');
+    document.getElementById('bankQText').value = '';
+    render();
+  }else toast(apiErrorMsg(r, '提交失败'));
+}
+
+function renderBankChoiceFields(){
+  const multi = bankAddQtype==='multi_choice';
+  const n = 4;
+  const optRows = [...Array(n)].map((_,i)=>`
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+      <span style="font-size:12px;color:#78817b;width:52px">${String.fromCharCode(65+i)}</span>
+      <input id="bankOptLabel${i}" class="inp" style="flex:1" placeholder="选项文字" />
+      ${multi?`<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" name="bankMultiCorrect" value="${i}"/>正确</label>`:
+        `<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="radio" name="bankSingleCorrect" value="${i}" ${i===0?'checked':''}/>正确</label>`}
+    </div>`).join('');
+  return `<div style="margin-top:12px">
+    <div style="font-size:13px;font-weight:600;color:var(--ink2)">选项</div>
+    ${optRows}
+  </div>`;
+}
+function renderBankQuestionForm(){
+  const cat = BANK_QTYPE_CATEGORY[bankAddQtype]||'subjective';
+  const qtypeOpts = BANK_QTYPES.map(q=>`<option value="${q}" ${q===bankAddQtype?'selected':''}>${BANK_QTYPE_LABEL[q]}</option>`).join('');
+  let extra = '';
+  if(cat==='choice') extra = renderBankChoiceFields();
+  else if(cat==='blank'){
+    extra = `<div style="margin-top:12px"><label style="font-size:13px;font-weight:600">参考答案（多空用逗号或换行分隔）</label>
+      <textarea id="bankBlanks" class="inp" rows="2" style="width:100%;margin-top:6px" placeholder="如：春天,播种"></textarea></div>`;
+  }else if(cat==='match'){
+    extra = `<div style="margin-top:12px"><label style="font-size:13px;font-weight:600">连线答案（每行一对，用 → 分隔）</label>
+      <textarea id="bankPairs" class="inp" rows="3" style="width:100%;margin-top:6px" placeholder="苹果→红色&#10;香蕉→黄色"></textarea></div>`;
+  }else{
+    extra = `<div style="margin-top:12px"><label style="font-size:13px;font-weight:600">参考答案 / 范文</label>
+      <textarea id="bankSubjAnswer" class="inp" rows="2" style="width:100%;margin-top:6px"></textarea>
+      <label style="font-size:13px;font-weight:600;display:block;margin-top:10px">评分要点（可选）</label>
+      <textarea id="bankRubric" class="inp" rows="2" style="width:100%;margin-top:6px"></textarea></div>`;
+  }
+  return `<div class="parent-panel" style="grid-column:1/-1;margin-top:16px">
+    <div class="head"><div class="ic green">${icon('pen',20)}</div>
+      <div><h3>录入题目</h3><div class="sub">提交后进入「题目审核台」，通过后孩子可练习</div></div></div>
+    <div class="bd">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <label style="font-size:13px;font-weight:600">题型<select id="bankQtypeSelect" class="inp" style="width:100%;margin-top:6px" onchange="setBankAddQtype(this.value)">${qtypeOpts}</select></label>
+        <label style="font-size:13px;font-weight:600">难度<select id="bankDifficulty" class="inp" style="width:100%;margin-top:6px"><option value="easy">简单</option><option value="medium" selected>中等</option><option value="hard">困难</option></select></label>
+      </div>
+      <label style="font-size:13px;font-weight:600;display:block;margin-top:12px">题干</label>
+      <textarea id="bankQText" class="inp" rows="3" style="width:100%;margin-top:6px" placeholder="请输入题目"></textarea>
+      ${extra}
+      <label style="font-size:13px;font-weight:600;display:block;margin-top:12px">解析（可选）</label>
+      <textarea id="bankAnalysis" class="inp" rows="2" style="width:100%;margin-top:6px"></textarea>
+      <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+        <button class="btn-primary" onclick="submitBankQuestion()">提交审核</button>
+        <label class="btn-ghost" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer">
+          ${icon('camera',16)} 拍照导入
+          <input type="file" accept="image/*" style="display:none" onchange="uploadBankPhoto(this)">
+        </label>
+        <span style="font-size:12px;color:#8e9691">OCR 自动结构化，进审核台校对</span>
+      </div>
+    </div>
+  </div>`;
+}
+function renderBankManage(){
+  const rows = bankList.map(b=>`
+    <div class="pdf-row" style="cursor:pointer;border-radius:12px;${b.id===bankSelectedId?'background:#f5f7ff;border:1px solid #c5d0ff':''}" onclick="selectBank(${b.id})">
+      <div class="ic">${icon('book',22)}</div>
+      <div><div class="nm">${escapeAttr(b.title)}</div>
+        <div class="meta">${escapeAttr(b.subject||'未设学科')}${b.grade?(' · '+b.grade+'年级'):''} · 来源 ${escapeAttr(b.source||'manual')}</div></div>
+    </div>`).join('');
+  const form = bankSelectedId ? renderBankQuestionForm() : `<div class="parent-panel" style="grid-column:1/-1;margin-top:16px"><div class="bd" style="color:#8e9691;padding:24px">← 选择左侧卷子后开始录入题目</div></div>`;
+  return `<div class="parent-grid" style="display:block">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('grid',20)}</div>
+        <div><h3>题库管理</h3><div class="sub">新建卷子并录入题目，经审核后进入学生端练习</div></div></div>
+      <div class="bd">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+          <label style="font-size:13px;font-weight:600">标题<input id="bankNewTitle" class="inp" style="margin-left:8px;width:160px" placeholder="如：三年级数学期末"/></label>
+          <label style="font-size:13px;font-weight:600">学科<select id="bankNewSubject" class="inp" style="margin-left:8px"><option value="">未设</option><option>语文</option><option>数学</option><option>英语</option></select></label>
+          <label style="font-size:13px;font-weight:600">年级<select id="bankNewGrade" class="inp" style="margin-left:8px"><option value="">未设</option>${[1,2,3,4,5,6].map(g=>`<option value="${g}">${g}</option>`).join('')}</select></label>
+          <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="bankIncludeDaily"/> 纳入每日任务</label>
+          <button class="btn-primary" onclick="createBankFromForm()">新建卷</button>
+        </div>
+        <div style="margin-top:20px">${rows || '<div style="color:#8e9691;padding:12px 0">暂无卷子，请先新建</div>'}</div>
+      </div>
+    </div>
+    ${form}
+  </div>`;
+}
+
 // ---- 题目审核台 ----
-const QTYPE_LABEL = {knowledge:'基础知识', listening:'听力', reading:'阅读理解', math:'数学练习'};
+const QTYPE_LABEL = {
+  knowledge:'基础知识', listening:'听力', reading:'阅读理解', math:'数学练习',
+  ...BANK_QTYPE_LABEL,
+};
 let reviewGroups = [];          // [{subject, lesson_id, questions:[{id, qtype, question, answer, extra, task_type}]}]
-let expandedLessons = new Set(); // 展开的 lesson_id 集合
+let expandedLessons = new Set(); // 展开的分组 key（课程 id 或 bank-{id}）
 
 function todayStr(){
   const t = new Date();
@@ -473,6 +659,26 @@ async function approveByLesson(lessonId){
   await api(`/api/questions/approve-by-lesson?lesson_id=${lessonId}&d=${todayStr()}`, {method:'POST'});
   await loadReviewQuestions(); render();
 }
+async function approveByBank(bankId){
+  await api(`/api/questions/approve-by-bank?bank_id=${bankId}&d=${todayStr()}`, {method:'POST'});
+  await loadReviewQuestions(); render();
+}
+async function uploadBankPhoto(input){
+  if(!bankSelectedId || !input.files || !input.files[0]) return;
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  const h = {};
+  const t = getAccessToken();
+  if(t) h.Authorization = `Bearer ${t}`;
+  try{
+    const r = await fetch(API + `/api/banks/${bankSelectedId}/photo-import`, {method:'POST', headers:h, body:fd});
+    const data = await r.json();
+    if(data && data.count>0){ toast(`已识别 ${data.count} 道题，请到审核台确认`); await loadBankList(); }
+    else toast((data && data.message) || '未识别到题目');
+  }catch(e){ toast('上传失败'); }
+  input.value = '';
+  render();
+}
 async function approveBySubject(subject){
   await api(`/api/questions/approve-by-subject?subject=${encodeURIComponent(subject)}&d=${todayStr()}`, {method:'POST'});
   await loadReviewQuestions(); render();
@@ -484,11 +690,39 @@ async function approveAllQuestions(){
   }
   await loadReviewQuestions(); render();
 }
+function reviewGroupKey(g){
+  if(g.bank_id) return `bank-${g.bank_id}`;
+  if(g.lesson_id != null && g.lesson_id !== '') return String(g.lesson_id);
+  return `solo-${(g.questions && g.questions[0] && g.questions[0].id) || 0}`;
+}
 function toggleLesson(id){
-  const key = String(id);  // 统一转字符串，与渲染时 expandedLessons.has(g.lesson_id) 的 g.lesson_id 数字需一致
+  const key = String(id);
   if(expandedLessons.has(key)) expandedLessons.delete(key);
   else expandedLessons.add(key);
   render();
+}
+
+function formatQuestionRichDetail(q){
+  const cat = q.qtype_category || BANK_QTYPE_CATEGORY[q.qtype] || '';
+  const parts = [];
+  const opts = Array.isArray(q.options) ? q.options : [];
+  if(cat==='choice' && opts.length){
+    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:6px"><b>选项：</b>${opts.map(o=>escapeAttr(o.label||'')).join(' · ')}</div>`);
+  }
+  const aj = (q.answer_json && typeof q.answer_json==='object') ? q.answer_json : {};
+  if(cat==='blank' && aj.blanks){
+    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:4px"><b>填空答案：</b>${aj.blanks.map(escapeAttr).join('；')}</div>`);
+  }
+  if(cat==='match' && aj.pairs){
+    const pairs = aj.pairs.map(p=>`${escapeAttr(p[0])}→${escapeAttr(p[1])}`).join('；');
+    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:4px"><b>连线：</b>${pairs}</div>`);
+  }
+  if(cat==='subjective' && (aj.sample || q.answer)){
+    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:4px"><b>参考：</b>${escapeAttr(aj.sample || q.answer)}</div>`);
+    if(aj.rubric) parts.push(`<div style="font-size:12px;color:#78817b;margin-top:2px"><b>要点：</b>${escapeAttr(aj.rubric)}</div>`);
+  }
+  if(q.analysis) parts.push(`<div style="font-size:12px;color:#78817b;margin-top:4px"><b>解析：</b>${escapeAttr(q.analysis)}</div>`);
+  return parts.join('');
 }
 
 function formatQuestionExtra(extra){
@@ -550,16 +784,19 @@ function renderQuestionTab(){
 
     const lessonGroups = groups.map(g=>{
       const qs = g.questions || [];
-      const open = expandedLessons.has(String(g.lesson_id));
+      const gkey = reviewGroupKey(g);
+      const open = expandedLessons.has(gkey);
       const chev = open ? '▾' : '▸';
       const qItems = qs.map(q=>{
         const label = QTYPE_LABEL[q.qtype] || q.task_type || '题目';
-        const ansText = (q.answer!=null && q.answer!=='') ? `答案：${q.answer}` : '';
+        const ansText = (q.answer!=null && q.answer!=='') ? `答案：${escapeAttr(q.answer)}` : '';
+        const richText = formatQuestionRichDetail(q);
         const extraText = formatQuestionExtra(q.extra);
         return `<div class="q-item" style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:#fafbf9;border:1px solid var(--line3);border-radius:10px;margin-bottom:8px">
           <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:#333;line-height:1.5"><span class="q-type" style="font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px;background:#edf1ff;color:#4566e8">${label}</span>${q.question||''}</div>
+            <div style="font-size:13px;font-weight:600;color:#333;line-height:1.5"><span class="q-type" style="font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px;background:#edf1ff;color:#4566e8">${label}</span>${escapeAttr(q.question||'')}</div>
             ${ansText?`<div style="font-size:12px;color:#8e9691;margin-top:3px">${ansText}</div>`:''}
+            ${richText}
             ${extraText}
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0">
@@ -570,12 +807,13 @@ function renderQuestionTab(){
       }).join('');
 
       return `<div class="lesson-group" style="border-top:1px solid var(--line2);padding:12px 20px">
-        <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="toggleLesson('${g.lesson_id}')">
+        <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="toggleLesson('${gkey}')">
           <span style="color:#8e9691;font-size:12px">${chev}</span>
-          <span style="font-size:14px;font-weight:600">${g.subject||''} · ${g.lesson_title||('课程 '+g.lesson_id)}</span>
+          <span style="font-size:14px;font-weight:600">${g.subject||''} · ${escapeAttr(g.lesson_title||('课程 '+g.lesson_id))}</span>
           <span style="font-size:12px;color:#8e9691">${qs.length} 题待审</span>
           <div style="margin-left:auto;display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
-            <button class="btn-ghost" style="padding:4px 10px" onclick="approveByLesson('${g.lesson_id}')">通过本课</button>
+            ${g.lesson_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByLesson('${g.lesson_id}')">通过本课</button>`:''}
+            ${g.bank_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByBank('${g.bank_id}')">通过本卷</button>`:''}
           </div>
         </div>
         <div style="margin-top:10px;padding-left:20px;${open?'':'display:none'}">${qItems}</div>
@@ -616,7 +854,8 @@ async function loadParentTasks(){
 }
 const TASK_TYPE_LABEL = {
   dictation:'听写', knowledge:'基础练习', review:'复习',
-  reading:'阅读理解', listening:'听力理解', custom:'自由任务', math:'数学练习'
+  reading:'阅读理解', listening:'听力理解', custom:'自由任务', math:'数学练习',
+  practice:'题库练习',
 };
 function parseMathTaskContent(raw){
   const s = (raw || '').trim();
@@ -901,6 +1140,7 @@ function renderParent(){
   let body='';
   if(parentTab==='教材') body = renderPdfTab();
   else if(parentTab==='知识点') body = renderKnowledgeTab();
+  else if(parentTab==='题库管理') body = renderBankManage();
   else if(parentTab==='题目审核台') body = renderQuestionTab();
   else if(parentTab==='目标') body = renderGoalsTab();
   else if(parentTab==='报告') body = renderReportTab();
