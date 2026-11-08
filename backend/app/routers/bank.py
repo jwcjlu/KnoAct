@@ -83,15 +83,15 @@ def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft]
         passage_id = None
         content = (d.passage_content or "").strip()
         if content:
-            title = (d.passage_title or "").strip() or (bank.title or "").strip() or "阅读材料"
-            key = (title, content)
+            raw_title = (d.passage_title or "").strip()
+            key = (raw_title, content)
             psg = passages.get(key)
             if psg is None:
                 psg = ReadingPassage(
                     user_id=bank.user_id,
                     bank_id=bank.id,
                     subject=subj,
-                    title=title,
+                    title=raw_title or (bank.title or "").strip() or "阅读材料",
                     content=content,
                     grade=bank.grade,
                     status="pending",
