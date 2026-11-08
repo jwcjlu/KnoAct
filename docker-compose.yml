@@ -18,6 +18,7 @@
 #   docker compose up -d --build                # 只起基础服务
 #   docker compose up -d --build backend        # 仅重建后端（改 API 时常用，避免连编全部前端）
 #   编 student-app 前建议 df -h 根分区剩余 ≥15GB；不足时 sh scripts/docker-free-disk.sh
+#   （只清悬空镜像/过期构建缓存，保留 MySQL 卷和正在用的 pip/Flutter 层；勿改成 prune -af）
 #   docker compose --profile render up -d --build   # 连同动画渲染一起起
 # 构建/拉取加速：统一在 .env 配置（默认官方源）；Hub 可多镜像 → scripts/docker-registry-mirrors.sh
 # 首次：docker compose pull && docker compose up -d --build   日常：只 build 改动的服务
