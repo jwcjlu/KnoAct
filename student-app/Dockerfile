@@ -1,5 +1,8 @@
 # KnoAct Flutter 学生端（Web）
 # 构建上下文为 student-app/：docker build -t knoact-student-app ./student-app
+# 全局 ARG：供最终 nginx 阶段 FROM 使用（须在首个 FROM 之前声明）
+ARG NGINX_IMAGE=nginx:1.27-alpine
+
 FROM --platform=linux/amd64 debian:bookworm-slim AS build
 ARG APT_MIRROR=deb.debian.org
 ARG PUB_HOSTED_URL=https://pub.dev
@@ -65,8 +68,7 @@ RUN set -eux; \
     flutter build web --release --no-web-resources-cdn --no-wasm-dry-run --no-pub \
         --dart-define=API_BASE=""
 
-ARG NGINX_IMAGE=nginx:1.27-alpine
-FROM ${NGINX_IMAGE}
+FROM ${NGINX_IMAGE} AS web
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/build/web /usr/share/nginx/html
 EXPOSE 80
