@@ -1,6 +1,13 @@
 from app.services.ocr_import import structure_questions_from_text
 
 
+def test_structure_system_aligns_passage_blanks_to_fill_subs():
+    from app.services.ocr_import import _STRUCTURE_SYSTEM
+    assert "子题" in _STRUCTURE_SYSTEM
+    assert "fill_blank/cloze 子题" in _STRUCTURE_SYSTEM
+    assert "fill_blank / cloze 的 ____ 数量必须与 answer_json.blanks 条数一致" not in _STRUCTURE_SYSTEM
+
+
 def test_structure_fake_returns_empty(client, setup_db):
     # fake provider 返回 "[fake] ..."，解析失败 → 空列表（不抛异常）
     from app.database import SessionLocal

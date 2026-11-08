@@ -469,16 +469,49 @@ const BANK_QTYPE_CATEGORY = {
 };
 const BANK_QTYPES = Object.keys(BANK_QTYPE_LABEL);
 let bankEntryMode = 'single'; // single | reading
-let readingSubs = [{qtype:'single_choice'}];
+let readingDraft = {title:'', content:''};
+function _emptyReadingSub(){
+  return {qtype:'single_choice', question:'', analysis:'', difficulty:'medium',
+          blanks:'', pairs:'', subjAnswer:'', rubric:'', options:['','','',''],
+          correct:0, multiCorrect:[]};
+}
+let readingSubs = [_emptyReadingSub()];
 
+function captureReadingForm(){
+  const titleEl = document.getElementById('readingTitle');
+  if(!titleEl) return;
+  readingDraft.title = titleEl.value;
+  readingDraft.content = document.getElementById('readingContent')?.value || '';
+  readingSubs = readingSubs.map((sub,i)=>{
+    const suf = '-'+i;
+    const opts = [];
+    for(let j=0;j<4;j++) opts[j] = document.getElementById('bankOptLabel'+j+suf)?.value || '';
+    const picked = document.querySelector('input[name="bankSingleCorrect'+suf+'"]:checked');
+    const multi = [...document.querySelectorAll('input[name="bankMultiCorrect'+suf+'"]:checked')].map(el=>Number(el.value));
+    return {
+      qtype: sub.qtype,
+      question: document.getElementById('bankQText'+suf)?.value || '',
+      analysis: document.getElementById('bankAnalysis'+suf)?.value || '',
+      difficulty: document.getElementById('bankDifficulty'+suf)?.value || 'medium',
+      blanks: document.getElementById('bankBlanks'+suf)?.value || '',
+      pairs: document.getElementById('bankPairs'+suf)?.value || '',
+      subjAnswer: document.getElementById('bankSubjAnswer'+suf)?.value || '',
+      rubric: document.getElementById('bankRubric'+suf)?.value || '',
+      options: opts,
+      correct: picked ? Number(picked.value) : (sub.correct||0),
+      multiCorrect: multi,
+    };
+  });
+}
 function setBankEntryMode(m){
+  if(bankEntryMode==='reading') captureReadingForm();
   bankEntryMode = m;
-  if(m==='reading' && (!readingSubs || !readingSubs.length)) readingSubs = [{qtype:'single_choice'}];
+  if(m==='reading' && (!readingSubs || !readingSubs.length)) readingSubs = [_emptyReadingSub()];
   render();
 }
-function setReadingSubQtype(i, v){ readingSubs[i].qtype = v; render(); }
-function addReadingSub(){ readingSubs.push({qtype:'single_choice'}); render(); }
-function removeReadingSub(i){ if(readingSubs.length>1){ readingSubs.splice(i,1); render(); } }
+function setReadingSubQtype(i, v){ captureReadingForm(); readingSubs[i].qtype = v; render(); }
+function addReadingSub(){ captureReadingForm(); readingSubs.push(_emptyReadingSub()); render(); }
+function removeReadingSub(i){ if(readingSubs.length>1){ captureReadingForm(); readingSubs.splice(i,1); render(); } }
 
 function escapeHtml(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -601,16 +634,20 @@ async function submitBankQuestion(){
 function renderBankChoiceFields(idx){
   const suf = _fieldSuf(idx);
   const qtype = idx==null ? bankAddQtype : readingSubs[idx].qtype;
+  const sub = idx==null ? null : readingSubs[idx];
   const multi = qtype==='multi_choice';
   const n = 4;
   const optRows = [...Array(n)].map((_,i)=>{
     const letter = String.fromCharCode(65+i);
+    const val = sub && sub.options && sub.options[i] ? escapeAttr(sub.options[i]) : '';
+    const checkedSingle = !multi && ((sub ? Number(sub.correct||0) : 0) === i);
+    const checkedMulti = multi && sub && Array.isArray(sub.multiCorrect) && sub.multiCorrect.includes(i);
     const mark = multi
-      ? `<label class="bank-opt-mark"><input type="checkbox" name="bankMultiCorrect${suf}" value="${i}"/>正确答案</label>`
-      : `<label class="bank-opt-mark"><input type="radio" name="bankSingleCorrect${suf}" value="${i}" ${i===0?'checked':''}/>正确答案</label>`;
+      ? `<label class="bank-opt-mark"><input type="checkbox" name="bankMultiCorrect${suf}" value="${i}" ${checkedMulti?'checked':''}/>正确答案</label>`
+      : `<label class="bank-opt-mark"><input type="radio" name="bankSingleCorrect${suf}" value="${i}" ${checkedSingle?'checked':''}/>正确答案</label>`;
     return `<div class="bank-opt-row">
       <span class="bank-opt-letter">${letter}</span>
-      <input id="bankOptLabel${i}${suf}" class="inp" placeholder="选项 ${letter} 内容" />
+      <input id="bankOptLabel${i}${suf}" class="inp" placeholder="选项 ${letter} 内容" value="${val}" />
       ${mark}
     </div>`;
   }).join('');
@@ -623,25 +660,34 @@ function renderBankChoiceFields(idx){
 function renderBankAnswerFields(qtype, idx){
   const suf = _fieldSuf(idx);
   const cat = BANK_QTYPE_CATEGORY[qtype]||'subjective';
+  const sub = idx==null ? null : readingSubs[idx];
   if(cat==='choice') return renderBankChoiceFields(idx);
   if(cat==='blank'){
-    return `<div class="bank-q-block"><label class="bank-field-label">参考答案（多空用逗号或换行分隔）</label>
-      <textarea id="bankBlanks${suf}" class="inp" rows="2" placeholder="如：春天,播种"></textarea></div>`;
+    const reading = idx!=null;
+    const saved = sub ? escapeHtml(sub.blanks||'') : '';
+    const label = reading ? '本空参考答案（一空一题，只填这一空）' : '参考答案（多空用逗号或换行分隔）';
+    const ph = reading ? '如：游啊游' : '如：春天,播种';
+    return `<div class="bank-q-block"><label class="bank-field-label">${label}</label>
+      <textarea id="bankBlanks${suf}" class="inp" rows="2" placeholder="${ph}">${saved}</textarea></div>`;
   }
   if(cat==='match'){
+    const saved = sub ? escapeHtml(sub.pairs||'') : '';
     return `<div class="bank-q-block"><label class="bank-field-label">连线答案（每行一对，用 → 分隔）</label>
-      <textarea id="bankPairs${suf}" class="inp" rows="3" placeholder="苹果→红色"></textarea></div>`;
+      <textarea id="bankPairs${suf}" class="inp" rows="3" placeholder="苹果→红色">${saved}</textarea></div>`;
   }
+  const subj = sub ? escapeHtml(sub.subjAnswer||'') : '';
+  const rub = sub ? escapeHtml(sub.rubric||'') : '';
   return `<div class="bank-q-block">
     <label class="bank-field-label">参考答案 / 范文</label>
-    <textarea id="bankSubjAnswer${suf}" class="inp" rows="2"></textarea>
+    <textarea id="bankSubjAnswer${suf}" class="inp" rows="2">${subj}</textarea>
     <label class="bank-field-label" style="margin-top:12px">评分要点（可选）</label>
-    <textarea id="bankRubric${suf}" class="inp" rows="2"></textarea>
+    <textarea id="bankRubric${suf}" class="inp" rows="2">${rub}</textarea>
   </div>`;
 }
 function renderReadingForm(){
   const qBlocks = readingSubs.map((sub,i)=>{
     const qtypeOpts = BANK_QTYPES.map(q=>`<option value="${q}" ${q===sub.qtype?'selected':''}>${BANK_QTYPE_LABEL[q]}</option>`).join('');
+    const diff = sub.difficulty || 'medium';
     return `<div class="reading-sub">
       <div class="reading-sub-head">
         <strong>子题 ${i+1}</strong>
@@ -651,26 +697,30 @@ function renderReadingForm(){
         <label class="bank-field"><span class="bank-field-label">题型</span>
           <select onchange="setReadingSubQtype(${i}, this.value)">${qtypeOpts}</select></label>
         <label class="bank-field"><span class="bank-field-label">难度</span>
-          <select id="bankDifficulty-${i}"><option value="easy">简单</option><option value="medium" selected>中等</option><option value="hard">困难</option></select></label>
+          <select id="bankDifficulty-${i}">
+            <option value="easy" ${diff==='easy'?'selected':''}>简单</option>
+            <option value="medium" ${diff==='medium'?'selected':''}>中等</option>
+            <option value="hard" ${diff==='hard'?'selected':''}>困难</option>
+          </select></label>
       </div>
       <div class="bank-q-block">
         <label class="bank-field-label">题干</label>
-        <textarea id="bankQText-${i}" class="inp" rows="3" placeholder="围绕材料出题"></textarea>
+        <textarea id="bankQText-${i}" class="inp" rows="3" placeholder="围绕材料出题">${escapeHtml(sub.question||'')}</textarea>
       </div>
       ${renderBankAnswerFields(sub.qtype, i)}
       <div class="bank-q-block">
         <label class="bank-field-label">解析（可选）</label>
-        <textarea id="bankAnalysis-${i}" class="inp" rows="2"></textarea>
+        <textarea id="bankAnalysis-${i}" class="inp" rows="2">${escapeHtml(sub.analysis||'')}</textarea>
       </div>
     </div>`;
   }).join('');
   return `<div class="bank-q-block">
       <label class="bank-field-label">材料标题</label>
-      <input id="readingTitle" class="inp" placeholder="如：小蝌蚪找妈妈" />
+      <input id="readingTitle" class="inp" placeholder="如：小蝌蚪找妈妈" value="${escapeAttr(readingDraft.title||'')}" />
     </div>
     <div class="bank-q-block">
       <label class="bank-field-label">材料正文（可用 # 标题、**加粗**、*斜体*、&lt;u&gt;下划线&lt;/u&gt;、/音标/、____ 挖空）</label>
-      <textarea id="readingContent" class="inp" rows="6" placeholder="在这里粘贴或编写短文" oninput="updateReadingPreview()"></textarea>
+      <textarea id="readingContent" class="inp" rows="6" placeholder="在这里粘贴或编写短文" oninput="updateReadingPreview()">${escapeHtml(readingDraft.content||'')}</textarea>
       <div id="readingBlankHint" class="blank-hint"></div>
       <div class="bank-field-label" style="margin-top:10px">预览</div>
       <div id="readingPreview" class="passage-preview"></div>
@@ -715,7 +765,7 @@ async function submitReadingPassage(){
     title, content, subject: bank?.subject||'语文', grade: bank?.grade??null,
     bank_id: bankSelectedId, questions
   }});
-  if(r && r.id){ toast('阅读理解已提交审核'); readingSubs=[{qtype:'single_choice'}]; render(); }
+  if(r && r.id){ toast('阅读理解已提交审核'); readingSubs=[_emptyReadingSub()]; readingDraft={title:'', content:''}; render(); }
   else toast(apiErrorMsg(r, '提交失败'));
 }
 function renderBankQuestionForm(){
@@ -1211,7 +1261,7 @@ function renderQuestionTab(){
           <span style="font-size:12px;color:#8e9691">${qs.length} 题待审</span>
           <div style="margin-left:auto;display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
             ${g.lesson_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByLesson('${g.lesson_id}')">通过本课</button>`:''}
-            ${g.bank_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByBank('${g.bank_id}')">通过本卷</button>`:''}
+            ${g.bank_id && !g.passage_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByBank('${g.bank_id}')">通过本卷</button>`:''}
             ${g.passage_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByPassage('${g.passage_id}')">通过本篇</button>`:''}
           </div>
         </div>

@@ -204,12 +204,27 @@ def reject_question(question_id: int, _auth: User = Depends(require_role("parent
     return {"ok": True}
 
 
+def _pending_passage_ids(db: Session, **filt) -> set[int]:
+    return {pid for (pid,) in db.query(Question.passage_id).filter_by(**filt).all() if pid}
+
+
+def _publish_passages(db: Session, passage_ids: set[int]) -> None:
+    ids = [i for i in passage_ids if i]
+    if not ids:
+        return
+    db.query(ReadingPassage).filter(ReadingPassage.id.in_(ids)).update(
+        {"status": "published"}, synchronize_session=False)
+
+
 @router.post("/approve-by-lesson")
 def approve_by_lesson(lesson_id: int, d: date_type,
                       _auth: User = Depends(require_role("parent", "admin")),
                       db: Session = Depends(get_db)):
-    db.query(Question).filter_by(lesson_id=lesson_id, date=d, status="pending").update(
+    filt = {"lesson_id": lesson_id, "date": d, "status": "pending"}
+    passage_ids = _pending_passage_ids(db, **filt)
+    db.query(Question).filter_by(**filt).update(
         {"status": "published"}, synchronize_session=False)
+    _publish_passages(db, passage_ids)
     db.commit()
     return {"ok": True}
 
@@ -218,8 +233,11 @@ def approve_by_lesson(lesson_id: int, d: date_type,
 def approve_by_subject(subject: str, d: date_type,
                        _auth: User = Depends(require_role("parent", "admin")),
                        db: Session = Depends(get_db)):
-    db.query(Question).filter_by(subject=subject, date=d, status="pending").update(
+    filt = {"subject": subject, "date": d, "status": "pending"}
+    passage_ids = _pending_passage_ids(db, **filt)
+    db.query(Question).filter_by(**filt).update(
         {"status": "published"}, synchronize_session=False)
+    _publish_passages(db, passage_ids)
     db.commit()
     return {"ok": True}
 
@@ -228,8 +246,11 @@ def approve_by_subject(subject: str, d: date_type,
 def approve_by_bank(bank_id: int, d: date_type,
                     _auth: User = Depends(require_role("parent", "admin")),
                     db: Session = Depends(get_db)):
-    db.query(Question).filter_by(bank_id=bank_id, date=d, status="pending").update(
+    filt = {"bank_id": bank_id, "date": d, "status": "pending"}
+    passage_ids = _pending_passage_ids(db, **filt)
+    db.query(Question).filter_by(**filt).update(
         {"status": "published"}, synchronize_session=False)
+    _publish_passages(db, passage_ids)
     db.commit()
     return {"ok": True}
 

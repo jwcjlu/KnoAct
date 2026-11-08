@@ -3,7 +3,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 from app.main import app
 from app.database import SessionLocal
-from app.models import PdfDocument, Lesson, Question, ReadingPassage, User
+from app.models import PdfDocument, Lesson, Question, QuestionBank, ReadingPassage, User
 from conftest import auth_headers, make_account
 
 client = TestClient(app)
@@ -223,6 +223,54 @@ def test_approve_question_publishes_passage(client, setup_db):
     qid, pid, hid = q.id, psg.id, parent.id
     db.close()
     r = client.post(f"/api/questions/{qid}/approve", headers=_ph(hid))
+    assert r.status_code == 200
+    db = SessionLocal()
+    assert db.get(ReadingPassage, pid).status == "published"
+    db.close()
+
+
+def test_approve_by_subject_publishes_passage(client, setup_db):
+    db = SessionLocal()
+    parent = make_account(db, "appr_subj_psg", "parent")
+    today = date.today()
+    psg = ReadingPassage(user_id=parent.id, subject="语文", title="T", content="C", status="pending")
+    db.add(psg)
+    db.flush()
+    q = Question(passage_id=psg.id, qtype="short_answer", question="Q", answer="A",
+                 subject="语文", date=today, status="pending")
+    db.add(q)
+    db.commit()
+    pid, hid = psg.id, parent.id
+    db.close()
+    r = client.post("/api/questions/approve-by-subject",
+                    params={"subject": "语文", "d": today.isoformat()},
+                    headers=_ph(hid))
+    assert r.status_code == 200
+    db = SessionLocal()
+    assert db.get(ReadingPassage, pid).status == "published"
+    db.close()
+
+
+def test_approve_by_bank_publishes_passage(client, setup_db):
+    db = SessionLocal()
+    parent = make_account(db, "appr_bank_psg", "parent")
+    today = date.today()
+    bank = QuestionBank(user_id=parent.id, title="卷", subject="语文", source="manual")
+    db.add(bank)
+    db.flush()
+    psg = ReadingPassage(user_id=parent.id, bank_id=bank.id, subject="语文",
+                         title="T", content="C", status="pending")
+    db.add(psg)
+    db.flush()
+    q = Question(bank_id=bank.id, passage_id=psg.id, qtype="short_answer", question="Q",
+                 answer="A", date=today, status="pending")
+    db.add(q)
+    db.commit()
+    pid, bid, hid = psg.id, bank.id, parent.id
+    db.close()
+    r = client.post("/api/questions/approve-by-bank",
+                    params={"bank_id": bid, "d": today.isoformat()},
+                    headers=_ph(hid))
     assert r.status_code == 200
     db = SessionLocal()
     assert db.get(ReadingPassage, pid).status == "published"

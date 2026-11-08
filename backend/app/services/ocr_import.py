@@ -45,7 +45,9 @@ _STRUCTURE_SYSTEM = (
     'cloze|calculation|matching|short_answer|essay|application|oral",'
     '"question":"题干","options":[{"label":"选项","value":0}],"answer_json":{...},"answer":"标准答案","analysis":"解析"}。\n'
     "content 只允许这些标记：# ## ** * <u> /ipa/ ____（加粗、斜体、下划线、音标、填空）。\n"
-    "fill_blank / cloze 的 ____ 数量必须与 answer_json.blanks 条数一致。\n"
+    "阅读材料 content 中 ____ 的个数与顺序，必须等于该材料下 fill_blank/cloze 子题的个数与顺序；"
+    "每道 fill_blank/cloze 子题只对应一个空，answer_json.blanks 只含该空答案。"
+    "独立填空题（不在 passages 内）题干里的 ____ 数量须与 answer_json.blanks 条数一致。\n"
     "options 仅选择题/连线题需要；answer_json 按题型填 correct_index / blanks / pairs / rubric。\n"
     "无法确定的题 qtype 填 short_answer。"
 )

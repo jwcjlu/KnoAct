@@ -51,6 +51,19 @@ def test_create_passage_with_questions(client, setup_db):
     assert qs[1].qtype == "short_answer"
 
 
+def test_create_passage_rejects_empty_stem(client, setup_db):
+    h, bid, _ = _parent_with_bank()
+    r = client.post("/api/passages", json={
+        "title": "空题干", "content": "正文", "bank_id": bid,
+        "questions": [{"qtype": "short_answer", "question": "  ", "answer": "A"}],
+    }, headers=h)
+    assert r.status_code == 400
+    db = SessionLocal()
+    assert db.query(ReadingPassage).filter_by(title="空题干").count() == 0
+    assert db.query(Question).filter_by(bank_id=bid).count() == 0
+    db.close()
+
+
 def test_create_passage_rejects_blank_mismatch(client, setup_db):
     h, bid, _ = _parent_with_bank()
     body = {
