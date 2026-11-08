@@ -1,7 +1,10 @@
 import json
 from datetime import datetime, date, timedelta
 from app.database import SessionLocal, Base, engine
-from app.models import User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question, UserDocument, ChildConfig
+from app.models import (
+    User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question,
+    UserDocument, ChildConfig, QuestionBank,
+)
 from app.services.task_gen import generate_tasks_for_user, _current_lesson
 
 
@@ -321,4 +324,32 @@ def test_dictation_isolates_due_words_across_users():
     got = {w["word"] for w in json.loads(t.content)}
     # A 的听写只含本课新词，绝不能混入 B 的到期旧词
     assert got == {"白鹭", "矗立"}
+    db.close()
+
+
+def test_generate_bank_practice_when_flagged():
+    db = SessionLocal()
+    parent = User(name="家长", role="parent")
+    db.add(parent); db.flush()
+    uid, _l1 = _setup(db)
+    db.query(User).filter_by(id=uid).update({"parent_id": parent.id})
+    bank = QuestionBank(
+        user_id=parent.id, title="每日卷", subject="语文",
+        tags=json.dumps({"include_daily_task": True}, ensure_ascii=False),
+    )
+    db.add(bank); db.flush()
+    db.add(Question(
+        bank_id=bank.id, qtype="single_choice", qtype_category="choice",
+        question="测试题", status="published", answer_json='{"correct_index":0}',
+    ))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(
+        user_id=uid, date=date.today(), task_type="practice", subject="语文",
+    ).first()
+    assert t is not None
+    payload = json.loads(t.content)
+    assert payload["bank_id"] == bank.id
+    assert len(payload["question_ids"]) == 1
     db.close()

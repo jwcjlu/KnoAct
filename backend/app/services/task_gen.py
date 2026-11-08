@@ -4,7 +4,10 @@ from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
-from ..models import User, Lesson, LearningProgress, WordBank, KnowledgePoint, WordMastery, KnowledgeMastery, Task, Text, UserDocument
+from ..models import (
+    User, Lesson, LearningProgress, WordBank, KnowledgePoint, WordMastery, KnowledgeMastery,
+    Task, Text, UserDocument, Question, QuestionBank,
+)
 
 
 def _current_lesson(db: Session, subject: str, user_id: int):
@@ -199,6 +202,64 @@ def _gen_math_practice(db, lesson, user_id=None, bucket_id=None):
     )
 
 
+def _bank_include_daily(tags_json: str) -> bool:
+    try:
+        return bool(json.loads(tags_json or "{}").get("include_daily_task"))
+    except (ValueError, TypeError):
+        return False
+
+
+def _gen_bank_practice_tasks(db: Session, user_id: int, day: date):
+    """从家长勾选「纳入每日任务」的卷子中抽已发布题，生成 task_type=practice。"""
+    child = db.get(User, user_id)
+    if not child or not child.parent_id:
+        return []
+    n_pick = _default_count(db, "task_bank_practice_count", 3, child_id=user_id)
+    if n_pick <= 0:
+        return []
+    banks = (
+        db.query(QuestionBank)
+        .filter_by(user_id=child.parent_id, status="active")
+        .order_by(QuestionBank.id)
+        .all()
+    )
+    created: list[Task] = []
+    used_subjects: set[str] = set()
+    for bank in banks:
+        if not _bank_include_daily(bank.tags):
+            continue
+        subj = (bank.subject or "").strip() or "综合"
+        if subj in used_subjects:
+            continue
+        if db.query(Task).filter_by(user_id=user_id, subject=subj, date=day, task_type="practice").first():
+            continue
+        pool = (
+            db.query(Question)
+            .filter_by(bank_id=bank.id, status="published")
+            .order_by(Question.id)
+            .all()
+        )
+        if not pool:
+            continue
+        offset = day.toordinal() % len(pool)
+        picked = [pool[(offset + i) % len(pool)] for i in range(min(n_pick, len(pool)))]
+        created.append(Task(
+            task_type="practice",
+            subject=subj,
+            title=f"{bank.title} 题库练习",
+            detail=f"每日抽练 · {len(picked)} 道题",
+            content=json.dumps({
+                "bank_id": bank.id,
+                "bank_title": bank.title,
+                "question_ids": [q.id for q in picked],
+            }, ensure_ascii=False),
+            points=15,
+            content_status="published",
+        ))
+        used_subjects.add(subj)
+    return created
+
+
 def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = False):
     """为单个孩子生成当天各科任务。幂等：同 (user_id, subject, date) 已存在则跳过。
     force=True 时先删除该孩子当天全部任务再重新生成（家长手动触发覆盖重生成）。"""
@@ -233,6 +294,11 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
                 gen.date = day
                 gen.bucket_id = bucket.id
                 db.add(gen)
+    for gen in _gen_bank_practice_tasks(db, user_id, day):
+        gen.user_id = user_id
+        gen.date = day
+        gen.bucket_id = bucket.id
+        db.add(gen)
     db.commit()
 
 
