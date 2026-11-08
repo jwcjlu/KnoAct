@@ -976,9 +976,9 @@ git commit -m "feat(bank): extend add_question with rich structure"
 - Modify: `parent-web/index.html`（新增导航项）
 - Modify: `parent-web/app.js`（新增 `renderBankManage` 等）
 
-- [ ] **Step 1:** 在 `index.html` 侧边导航加一项「题库管理」，触发 `renderBankManage()`。
+- [x] **Step 1:** 在 `index.html` 侧边导航加一项「题库管理」，触发 `renderBankManage()`。（导航经 `PARENT_TABS` / `app.js`）
 
-- [ ] **Step 2:** 在 `app.js` 加 `renderBankManage()`：顶部「新建卷」表单（标题/学科/年级）+ 卷列表（调 `GET /api/banks`）；点某卷进入「录入题目」表单，支持题型下拉（复用 `QTYPE_LABEL` 中文名，加一个 taxonomy 到 label 的映射）与按题型动态字段（单选/多选/判断/填空/连线/简答/作文）。提交调 `POST /api/questions`。
+- [x] **Step 2:** 在 `app.js` 加 `renderBankManage()`：顶部「新建卷」表单（标题/学科/年级）+ 卷列表（调 `GET /api/banks`）；点某卷进入「录入题目」表单，支持题型下拉（复用 `QTYPE_LABEL` 中文名，加一个 taxonomy 到 label 的映射）与按题型动态字段（单选/多选/判断/填空/连线/简答/作文）。提交调 `POST /api/questions`。
 
 - [ ] **Step 3:** 手动验证（后端起来后）：建卷成功 → 录入一道单选题成功 → `GET /api/banks/{id}/questions` 能在审核通过后看到它。
 
@@ -994,9 +994,9 @@ git commit -m "feat(parent-web): question bank manage page (create bank + add qu
 **Files:**
 - Modify: `parent-web/app.js`（扩展 `QTYPE_LABEL` + 审核渲染）
 
-- [ ] **Step 1:** 扩展 `QTYPE_LABEL`：新增 taxonomy 值到中文名映射（或复用后端同一份，前端写死一份中文表）。
+- [x] **Step 1:** 扩展 `QTYPE_LABEL`：新增 taxonomy 值到中文名映射（或复用后端同一份，前端写死一份中文表）。
 
-- [ ] **Step 2:** 审核卡片（`reviewGroups` 渲染处）按 `qtype` 展示：选择题显示选项列表、填空题显示答案、主观题显示解析；`approve`/`reject` 按钮保持原逻辑。
+- [x] **Step 2:** 审核卡片（`reviewGroups` 渲染处）按 `qtype` 展示：选择题显示选项列表、填空题显示答案、主观题显示解析；`approve`/`reject` 按钮保持原逻辑。
 
 - [ ] **Step 3:** 手动验证：录入一道选择题 → 审核页能看到选项与答案 → approve 后 `GET /api/banks/{id}/questions` 能拉到。
 
@@ -1014,11 +1014,11 @@ git commit -m "feat(parent-web): multi-type preview in review page"
 - Modify: `student-app/lib/core/router.dart`（注册路由/入口）
 - Test: `student-app/test/bank_exercise_test.dart`
 
-- [ ] **Step 1:** 写失败测试：`flutter test` 断言「题库练习」页能渲染题干与选项。
+- [x] **Step 1:** 写失败测试：`flutter test` 断言「题库练习」页能渲染题干与选项。
 
-- [ ] **Step 2:** 实现 `BankExercisePage`：调 `GET /api/banks/{id}/questions` 拉题 → 按 `qtype` 渲染控件（单选 RadioListTile / 多选 CheckboxListTile / 填空 TextField / 连线省略为下拉配对 / 简答作文多行 TextField）→ 提交 `POST /api/banks/submit` → 展示判分结果。
+- [x] **Step 2:** 实现 `BankExercisePage`：调 `GET /api/banks/{id}/questions` 拉题 → 按 `qtype` 渲染控件（单选 RadioListTile / 多选 CheckboxListTile / 填空 TextField / 连线省略为下拉配对 / 简答作文多行 TextField）→ 提交 `POST /api/banks/submit` → 展示判分结果。
 
-- [ ] **Step 3:** `flutter analyze && flutter test` 通过。
+- [x] **Step 3:** `flutter analyze && flutter test` 通过。
 
 - [ ] **Step 4: 提交**
 
@@ -1038,6 +1038,6 @@ git commit -m "feat(student-app): bank exercise page"
 ## 遗留（明确不做，避免计划外蔓延）
 
 1. **旧数据迁移脚本**：`LEGACY_QTYPE_MAP` 常量已定义，但「把库里旧 4 值 `qtype` 批量更新为 taxonomy 值」的迁移脚本不在本计划。现有旧数据 `answer_json` 为空、判分回落「仅展示/人工批改」，功能不破。如需，另行一个 data-migration 任务。
-2. **拍照上传端点**：`OcrAdapter`/`ocr_import` 已就绪，但「家长端上传照片 → 调 `ocr_image` → 结构化落库」的 HTTP 端点（如 `POST /api/banks/photo-import`）不在本计划——它依赖 vision 模型配置与上传落盘，留作后续任务（或实现时若你有 vision 配置再加）。
+2. **拍照上传端点**：已实现 `POST /api/banks/{bank_id}/photo-import` + 家长端「拍照导入」；未配置 vision 时 OCR/结构化回落空列表，不抛错。
 3. **第三方 tiku.cn 真实接入**：占位 stub，需爬虫/授权信息后续确认。
-4. **「纳入每日任务」抽取规则**：spec 标 P2，本计划未展开 `task_gen` 的抽取逻辑。
+4. **「纳入每日任务」抽取规则**：已实现——`QuestionBank.tags.include_daily_task` + `task_gen._gen_bank_practice_tasks`（`task_type=practice`，题量配置键 `task_bank_practice_count`）。
