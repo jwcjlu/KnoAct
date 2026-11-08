@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
 from app.main import app
 from app.database import SessionLocal
-from app.models import Mistake, Question, QuestionBank
+from app.models import Mistake, Question, QuestionBank, ReadingPassage
+from app.core.source_adapter import QuestionDraft
+from app.routers.bank import _persist_drafts
 from conftest import auth_headers, make_account, parent_child
 
 client = TestClient(app)
@@ -156,3 +158,46 @@ def test_photo_import_empty_without_ocr(client, setup_db):
                     files={"file": ("x.png", png, "image/png")}, headers=h)
     assert r.status_code == 200
     assert r.json()["count"] == 0
+
+
+def test_persist_drafts_groups_passage(client, setup_db):
+    db = SessionLocal()
+    from conftest import make_account
+    p = make_account(db, "persist_psg", "parent")
+    bank = QuestionBank(user_id=p.id, title="卷", subject="英语", source="manual")
+    db.add(bank)
+    db.flush()
+    drafts = [
+        QuestionDraft(qtype="short_answer", question="Q1", answer="A",
+                      passage_title="Apple", passage_content="I like apples."),
+        QuestionDraft(qtype="fill_blank", question="Q2", answer="red",
+                      passage_title="Apple", passage_content="I like apples."),
+        QuestionDraft(qtype="short_answer", question="独立题", answer="B"),
+    ]
+    ids = _persist_drafts(db, bank, drafts, "photo")
+    db.commit()
+    assert len(ids) == 3
+    qs = db.query(Question).filter(Question.id.in_(ids)).order_by(Question.id).all()
+    assert qs[0].passage_id is not None
+    assert qs[0].passage_id == qs[1].passage_id
+    assert qs[2].passage_id is None
+    psg = db.get(ReadingPassage, qs[0].passage_id)
+    assert psg.title == "Apple"
+    assert psg.content == "I like apples."
+    assert psg.bank_id == bank.id
+    assert psg.status == "pending"
+    db.close()
+
+
+def test_tiku_item_reads_passage_fields():
+    from app.core.tiku_cn_adapter import item_to_draft
+    d = item_to_draft({
+        "question": "What is the main idea?",
+        "type": "short_answer",
+        "answer": "spring",
+        "passage": "Spring is coming.",
+        "passage_title": "Spring",
+    })
+    assert d is not None
+    assert d.passage_content == "Spring is coming."
+    assert d.passage_title == "Spring"

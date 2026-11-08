@@ -74,11 +74,32 @@ def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft]
     today = date_type.today()
     subj = (bank.subject or "").strip()
     ids: list[int] = []
+    passages: dict[tuple[str, str], ReadingPassage] = {}
     for d in drafts:
         if not d.question:
             continue
         category = CATEGORY_OF_QTYPE.get(d.qtype, "subjective")
         tags = {**(d.tags or {}), "source": tag_source}
+        passage_id = None
+        content = (d.passage_content or "").strip()
+        if content:
+            title = (d.passage_title or "").strip() or (bank.title or "").strip() or "阅读材料"
+            key = (title, content)
+            psg = passages.get(key)
+            if psg is None:
+                psg = ReadingPassage(
+                    user_id=bank.user_id,
+                    bank_id=bank.id,
+                    subject=subj,
+                    title=title,
+                    content=content,
+                    grade=bank.grade,
+                    status="pending",
+                )
+                db.add(psg)
+                db.flush()
+                passages[key] = psg
+            passage_id = psg.id
         q = Question(
             bank_id=bank.id,
             qtype=d.qtype or "short_answer",
@@ -93,6 +114,7 @@ def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft]
             subject=subj,
             date=today,
             status="pending",
+            passage_id=passage_id,
         )
         db.add(q)
         db.flush()

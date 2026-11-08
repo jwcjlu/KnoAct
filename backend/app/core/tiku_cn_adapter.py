@@ -189,6 +189,14 @@ def item_to_draft(item: dict) -> QuestionDraft | None:
     ext_id = item.get("id") or item.get("question_id") or item.get("item_id")
     if ext_id is not None:
         tags["tiku_id"] = str(ext_id)
+    passage_content = str(
+        item.get("passage") or item.get("article") or item.get("material")
+        or item.get("passage_content") or ""
+    ).strip()
+    passage_title = str(
+        item.get("passage_title") or item.get("article_title")
+        or item.get("material_title") or ""
+    ).strip()
     return QuestionDraft(
         qtype=qtype,
         question=stem,
@@ -198,6 +206,8 @@ def item_to_draft(item: dict) -> QuestionDraft | None:
         analysis=analysis,
         difficulty=diff,
         tags=tags,
+        passage_title=passage_title,
+        passage_content=passage_content,
     )
 
 
