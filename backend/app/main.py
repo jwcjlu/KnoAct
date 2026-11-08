@@ -42,12 +42,12 @@ def _ensure_db_tables() -> None:
     db = SessionLocal()
     try:
         try:
-            from .migrate_question_bank import _sqlite_relax_questions_lesson_id
+            from .migrate_question_bank import migrate as _migrate_question_bank
 
-            _sqlite_relax_questions_lesson_id(db)
+            _migrate_question_bank(db)
         except Exception as exc:
             db.rollback()
-            _log.warning("questions.lesson_id 放宽迁移失败: %s", exc)
+            _log.warning("questions 题库列迁移失败: %s", exc)
         try:
             from .migrate_reading_passage import migrate as _migrate_reading_passage
 
