@@ -88,7 +88,12 @@ let configMap = {};
 let aiConfig = {provider:'deepseek', model:'deepseek-chat', key:'', baseUrl:''};
 let aiModelOptions = [];  // 中转站拉取到的动态模型列表
 let ttsModelOptions = []; // 中转站拉取到的动态语音模型列表
-let ttsConfig = {provider:'minimax', voice:'清澈男声', key:'', baseUrl:'', model:'speech-2.8-hd', speed:1.0, repeat:2};
+let ttsConfig = {provider:'minimax', voice:'清澈男声', key:'', baseUrl:'', model:'speech-2.8-hd', speed:1.0, repeat:2, appId:'', apiSecret:''};
+const MS_TTS_VOICES = {
+  xunfei: ['讯飞女声','讯飞男声','标准普通话'],
+  minimax: ['male-qn-qingse','female-shaonv','presenter_male'],
+  openai: ['alloy','echo','fable','onyx','nova','shimmer'],
+};
 
 // 家长端任务审核
 let parentTaskDate = '';   // 家长端任务查看的日期（默认今天）
@@ -445,6 +450,8 @@ async function loadConfig(){
   ttsConfig.model = configMap.tts_model || 'speech-2.8-hd';
   ttsConfig.speed = parseFloat(configMap.tts_speed || '1.0');
   ttsConfig.repeat = parseInt(configMap.tts_repeat || '2');
+  ttsConfig.appId = configMap.tts_app_id || '';
+  ttsConfig.apiSecret = configMap.tts_api_secret || '';
 }
 
 // ---- 题库管理 ----
@@ -463,6 +470,11 @@ const BANK_QTYPES = Object.keys(BANK_QTYPE_LABEL);
 let bankList = [];
 let bankSelectedId = null;
 let bankAddQtype = 'single_choice';
+const BANK_SOURCE_LABEL = {manual:'手动录入', photo:'拍照识别', third_party:'第三方/混合'};
+function bankFormDefaultGrade(){
+  const c = children.find(x=>x.id===uid);
+  return c && c.grade ? String(c.grade) : '';
+}
 
 async function loadBankList(){
   const rows = await api('/api/banks');
@@ -549,80 +561,138 @@ async function submitBankQuestion(){
 function renderBankChoiceFields(){
   const multi = bankAddQtype==='multi_choice';
   const n = 4;
-  const optRows = [...Array(n)].map((_,i)=>`
-    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
-      <span style="font-size:12px;color:#78817b;width:52px">${String.fromCharCode(65+i)}</span>
-      <input id="bankOptLabel${i}" class="inp" style="flex:1" placeholder="选项文字" />
-      ${multi?`<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" name="bankMultiCorrect" value="${i}"/>正确</label>`:
-        `<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="radio" name="bankSingleCorrect" value="${i}" ${i===0?'checked':''}/>正确</label>`}
-    </div>`).join('');
-  return `<div style="margin-top:12px">
-    <div style="font-size:13px;font-weight:600;color:var(--ink2)">选项</div>
-    ${optRows}
+  const optRows = [...Array(n)].map((_,i)=>{
+    const letter = String.fromCharCode(65+i);
+    const mark = multi
+      ? `<label class="bank-opt-mark"><input type="checkbox" name="bankMultiCorrect" value="${i}"/>正确答案</label>`
+      : `<label class="bank-opt-mark"><input type="radio" name="bankSingleCorrect" value="${i}" ${i===0?'checked':''}/>正确答案</label>`;
+    return `<div class="bank-opt-row">
+      <span class="bank-opt-letter">${letter}</span>
+      <input id="bankOptLabel${i}" class="inp" placeholder="选项 ${letter} 内容，可含公式或图片链接" />
+      ${mark}
+    </div>`;
+  }).join('');
+  const hint = multi ? '可多选「正确答案」' : '勾选唯一正确答案';
+  return `<div class="bank-q-block">
+    <span class="bank-field-label">选项 <span style="font-weight:500;color:#9aa39d">${hint}</span></span>
+    <div class="bank-opt-list">${optRows}</div>
   </div>`;
 }
 function renderBankQuestionForm(){
   const cat = BANK_QTYPE_CATEGORY[bankAddQtype]||'subjective';
   const qtypeOpts = BANK_QTYPES.map(q=>`<option value="${q}" ${q===bankAddQtype?'selected':''}>${BANK_QTYPE_LABEL[q]}</option>`).join('');
+  const bank = bankList.find(b => b.id === bankSelectedId);
+  const bankHint = bank ? `当前卷子：${bank.title}` : '';
   let extra = '';
   if(cat==='choice') extra = renderBankChoiceFields();
   else if(cat==='blank'){
-    extra = `<div style="margin-top:12px"><label style="font-size:13px;font-weight:600">参考答案（多空用逗号或换行分隔）</label>
-      <textarea id="bankBlanks" class="inp" rows="2" style="width:100%;margin-top:6px" placeholder="如：春天,播种"></textarea></div>`;
+    extra = `<div class="bank-q-block"><label class="bank-field-label">参考答案（多空用逗号或换行分隔）</label>
+      <textarea id="bankBlanks" class="inp" rows="2" placeholder="如：春天,播种"></textarea></div>`;
   }else if(cat==='match'){
-    extra = `<div style="margin-top:12px"><label style="font-size:13px;font-weight:600">连线答案（每行一对，用 → 分隔）</label>
-      <textarea id="bankPairs" class="inp" rows="3" style="width:100%;margin-top:6px" placeholder="苹果→红色&#10;香蕉→黄色"></textarea></div>`;
+    extra = `<div class="bank-q-block"><label class="bank-field-label">连线答案（每行一对，用 → 分隔）</label>
+      <textarea id="bankPairs" class="inp" rows="3" placeholder="苹果→红色&#10;香蕉→黄色"></textarea></div>`;
   }else{
-    extra = `<div style="margin-top:12px"><label style="font-size:13px;font-weight:600">参考答案 / 范文</label>
-      <textarea id="bankSubjAnswer" class="inp" rows="2" style="width:100%;margin-top:6px"></textarea>
-      <label style="font-size:13px;font-weight:600;display:block;margin-top:10px">评分要点（可选）</label>
-      <textarea id="bankRubric" class="inp" rows="2" style="width:100%;margin-top:6px"></textarea></div>`;
+    extra = `<div class="bank-q-block">
+      <label class="bank-field-label">参考答案 / 范文</label>
+      <textarea id="bankSubjAnswer" class="inp" rows="2" placeholder="展示给孩子核对或家长审核用"></textarea>
+      <label class="bank-field-label" style="margin-top:12px">评分要点（可选，主观题 AI 判分参考）</label>
+      <textarea id="bankRubric" class="inp" rows="2" placeholder="如：须提到「梗概」与主旨"></textarea>
+    </div>`;
   }
-  return `<div class="parent-panel" style="grid-column:1/-1;margin-top:16px">
+  return `<div class="parent-panel bank-qform" style="grid-column:1/-1;margin-top:16px">
     <div class="head"><div class="ic green">${icon('pen',20)}</div>
-      <div><h3>录入题目</h3><div class="sub">提交后进入「题目审核台」，通过后孩子可练习</div></div></div>
+      <div><h3>录入题目</h3><div class="sub">${escapeAttr(bankHint || '提交后进入「题目审核台」，通过后孩子可练习')}</div></div></div>
     <div class="bd">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <label style="font-size:13px;font-weight:600">题型<select id="bankQtypeSelect" class="inp" style="width:100%;margin-top:6px" onchange="setBankAddQtype(this.value)">${qtypeOpts}</select></label>
-        <label style="font-size:13px;font-weight:600">难度<select id="bankDifficulty" class="inp" style="width:100%;margin-top:6px"><option value="easy">简单</option><option value="medium" selected>中等</option><option value="hard">困难</option></select></label>
+      <div class="bank-q-meta">
+        <label class="bank-field"><span class="bank-field-label">题型</span>
+          <select id="bankQtypeSelect" onchange="setBankAddQtype(this.value)">${qtypeOpts}</select></label>
+        <label class="bank-field"><span class="bank-field-label">难度</span>
+          <select id="bankDifficulty"><option value="easy">简单</option><option value="medium" selected>中等</option><option value="hard">困难</option></select></label>
       </div>
-      <label style="font-size:13px;font-weight:600;display:block;margin-top:12px">题干</label>
-      <textarea id="bankQText" class="inp" rows="3" style="width:100%;margin-top:6px" placeholder="请输入题目"></textarea>
+      <div class="bank-q-block">
+        <label class="bank-field-label">题干</label>
+        <textarea id="bankQText" class="inp" rows="4" placeholder="请输入题目正文，支持换行"></textarea>
+      </div>
       ${extra}
-      <label style="font-size:13px;font-weight:600;display:block;margin-top:12px">解析（可选）</label>
-      <textarea id="bankAnalysis" class="inp" rows="2" style="width:100%;margin-top:6px"></textarea>
-      <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-        <button class="btn-primary" onclick="submitBankQuestion()">提交审核</button>
-        <label class="btn-ghost" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer">
-          ${icon('camera',16)} 拍照导入
-          <input type="file" accept="image/*" style="display:none" onchange="uploadBankPhoto(this)">
-        </label>
-        <span style="font-size:12px;color:#8e9691">OCR 自动结构化，进审核台校对</span>
+      <div class="bank-q-block">
+        <label class="bank-field-label">解析（可选）</label>
+        <textarea id="bankAnalysis" class="inp" rows="2" placeholder="审核与孩子练习时可查看"></textarea>
+      </div>
+      <div class="bank-actions">
+        <div class="bank-actions-primary">
+          <button type="button" class="btn-primary" onclick="submitBankQuestion()">提交审核</button>
+        </div>
+        <div class="bank-import-bar">
+          <div class="bank-import-title">批量导入（进审核台校对）</div>
+          <div class="bank-import-btns">
+            <button type="button" class="btn-ghost" onclick="syncBankFromTiku()">${icon('search',16)} tiku.cn</button>
+            <button type="button" class="btn-ghost" onclick="syncBankFromXuekubao()">${icon('search',16)} 学库宝选题</button>
+            <label class="btn-ghost" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer;margin:0">
+              ${icon('camera',16)} 拍照导入
+              <input type="file" accept="image/*" style="display:none" onchange="uploadBankPhoto(this)">
+            </label>
+          </div>
+          <div class="bank-import-hint">拍照与第三方同步的题目均需先审核，通过后才会进入练习。</div>
+        </div>
       </div>
     </div>
   </div>`;
 }
 function renderBankManage(){
-  const rows = bankList.map(b=>`
-    <div class="pdf-row" style="cursor:pointer;border-radius:12px;${b.id===bankSelectedId?'background:#f5f7ff;border:1px solid #c5d0ff':''}" onclick="selectBank(${b.id})">
+  const defGrade = bankFormDefaultGrade();
+  const gradeOpts = `<option value="">不指定</option>${[1,2,3,4,5,6].map(g =>
+    `<option value="${g}" ${defGrade === String(g) ? 'selected' : ''}>小学${g}年级</option>`
+  ).join('')}`;
+  const rows = bankList.map(b=>{
+    const subj = b.subject || '未设学科';
+    const src = BANK_SOURCE_LABEL[b.source] || b.source || '手动录入';
+    const cnt = typeof b.question_count === 'number' ? `${b.question_count} 题` : '';
+    const daily = b.include_daily_task ? '<span class="bank-tag">每日任务</span>' : '';
+    const sel = b.id===bankSelectedId;
+    return `<div class="pdf-row bank-row ${sel?'bank-row-on':''}" onclick="selectBank(${b.id})">
       <div class="ic">${icon('book',22)}</div>
-      <div><div class="nm">${escapeAttr(b.title)}</div>
-        <div class="meta">${escapeAttr(b.subject||'未设学科')}${b.grade?(' · '+b.grade+'年级'):''} · 来源 ${escapeAttr(b.source||'manual')}</div></div>
-    </div>`).join('');
-  const form = bankSelectedId ? renderBankQuestionForm() : `<div class="parent-panel" style="grid-column:1/-1;margin-top:16px"><div class="bd" style="color:#8e9691;padding:24px">← 选择左侧卷子后开始录入题目</div></div>`;
+      <div class="bank-row-body">
+        <div class="nm">${escapeAttr(b.title)} ${daily}</div>
+        <div class="meta">${escapeAttr(subj)}${b.grade?(' · '+b.grade+'年级'):''}${cnt?(' · '+cnt):''} · ${escapeAttr(src)}</div>
+      </div>
+      <div class="st ${sel?'done':''}">${sel?'录入中':'选择'}</div>
+    </div>`;
+  }).join('');
+  const form = bankSelectedId ? renderBankQuestionForm() : `<div class="parent-panel" style="grid-column:1/-1;margin-top:16px"><div class="bd" style="color:#8e9691;padding:24px">在下方列表点选一张卷子，即可录入、同步或拍照导入题目</div></div>`;
   return `<div class="parent-grid" style="display:block">
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('grid',20)}</div>
         <div><h3>题库管理</h3><div class="sub">新建卷子并录入题目，经审核后进入学生端练习</div></div></div>
       <div class="bd">
-        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
-          <label style="font-size:13px;font-weight:600">标题<input id="bankNewTitle" class="inp" style="margin-left:8px;width:160px" placeholder="如：三年级数学期末"/></label>
-          <label style="font-size:13px;font-weight:600">学科<select id="bankNewSubject" class="inp" style="margin-left:8px"><option value="">未设</option><option>语文</option><option>数学</option><option>英语</option></select></label>
-          <label style="font-size:13px;font-weight:600">年级<select id="bankNewGrade" class="inp" style="margin-left:8px"><option value="">未设</option>${[1,2,3,4,5,6].map(g=>`<option value="${g}">${g}</option>`).join('')}</select></label>
-          <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="bankIncludeDaily"/> 纳入每日任务</label>
-          <button class="btn-primary" onclick="createBankFromForm()">新建卷</button>
-        </div>
-        <div style="margin-top:20px">${rows || '<div style="color:#8e9691;padding:12px 0">暂无卷子，请先新建</div>'}</div>
+        <form class="bank-create" onsubmit="event.preventDefault();createBankFromForm();">
+          <div class="bank-create-grid">
+            <label class="bank-field">
+              <span class="bank-field-label">卷子标题</span>
+              <input id="bankNewTitle" class="inp" type="text" placeholder="如：五年级数学单元测" autocomplete="off"/>
+            </label>
+            <label class="bank-field">
+              <span class="bank-field-label">学科</span>
+              <select id="bankNewSubject" class="inp">
+                <option value="">请选择</option>
+                <option>语文</option><option>数学</option><option>英语</option>
+              </select>
+            </label>
+            <label class="bank-field">
+              <span class="bank-field-label">年级</span>
+              <select id="bankNewGrade" class="inp">${gradeOpts}</select>
+            </label>
+          </div>
+          <div class="bank-create-foot">
+            <label class="bank-daily">
+              <input type="checkbox" id="bankIncludeDaily"/>
+              <span>纳入每日任务</span>
+              <span class="bank-daily-hint">勾选后，审核通过的题可进入孩子首页练习任务</span>
+            </label>
+            <button type="submit" class="btn-primary">新建卷子</button>
+          </div>
+        </form>
+        <div class="bank-list-head">我的卷子 ${bankList.length ? `（${bankList.length}）` : ''}</div>
+        <div class="bank-list">${rows || '<div class="bank-empty">还没有卷子，填写上方信息并点击「新建卷子」</div>'}</div>
       </div>
     </div>
     ${form}
@@ -662,6 +732,195 @@ async function approveByLesson(lessonId){
 async function approveByBank(bankId){
   await api(`/api/questions/approve-by-bank?bank_id=${bankId}&d=${todayStr()}`, {method:'POST'});
   await loadReviewQuestions(); render();
+}
+async function syncBankFromTiku(){
+  if(!bankSelectedId){ toast('请先选择卷子'); return; }
+  const keyword = (prompt('tiku.cn 搜索关键词（可空）','')||'').trim();
+  const pageSize = Number(prompt('每页拉取条数（1-20）','10')||'10');
+  const r = await api(`/api/banks/${bankSelectedId}/sync-tiku`, {
+    method:'POST',
+    body:{keyword, page:1, page_size:Math.max(1,Math.min(20,pageSize||10)), max_import:20},
+  });
+  if(r && r.count>0){ toast(`已导入 ${r.count} 道题，请到审核台确认`); await loadBankList(); }
+  else toast((r && r.message) || apiErrorMsg(r, '同步失败或未配置 TIKU_CN_API'));
+}
+// 与学库宝 subjectEditionApi 一致：学段 → 年级(上下册) → 学科 → 教材版本（code 传给 chapterApi）
+const XKB_LEVEL_LABELS = ['学段','年级','学科','教材版本'];
+let xkbPicker = {
+  open: false, loading: false, error: '', tree: [], sel: ['','','',''],
+  chapters: null, knowledge: [], filter: '', picked: null, page: 1,
+};
+
+function xkbLevelOptions(depth){
+  let nodes = xkbPicker.tree;
+  if(!Array.isArray(nodes)) return [];
+  for(let i = 0; i < depth; i++){
+    const code = xkbPicker.sel[i];
+    if(!code) return [];
+    const hit = nodes.find(n => String(n.code ?? n.id) === String(code));
+    nodes = hit && hit.child ? hit.child : [];
+  }
+  return nodes;
+}
+function xkbSetLevel(depth, code){
+  xkbPicker.sel[depth] = code || '';
+  for(let i = depth + 1; i < XKB_LEVEL_LABELS.length; i++) xkbPicker.sel[i] = '';
+  xkbPicker.chapters = null;
+  xkbPicker.knowledge = [];
+  xkbPicker.picked = null;
+  if(xkbPicker.sel[0]) loadXkbChapters();
+  else paintXkbModal();
+}
+function xkbWalkChapters(nodes, path, out){
+  for(const n of nodes || []){
+    if(!n || typeof n !== 'object') continue;
+    const name = (n.name || n.title || '').trim();
+    const kids = n.child || n.children || [];
+    const oldId = (n.oldId != null ? n.oldId : n.oldid != null ? n.oldid : n.knowledgeId);
+    const kid = oldId != null ? String(oldId).trim() : '';
+    const nextPath = name ? [...path, name] : path;
+    if(kid && kid !== '0'){
+      out.push({id: kid, name: name || kid, path: nextPath.join(' › ')});
+    }
+    if(kids.length) xkbWalkChapters(kids, nextPath, out);
+  }
+}
+function xkbFilteredKnowledge(){
+  const q = (xkbPicker.filter || '').trim().toLowerCase();
+  if(!q) return xkbPicker.knowledge;
+  return xkbPicker.knowledge.filter(k =>
+    k.name.toLowerCase().includes(q) || k.path.toLowerCase().includes(q) || k.id.toLowerCase().includes(q));
+}
+function closeXuekubaoPicker(){
+  xkbPicker.open = false;
+  paintXkbModal();
+}
+function guessXkbDefaults(){
+  const bank = bankList.find(b => b.id === bankSelectedId);
+  const subj = (bank && bank.subject) || '';
+  const grade = bank && bank.grade ? String(bank.grade) : bankFormDefaultGrade();
+  const pick = (nodes, pred) => {
+    if(!nodes || !nodes.length) return '';
+    const hit = nodes.find(pred);
+    return hit ? String(hit.code ?? hit.id) : '';
+  };
+  let nodes = xkbPicker.tree;
+  const g = Number(grade);
+  const phaseHint = g >= 7 ? '初' : g >= 10 ? '高' : '小';
+  xkbPicker.sel[0] = pick(nodes, n => (n.name || '').includes(phaseHint)) || pick(nodes, () => true);
+  nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[0]) || {}).child || [];
+  xkbPicker.sel[1] = pick(nodes, n => grade && (
+    (n.name || '').includes(`${grade}年级`) || (n.name || '').includes(`年级${grade}`) ||
+    (n.name || '').includes(`${['一','二','三','四','五','六','七','八','九'][grade-1] || grade}年级`)
+  )) || pick(nodes, () => true);
+  nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[1]) || {}).child || [];
+  xkbPicker.sel[2] = pick(nodes, n => subj && (n.name || '').includes(subj)) || pick(nodes, () => true);
+  nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[2]) || {}).child || [];
+  xkbPicker.sel[3] = nodes.length === 1 ? String(nodes[0].code ?? nodes[0].id) : pick(nodes, () => true);
+}
+function xkbPickKnowledge(id){
+  xkbPicker.picked = id;
+  paintXkbModal();
+}
+async function openXuekubaoPicker(){
+  if(!bankSelectedId){ toast('请先选择卷子'); return; }
+  xkbPicker = {open:true, loading:true, error:'', tree:[], sel:['','','',''], chapters:null, knowledge:[], filter:'', picked:null, page:1};
+  paintXkbModal();
+  try{
+    const r = await api('/api/xuekubao/subject-edition', {method:'POST', body:{}});
+    if(r && r.detail){ throw new Error(r.detail); }
+    xkbPicker.tree = Array.isArray(r && r.data) ? r.data : [];
+    if(!xkbPicker.tree.length){ xkbPicker.error = '未获取到教材目录，请检查学库宝密钥'; }
+    else { guessXkbDefaults(); if(xkbPicker.sel[0]) await loadXkbChapters(true); }
+  }catch(e){
+    xkbPicker.error = (e && e.message) || '加载失败：请在「设置 → 题库来源」配置学库宝 Access Key';
+  }
+  xkbPicker.loading = false;
+  paintXkbModal();
+}
+async function loadXkbChapters(silent){
+  if(!xkbPicker.sel[0]) return;
+  if(!silent){ xkbPicker.loading = true; paintXkbModal(); }
+  try{
+    const [pharse_id, grade_id, subject_id, edition_id] = xkbPicker.sel;
+    const r = await api('/api/xuekubao/chapters', {method:'POST', body:{
+      pharse_id, subject_id, grade_id, edition_id,
+    }});
+    if(r && r.detail) throw new Error(r.detail);
+    const data = (r && r.data) || [];
+    const roots = Array.isArray(data) ? data : (data.child || data.children || [data]);
+    const out = [];
+    xkbWalkChapters(roots, [], out);
+    const seen = new Set();
+    xkbPicker.knowledge = out.filter(k => { if(seen.has(k.id)) return false; seen.add(k.id); return true; });
+    xkbPicker.chapters = true;
+    if(xkbPicker.knowledge.length && !xkbPicker.picked) xkbPicker.picked = xkbPicker.knowledge[0].id;
+  }catch(e){
+    xkbPicker.error = (e && e.message) || '章节加载失败';
+    xkbPicker.knowledge = [];
+  }
+  xkbPicker.loading = false;
+  paintXkbModal();
+}
+function paintXkbModal(){
+  const el = document.getElementById('xkbModal');
+  if(!el) return;
+  if(!xkbPicker.open){ el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = 'flex';
+  const cascade = XKB_LEVEL_LABELS.map((label, depth) => {
+    const opts = xkbLevelOptions(depth);
+    const disabled = depth > 0 && !xkbPicker.sel[depth - 1];
+    const options = `<option value="">${disabled ? '请先选上一级' : '请选择'}</option>` +
+      opts.map(n => {
+        const code = String(n.code ?? n.id);
+        const sel = xkbPicker.sel[depth] === code ? ' selected' : '';
+        return `<option value="${escapeAttr(code)}"${sel}>${escapeAttr(n.name || code)}</option>`;
+      }).join('');
+    return `<label><span>${label}</span><select ${disabled?'disabled':''} onchange="xkbSetLevel(${depth}, this.value)">${options}</select></label>`;
+  }).join('');
+  const list = xkbFilteredKnowledge();
+  const kps = list.length ? list.map(k => `
+    <button type="button" class="xkb-kp-item ${xkbPicker.picked===k.id?'on':''}" onclick='xkbPickKnowledge(${JSON.stringify(k.id)})'>
+      <span>${escapeAttr(k.name)}</span>
+      <span class="xkb-kp-path">${escapeAttr(k.path)}</span>
+    </button>`).join('') : `<div style="padding:16px;color:#8e9691;font-size:13px">${xkbPicker.chapters ? '该教材下未解析到知识点' : '选好教材后自动加载章节'}</div>`;
+  const picked = xkbPicker.knowledge.find(k => k.id === xkbPicker.picked);
+  el.innerHTML = `<div class="xkb-panel" role="dialog">
+    <div class="hd">
+      <h4>从学库宝按知识点拉题</h4>
+      <p>先选学段与教材，再点选知识点（无需手工填 ID）</p>
+    </div>
+    <div class="bd">
+      ${xkbPicker.error ? `<div style="color:#c05b4a;font-size:13px;margin-bottom:10px">${escapeAttr(xkbPicker.error)}</div>` : ''}
+      ${xkbPicker.loading ? '<div style="color:#8e9691;font-size:13px">加载中…</div>' : ''}
+      <div class="xkb-cascade">${cascade}</div>
+      ${xkbPicker.knowledge.length ? `<input class="xkb-search" placeholder="搜索知识点名称或路径…" value="${escapeAttr(xkbPicker.filter)}" oninput="xkbPicker.filter=this.value;paintXkbModal()">` : ''}
+      <div class="xkb-kp-list">${kps}</div>
+      ${picked ? `<div style="margin-top:10px;font-size:12px;color:#6b746e">已选：<b>${escapeAttr(picked.name)}</b>（ID: ${escapeAttr(picked.id)}）</div>` : ''}
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px">
+        页码 <input type="number" min="1" max="50" value="${xkbPicker.page||1}" style="width:72px;padding:6px 8px;border-radius:8px;border:1px solid var(--line3)"
+          onchange="xkbPicker.page=Math.max(1, parseInt(this.value,10)||1)">
+      </label>
+    </div>
+    <div class="xkb-foot">
+      <button type="button" class="btn-ghost" onclick="closeXuekubaoPicker()">取消</button>
+      <button type="button" class="btn-primary" ${!xkbPicker.picked || xkbPicker.loading ? 'disabled' : ''} onclick="confirmXuekubaoSync()">导入题目</button>
+    </div>
+  </div>`;
+}
+async function confirmXuekubaoSync(){
+  if(!bankSelectedId || !xkbPicker.picked) return;
+  closeXuekubaoPicker();
+  toast('正在从学库宝拉题…');
+  const r = await api(`/api/banks/${bankSelectedId}/sync-xuekubao`, {
+    method:'POST',
+    body:{knowledge_id: xkbPicker.picked, page: Math.max(1, xkbPicker.page || 1), max_import: 20, fetch_answers: true},
+  });
+  if(r && r.count > 0){ toast(`已导入 ${r.count} 道题，请到审核台确认`); await loadBankList(); render(); }
+  else toast((r && r.message) || apiErrorMsg(r, '同步失败或未配置学库宝密钥'));
+}
+async function syncBankFromXuekubao(){
+  openXuekubaoPicker();
 }
 async function uploadBankPhoto(input){
   if(!bankSelectedId || !input.files || !input.files[0]) return;
@@ -1617,6 +1876,9 @@ function renderScreenTab(){
 
 let msCatalog = null;
 let msRoleTab = 'llm';
+let msSources = null;
+let msSourcesDraft = {xuekubao_api_base:'', xuekubao_access_key:'', tiku_cn_api_base:'', tiku_cn_app_key:''};
+let msSourcesProbe = '';
 let msProbe = {};
 let msConnEdit = null;
 let msSaving = false;
@@ -1635,6 +1897,9 @@ const MS_ROLES = [
 
 async function loadModelCatalog(){
   msCatalog = await api('/api/config/catalog');
+  (msCatalog.connections||[]).forEach(c=>{
+    if(c.provider === 'xunfei') c._xunfei = msParseConnExtra(c);
+  });
   return msCatalog;
 }
 function msSvc(role){ return (msCatalog && msCatalog.services && msCatalog.services[role]) || {}; }
@@ -1651,6 +1916,13 @@ function msOpts(role){
   const raw = msSvc(role).options || '';
   try { return raw ? JSON.parse(raw) : {}; } catch(e){ return {}; }
 }
+function msConnProviderForRole(role){
+  const svc = msSvc(role);
+  const idx = svc.connection_index;
+  if(idx === null || idx === undefined || idx === '') return (svc.effective||{}).provider || '';
+  const c = msConns()[idx];
+  return (c && c.provider) || '';
+}
 
 function renderSettingsTab(){
   if(msLegacyView){ return renderSettingsTabLegacy(); }
@@ -1661,7 +1933,7 @@ function renderSettingsTab(){
   return `<div style="display:flex;justify-content:flex-end;margin-bottom:-8px">
       <button class="btn-ghost" onclick="msLegacyView=true;render()">切换到旧版设置</button>
     </div>
-    <div class="ms-wrap">${msNavHtml()}${msRoleTab==='connections' ? msConnectionsHtml() : msRoleHtml()}</div>`;
+    <div class="ms-wrap">${msNavHtml()}${msRoleTab==='connections' ? msConnectionsHtml() : msRoleTab==='sources' ? msSourcesHtml() : msRoleHtml()}</div>`;
 }
 
 function msNavHtml(){
@@ -1679,7 +1951,49 @@ function msNavHtml(){
     <button class="ms-item ${msRoleTab==='connections'?'on':''}" onclick="msSelectRole('connections')">
       ${icon('book',16)}<span>提供方</span>
     </button>
+    <button class="ms-item ${msRoleTab==='sources'?'on':''}" onclick="msSelectRole('sources')">
+      ${icon('grid',16)}<span>题库来源</span>
+    </button>
   </aside>`;
+}
+
+function msSourcesHtml(){
+  const s = msSources || {};
+  const xkbOn = !!s.xuekubao_configured;
+  const tikuOn = !!s.tiku_cn_configured;
+  return `<section class="ms-main">
+    <div class="head"><div class="ic green">${icon('grid',20)}</div>
+      <div><h3>题库来源</h3><div class="sub">学库宝 / tiku.cn 拉题凭证；服务器环境变量仍可作为兜底</div></div>
+      <span class="ms-badge ${xkbOn?'ok':(tikuOn?'warn':'off')}">${xkbOn?'学库宝已配':tikuOn?'仅 tiku':'未配置'}</span>
+    </div>
+  <div class="ms-field" style="margin-top:18px">
+    <div class="ms-label">学库宝 API 地址</div>
+    <input class="ms-input" value="${escapeAttr(msSourcesDraft.xuekubao_api_base||s.xuekubao_api_base||'https://api.xuekubao.com')}"
+      placeholder="https://api.xuekubao.com" oninput="msSourcesDraft.xuekubao_api_base=this.value">
+    <div class="ms-hint">控制台申请的 x-api-key 填在下方；用于「题库管理 → 学库宝选题」。</div>
+  </div>
+  <div class="ms-field">
+    <div class="ms-label">学库宝 Access Key</div>
+    <input class="ms-input" type="password" value="" placeholder="${xkbOn?'已保存，留空则不修改':'粘贴 Access Key'}"
+      oninput="msSourcesDraft.xuekubao_access_key=this.value">
+  </div>
+  <div style="margin:22px 0 8px;padding-top:16px;border-top:1px solid #eef1ec;font-size:12px;font-weight:700;color:var(--gray2)">tiku.cn（可选）</div>
+  <div class="ms-field">
+    <div class="ms-label">tiku.cn API 地址</div>
+    <input class="ms-input" value="${escapeAttr(msSourcesDraft.tiku_cn_api_base!==''?msSourcesDraft.tiku_cn_api_base:(s.tiku_cn_api_base||''))}"
+      placeholder="https://…" oninput="msSourcesDraft.tiku_cn_api_base=this.value">
+  </div>
+  <div class="ms-field">
+    <div class="ms-label">tiku.cn App Key</div>
+    <input class="ms-input" type="password" value="" placeholder="${tikuOn?'已保存，留空则不修改':'App Key'}"
+      oninput="msSourcesDraft.tiku_cn_app_key=this.value">
+  </div>
+  <div class="ms-hint" style="margin-top:4px">${escapeAttr(msSourcesProbe||'')}</div>
+  <div class="ms-actions">
+    <button type="button" class="btn-ghost" style="padding:10px 20px" onclick="msTestXuekubao()">测试学库宝连接</button>
+    <button type="button" class="btn-primary" style="padding:10px 24px" onclick="msSaveSources()" ${msSaving?'disabled':''}>保存配置</button>
+  </div>
+  </section>`;
 }
 
 function msConnectionsHtml(){
@@ -1692,11 +2006,30 @@ function msConnectionsHtml(){
         ${editing ? `
           <div class="ms-field"><div class="ms-label">名称</div>
             <input class="ms-input" value="${escapeAttr(c.name||'')}" oninput="msConnField(${i},'name',this.value)"></div>
+          <div class="ms-field"><div class="ms-label">厂商</div>
+            <select class="ms-select" onchange="msSetConnProvider(${i}, this.value)">
+              ${['openai','deepseek','glm','minimax','xunfei'].map(p=>
+                `<option value="${p}" ${(c.provider||'openai')===p?'selected':''}>${p}</option>`).join('')}
+            </select>
+            <div class="ms-hint">语音选 <b>xunfei</b> 时需填写开放平台「语音合成」的 APPID / APIKey / APISecret。</div>
+          </div>
+          ${(c.provider||'openai') === 'xunfei' ? `
+          <div class="ms-field"><div class="ms-label">APPID</div>
+            <input class="ms-input" value="${escapeAttr((c._xunfei||msParseConnExtra(c)).app_id||'')}" placeholder="讯飞控制台 APPID"
+              oninput="msConnField(${i},'xunfei_app_id',this.value)"></div>
+          <div class="ms-field"><div class="ms-label">APIKey（32 位）</div>
+            <input class="ms-input" type="password" value="" placeholder="${c.api_key?'已保存，留空则不修改':'APIKey'}"
+              oninput="msConnField(${i},'_newKey',this.value)">
+            <div class="ms-hint">密钥只在提供方录一次，所有角色共用。</div></div>
+          <div class="ms-field"><div class="ms-label">APISecret</div>
+            <input class="ms-input" type="password" value="" placeholder="${msParseConnExtra(c).api_secret?'已保存，留空则不修改':'APISecret'}"
+              oninput="msConnField(${i},'_newSecret',this.value)"></div>` : `
           <div class="ms-field"><div class="ms-label">Base URL</div>
             <input class="ms-input" value="${escapeAttr(c.base_url||'')}" placeholder="留空使用默认端点" oninput="msConnField(${i},'base_url',this.value)"></div>
           <div class="ms-field"><div class="ms-label">API Key</div>
             <input class="ms-input" type="password" value="" placeholder="${c.api_key?'已保存，留空则不修改':'sk-...'}" oninput="msConnField(${i},'_newKey',this.value)">
-            <div class="ms-hint">密钥只在提供方录一次，所有角色共用。</div></div>` : ''}
+            <div class="ms-hint">密钥只在提供方录一次，所有角色共用。</div></div>`}
+        ` : ''}
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
         <button class="btn-ghost" onclick="msToggleConnEdit(${i})">${editing?'收起':'编辑'}</button>
@@ -1769,11 +2102,17 @@ function msRoleHtml(){
         </div>
         <div class="ms-hint">${escapeAttr(msProbe[r.id]||'选择提供方后，可拉取该账号下可用的模型列表。')}</div>
       </div>` : ''}
-      ${r.id==='tts' ? `<div class="ms-field"><div class="ms-label">音色</div>
+      ${r.id==='tts' ? (()=>{
+        const prov = msConnProviderForRole('tts') || 'openai';
+        const voices = MS_TTS_VOICES[prov] || MS_TTS_VOICES.openai;
+        const cur = opts.voice || voices[0] || '';
+        return `<div class="ms-field"><div class="ms-label">音色</div>
         <select class="ms-select" onchange="msSetOption('voice',this.value)">
-          ${['male-qn-qingse','female-shaonv','presenter_male','alloy','nova'].map(v=>
-            `<option value="${v}" ${(opts.voice||'')===v?'selected':''}>${v}</option>`).join('')}
-        </select></div>
+          ${voices.map(v=>`<option value="${escapeAttr(v)}" ${cur===v?'selected':''}>${escapeAttr(v)}</option>`).join('')}
+        </select>
+        ${prov==='xunfei'?'<div class="ms-hint">需在「提供方」选用厂商 xunfei 并填写开放平台语音合成凭证。</div>':''}</div>`;
+      })() : ''}
+      ${r.id==='tts' ? `
         <div class="ms-field">
           <div class="ms-row"><span class="ms-label" style="margin:0;white-space:nowrap">语速</span>
             <input type="range" min="0.5" max="2" step="0.1" value="${opts.speed||1}" style="flex:1"
@@ -1942,7 +2281,11 @@ function renderSettingsTabLegacy(){
           <input type="text" placeholder="https://aiapi.icloudsky.com/v1" value="${ttsConfig.baseUrl}" oninput="ttsConfig.baseUrl=this.value" style="width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px">
         </div>`:''}
         <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px">
-          <div><div style="font-size:13px;color:var(--gray2);margin-bottom:8px">API Key</div><input type="password" placeholder="语音服务 Key" value="${ttsConfig.key}" oninput="ttsConfig.key=this.value" style="width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"></div>
+          ${ttsConfig.provider==='xunfei'?`
+          <div><div style="font-size:13px;color:var(--gray2);margin-bottom:8px">APPID</div><input type="text" value="${ttsConfig.appId||''}" oninput="ttsConfig.appId=this.value" style="width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"></div>
+          <div><div style="font-size:13px;color:var(--gray2);margin-bottom:8px">APIKey</div><input type="password" placeholder="讯飞 APIKey" value="${ttsConfig.key}" oninput="ttsConfig.key=this.value" style="width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"></div>
+          <div><div style="font-size:13px;color:var(--gray2);margin-bottom:8px">APISecret</div><input type="password" placeholder="讯飞 APISecret" value="${ttsConfig.apiSecret||''}" oninput="ttsConfig.apiSecret=this.value" style="width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"></div>
+          `:`<div><div style="font-size:13px;color:var(--gray2);margin-bottom:8px">API Key</div><input type="password" placeholder="语音服务 Key" value="${ttsConfig.key}" oninput="ttsConfig.key=this.value" style="width:100%;border:1px solid var(--line3);border-radius:12px;padding:10px 12px;font-size:13px"></div>`}
           <div style="display:flex;gap:10px;align-items:center"><span style="font-size:13px;color:var(--gray2);white-space:nowrap">语速</span><input type="range" min="0.5" max="2" step="0.1" value="${ttsConfig.speed}" oninput="ttsConfig.speed=this.value;this.nextElementSibling.textContent=this.value" style="flex:1"><span style="font-size:13px;width:32px;text-align:right">${ttsConfig.speed}</span></div>
           <div style="display:flex;gap:10px;align-items:center"><span style="font-size:13px;color:var(--gray2);white-space:nowrap">重复次数</span><input type="range" min="1" max="3" step="1" value="${ttsConfig.repeat}" oninput="ttsConfig.repeat=this.value;this.nextElementSibling.textContent=this.value+' 次'" style="flex:1"><span style="font-size:13px;width:44px;text-align:right">${ttsConfig.repeat} 次</span></div>
         </div>
@@ -1962,11 +2305,79 @@ function setAiProvider(id){ aiConfig.provider=id; aiConfig.model=aiProviders.fin
 function setTtsProvider(id){ ttsConfig.provider=id; ttsConfig.voice=ttsProviders.find(p=>p.id===id).voices[0]; render(); }
 
 // ---- 模型与服务：交互 ----
-function msSelectRole(id){ msRoleTab = id; msConnEdit = null; render(); }
+function msSelectRole(id){
+  msRoleTab = id;
+  msConnEdit = null;
+  if(id === 'sources'){
+    loadSourcesConfig().then(()=>render()).catch(()=>render());
+    return;
+  }
+  render();
+}
+async function loadSourcesConfig(){
+  msSources = await api('/api/config/sources');
+  if(!msSourcesDraft.xuekubao_api_base && msSources){
+    msSourcesDraft.xuekubao_api_base = msSources.xuekubao_api_base || 'https://api.xuekubao.com';
+  }
+  return msSources;
+}
+async function msSaveSources(){
+  if(msSaving) return;
+  msSaving = true;
+  render();
+  const base = (msSourcesDraft.xuekubao_api_base || msSources?.xuekubao_api_base || 'https://api.xuekubao.com').trim();
+  const body = {
+    xuekubao_api_base: base,
+    xuekubao_access_key: msSourcesDraft.xuekubao_access_key || '',
+    tiku_cn_api_base: (msSourcesDraft.tiku_cn_api_base ?? msSources?.tiku_cn_api_base ?? '').trim(),
+    tiku_cn_app_key: msSourcesDraft.tiku_cn_app_key || '',
+  };
+  try{
+    const r = await api('/api/config/sources', {method:'PUT', body});
+    if(r && r.ok){
+      msSourcesDraft.xuekubao_access_key = '';
+      msSourcesDraft.tiku_cn_app_key = '';
+      await loadSourcesConfig();
+      toast('题库来源已保存');
+    } else toast('保存失败');
+  }catch(e){ toast('保存失败：' + (e.message||e)); }
+  msSaving = false;
+  render();
+}
+async function msTestXuekubao(){
+  msSourcesProbe = '正在测试…';
+  render();
+  try{
+    const r = await api('/api/config/sources/test-xuekubao', {method:'POST', body:{}});
+    msSourcesProbe = r.ok ? (r.message || '连接成功') : ('失败：' + (r.error || '未知'));
+  }catch(e){ msSourcesProbe = '失败：' + (e.message||e); }
+  render();
+}
 function msToggleConnEdit(i){ msConnEdit = msConnEdit === i ? null : i; render(); }
+function msParseConnExtra(c){
+  if(!c || !c.extra_headers) return {};
+  if(typeof c.extra_headers === 'object') return c.extra_headers;
+  try { return JSON.parse(c.extra_headers) || {}; } catch(e){ return {}; }
+}
+function msSetConnProvider(i, val){
+  const c = msConns()[i];
+  if(!c) return;
+  c.provider = val;
+  if(val === 'xunfei'){
+    c._xunfei = c._xunfei || msParseConnExtra(c);
+    c.base_url = '';
+  }
+  render();
+}
 function msConnField(i, field, val){
   const c = msConns()[i]; if(!c) return;
   if(field === '_newKey'){ c._newKey = val; return; }
+  if(field === '_newSecret'){ c._newSecret = val; return; }
+  if(field === 'xunfei_app_id'){
+    c._xunfei = c._xunfei || msParseConnExtra(c);
+    c._xunfei.app_id = val;
+    return;
+  }
   c[field] = val;
 }
 function msAddConn(){
@@ -2034,11 +2445,21 @@ async function msSaveAll(){
   if(msSaving) return;
   msSaving = true; render();
   const payload = {
-    connections: msConns().map(c=>({
-      id: c.id || null, provider: c.provider, name: c.name,
-      base_url: c.base_url, api_key: c._newKey || c.api_key || '',
-      extra_headers: c.extra_headers || ''
-    })),
+    connections: msConns().map(c=>{
+      let extra = c.extra_headers || '';
+      if(c.provider === 'xunfei'){
+        const ex = c._xunfei || msParseConnExtra(c);
+        const secret = c._newSecret || ex.api_secret || '';
+        extra = JSON.stringify({app_id: ex.app_id || '', api_secret: secret});
+      } else if(typeof extra !== 'string'){
+        extra = JSON.stringify(extra || {});
+      }
+      return {
+        id: c.id || null, provider: c.provider, name: c.name,
+        base_url: c.base_url, api_key: c._newKey || c.api_key || '',
+        extra_headers: extra
+      };
+    }),
     services: {}
   };
   Object.keys(msCatalog.services||{}).forEach(role=>{
@@ -2061,6 +2482,7 @@ async function saveConfig(){
     ['ai_provider', aiConfig.provider], ['ai_model', aiConfig.model], ['ai_key', aiConfig.key],
     ['ai_base_url', aiConfig.baseUrl],
     ['tts_provider', ttsConfig.provider], ['tts_voice', ttsConfig.voice], ['tts_key', ttsConfig.key],
+    ['tts_app_id', ttsConfig.appId || ''], ['tts_api_secret', ttsConfig.apiSecret || ''],
     ['tts_base_url', ttsConfig.baseUrl], ['tts_model', ttsConfig.model],
     ['tts_speed', String(ttsConfig.speed)], ['tts_repeat', String(ttsConfig.repeat)]
   ];
@@ -2107,8 +2529,16 @@ async function testAiConnection(){
 }
 async function testVoice(){
   toast('正在合成试听语音…');
+  const sample = '你好，这是语音合成测试';
   try{
-    const r = await fetch(`${API}/api/tts/synthesize?text=${encodeURIComponent('你好，这是语音合成测试')}`);
+    const r = await fetch(
+      `${API}/api/tts/synthesize?text=${encodeURIComponent(sample)}`,
+      {headers: authHeaders()}
+    );
+  if(r.status === 401){
+      toast('请先登录家长账号后再试听');
+      return;
+    }
     const ct = r.headers.get('content-type')||'';
     if(ct.includes('audio')){
       const blob = await r.blob();
@@ -2117,8 +2547,8 @@ async function testVoice(){
       toast('已播放中转站合成语音');
     } else {
       const d = await r.json().catch(()=>({}));
-      if(d && d.use_browser_tts){ browserSpeak('你好，这是语音合成测试'); toast('当前为浏览器合成（未配置真实 TTS）'); }
-      else { toast('语音合成失败：' + (d.error||'未知错误')); }
+      if(d && d.use_browser_tts){ browserSpeak(sample); toast('当前为浏览器合成（未配置真实 TTS）'); }
+      else { toast('语音合成失败：' + (d.detail || d.error || r.statusText || '未知错误')); }
     }
   }catch(e){ toast('语音合成失败：' + e.message); }
 }

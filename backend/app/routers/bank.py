@@ -11,6 +11,9 @@ from sqlalchemy.orm import Session
 from ..core.access import require_learning_user
 from ..core.deps import get_current_user, require_role
 from ..core.question_types import CATEGORY_OF_QTYPE
+from ..core.source_adapter import QuestionDraft
+from ..core.source_registry import SOURCE_REGISTRY
+from ..services.source_config import tiku_cn_adapter, xuekubao_adapter
 from ..database import get_db
 from ..models import Mistake, Question, QuestionBank, User
 from ..services.ai import ocr_image
@@ -37,6 +40,68 @@ class BankSubmitReq(BaseModel):
     answers: list[dict]   # [{question_id, selected_index|blanks|pairs|text}]
 
 
+class TikuSyncReq(BaseModel):
+    keyword: str = ""
+    subject: str = ""
+    page: int = 1
+    page_size: int = 20
+    max_import: int = 20
+
+
+class XuekubaoSyncReq(BaseModel):
+    knowledge_id: str
+    page: int = 1
+    max_import: int = 20
+    qtype_id: str | None = None
+    diff: str | None = None
+    year: int | None = None
+    fetch_answers: bool = True
+
+
+class ThirdPartyImportReq(BaseModel):
+    source: str = "tiku.cn"
+    items: list[dict] = []
+
+
+def _require_bank(bank_id: int, user: User, db: Session) -> QuestionBank:
+    bank = db.get(QuestionBank, bank_id)
+    if not bank or (user.role != "admin" and bank.user_id != user.id):
+        raise HTTPException(status_code=404, detail="卷子不存在")
+    return bank
+
+
+def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft], tag_source: str) -> list[int]:
+    today = date_type.today()
+    subj = (bank.subject or "").strip()
+    ids: list[int] = []
+    for d in drafts:
+        if not d.question:
+            continue
+        category = CATEGORY_OF_QTYPE.get(d.qtype, "subjective")
+        tags = {**(d.tags or {}), "source": tag_source}
+        q = Question(
+            bank_id=bank.id,
+            qtype=d.qtype or "short_answer",
+            qtype_category=category,
+            question=d.question,
+            answer=d.answer,
+            answer_json=json.dumps(d.answer_json or {}, ensure_ascii=False),
+            options=json.dumps(d.options or [], ensure_ascii=False),
+            analysis=d.analysis or "",
+            difficulty=d.difficulty or "medium",
+            tags=json.dumps(tags, ensure_ascii=False),
+            subject=subj,
+            date=today,
+            status="pending",
+        )
+        db.add(q)
+        db.flush()
+        ids.append(q.id)
+    if ids and bank.source == "manual":
+        bank.source = "third_party"
+    return ids
+
+
 @router.post("")
 def create_bank(req: BankCreateReq, user: User = Depends(require_role("parent", "admin")),
                 db: Session = Depends(get_db)):
@@ -53,8 +118,25 @@ def create_bank(req: BankCreateReq, user: User = Depends(require_role("parent", 
 def list_banks(user: User = Depends(require_role("parent", "admin")),
                db: Session = Depends(get_db)):
     banks = db.query(QuestionBank).filter_by(user_id=user.id).order_by(QuestionBank.id.desc()).all()
-    return [{"id": b.id, "title": b.title, "subject": b.subject, "grade": b.grade,
-             "source": b.source, "status": b.status} for b in banks]
+    q_counts = dict(
+        db.query(Question.bank_id, func.count(Question.id))
+        .filter(Question.bank_id.isnot(None))
+        .group_by(Question.bank_id)
+        .all()
+    )
+    out = []
+    for b in banks:
+        try:
+            tags = json.loads(b.tags or "{}") if b.tags else {}
+        except (ValueError, TypeError):
+            tags = {}
+        out.append({
+            "id": b.id, "title": b.title, "subject": b.subject, "grade": b.grade,
+            "source": b.source, "status": b.status,
+            "question_count": int(q_counts.get(b.id, 0)),
+            "include_daily_task": bool(tags.get("include_daily_task")),
+        })
+    return out
 
 
 def _parent_id_for_practice(user: User) -> int | None:
@@ -185,9 +267,7 @@ async def photo_import_bank(
     db: Session = Depends(get_db),
 ):
     """卷子拍照 → OCR → LLM 结构化 → 待审核题目批量入库。"""
-    bank = db.get(QuestionBank, bank_id)
-    if not bank or (user.role != "admin" and bank.user_id != user.id):
-        raise HTTPException(status_code=404, detail="卷子不存在")
+    bank = _require_bank(bank_id, user, db)
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in _PHOTO_EXT:
         raise HTTPException(status_code=400, detail="不支持的图片格式")
@@ -201,30 +281,112 @@ async def photo_import_bank(
     drafts = structure_questions_from_text(db, ocr_text or "")
     if not drafts:
         return {"count": 0, "ids": [], "message": "未能识别题目，请换更清晰照片或改用手工录入"}
-    ids = []
-    today = date_type.today()
-    subj = (bank.subject or "").strip()
-    for d in drafts:
-        category = CATEGORY_OF_QTYPE.get(d.qtype, "subjective")
-        q = Question(
-            bank_id=bank_id,
-            qtype=d.qtype or "short_answer",
-            qtype_category=category,
-            question=d.question,
-            answer=d.answer,
-            answer_json=json.dumps(d.answer_json or {}, ensure_ascii=False),
-            options=json.dumps(d.options or [], ensure_ascii=False),
-            analysis=d.analysis or "",
-            difficulty=d.difficulty or "medium",
-            tags=json.dumps({**(d.tags or {}), "source": "photo"}, ensure_ascii=False),
-            subject=subj,
-            date=today,
-            status="pending",
-        )
-        db.add(q)
-        db.flush()
-        ids.append(q.id)
-    if bank.source == "manual" and ids:
+    ids = _persist_drafts(db, bank, drafts, "photo")
+    if ids and bank.source != "third_party":
         bank.source = "photo"
+    db.commit()
+    return {"count": len(ids), "ids": ids}
+
+
+@router.post("/{bank_id}/sync-tiku")
+def sync_tiku_bank(
+    bank_id: int,
+    req: TikuSyncReq,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """从 tiku.cn B2B API 拉题并写入待审核队列（需环境变量配置）。"""
+    bank = _require_bank(bank_id, user, db)
+    adapter = tiku_cn_adapter(db)
+    if not adapter.configured():
+        raise HTTPException(
+            status_code=503,
+            detail="tiku.cn API 未配置：请在「设置 → 题库来源」填写，或设置环境变量 TIKU_CN_API_BASE / TIKU_CN_APP_KEY",
+        )
+    subject = (req.subject or bank.subject or "").strip()
+    raw = adapter.fetch(
+        keyword=req.keyword.strip(),
+        subject=subject,
+        page=req.page,
+        page_size=req.page_size,
+        grade=bank.grade,
+    )
+    if raw.get("error") and not _extract_items_safe(raw):
+        raise HTTPException(
+            status_code=502,
+            detail=raw.get("message") or raw.get("error") or "拉取失败",
+        )
+    drafts = adapter.normalize(raw)[: max(1, min(req.max_import, 50))]
+    if not drafts:
+        return {"count": 0, "ids": [], "message": "未解析到题目，请核对 API 响应格式或改用 import-third-party"}
+    ids = _persist_drafts(db, bank, drafts, "tiku.cn")
+    db.commit()
+    return {"count": len(ids), "ids": ids}
+
+
+@router.post("/{bank_id}/sync-xuekubao")
+def sync_xuekubao_bank(
+    bank_id: int,
+    req: XuekubaoSyncReq,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """按学库宝知识点 knowledgeId（章节树三级 oldId）拉题并写入待审核队列。"""
+    bank = _require_bank(bank_id, user, db)
+    adapter = xuekubao_adapter(db)
+    if not adapter.configured():
+        raise HTTPException(
+            status_code=503,
+            detail="学库宝 API 未配置：请在「设置 → 题库来源」填写 Access Key，或设置环境变量 XUEKUBAO_ACCESS_KEY",
+        )
+    raw = adapter.fetch_by_knowledge(
+        knowledge_id=req.knowledge_id.strip(),
+        page=req.page,
+        qtype_id=req.qtype_id,
+        diff=req.diff,
+        year=req.year,
+        fetch_answers=req.fetch_answers,
+    )
+    items = raw.get("data") if isinstance(raw.get("data"), list) else _extract_items_safe(raw)
+    err = str(raw.get("errorCode") or "")
+    if not items and err not in ("0", "200", ""):
+        raise HTTPException(
+            status_code=502,
+            detail=raw.get("message") or raw.get("errorCode") or "拉取失败",
+        )
+    drafts = adapter.normalize(raw)[: max(1, min(req.max_import, 50))]
+    if not drafts:
+        return {
+            "count": 0,
+            "ids": [],
+            "message": "未解析到题目，请核对 knowledge_id 或改用 import-third-party",
+            "data_count": raw.get("dataCount"),
+        }
+    ids = _persist_drafts(db, bank, drafts, "xuekubao")
+    db.commit()
+    return {"count": len(ids), "ids": ids, "data_count": raw.get("dataCount")}
+
+
+def _extract_items_safe(raw) -> list:
+    from ..core.tiku_cn_adapter import _extract_items
+    return _extract_items(raw)
+
+
+@router.post("/{bank_id}/import-third-party")
+def import_third_party(
+    bank_id: int,
+    req: ThirdPartyImportReq,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """无需在线 API：将第三方已拉取的题目 JSON 标准化入库（source 须在 SOURCE_REGISTRY）。"""
+    bank = _require_bank(bank_id, user, db)
+    adapter = SOURCE_REGISTRY.get(req.source)
+    if adapter is None:
+        raise HTTPException(status_code=400, detail=f"未知来源 {req.source}")
+    drafts = adapter.normalize({"list": req.items})
+    if not drafts:
+        raise HTTPException(status_code=400, detail="无法解析题目列表")
+    ids = _persist_drafts(db, bank, drafts, req.source)
     db.commit()
     return {"count": len(ids), "ids": ids}

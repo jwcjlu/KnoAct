@@ -64,6 +64,10 @@ def _legacy(db: Session, role: str) -> Resolved | None:
             opts["speed"] = cfg["tts_speed"]
         if cfg.get("tts_repeat"):
             opts["repeat"] = cfg["tts_repeat"]
+        if cfg.get("tts_app_id"):
+            opts["app_id"] = cfg["tts_app_id"]
+        if cfg.get("tts_api_secret"):
+            opts["api_secret"] = cfg["tts_api_secret"]
         return Resolved(
             role="tts",
             provider=provider,

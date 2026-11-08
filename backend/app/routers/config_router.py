@@ -8,6 +8,7 @@ from ..models import ModelConnection, ModelProfile, RoleBinding
 from ..services.model_config import MASK, redact, resolve, restore
 from ..services.provider_registry import REGISTRY, ROLES
 from ..services.ai import OpenAICompatibleProvider, DeepSeekProvider, GLMProvider, FakeProvider
+from ..services.source_config import save_sources, sources_public, xuekubao_adapter
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -46,7 +47,43 @@ def set_config(req: ConfigReq, db: Session = Depends(get_db)):
 
 @router.get("")
 def get_config(db: Session = Depends(get_db)):
-    return {r.key: r.value for r in db.query(ModelConfig).all()}
+    out = {r.key: r.value for r in db.query(ModelConfig).all()}
+    for k in list(out.keys()):
+        if k in ("xuekubao_access_key", "tiku_cn_app_key") and out[k]:
+            out[k] = MASK
+    return out
+
+
+class SourcesReq(BaseModel):
+    xuekubao_api_base: str = ""
+    xuekubao_access_key: str = ""
+    tiku_cn_api_base: str = ""
+    tiku_cn_app_key: str = ""
+
+
+@router.get("/sources", dependencies=[Depends(require_role("parent", "admin"))])
+def get_sources(db: Session = Depends(get_db)):
+    return sources_public(db)
+
+
+@router.put("/sources", dependencies=[Depends(require_role("parent", "admin"))])
+def put_sources(req: SourcesReq, db: Session = Depends(get_db)):
+    save_sources(db, req.model_dump())
+    return {"ok": True}
+
+
+@router.post("/sources/test-xuekubao", dependencies=[Depends(require_role("parent", "admin"))])
+def test_xuekubao(db: Session = Depends(get_db)):
+    adapter = xuekubao_adapter(db)
+    if not adapter.configured():
+        return {"ok": False, "error": "未配置 Access Key"}
+    raw = adapter.subject_edition_tree()
+    data = raw.get("data")
+    ok = bool(data) or str(raw.get("errorCode")) in ("0", "200")
+    if ok:
+        n = len(data) if isinstance(data, list) else 0
+        return {"ok": True, "message": f"连接成功，目录节点 {n} 个"}
+    return {"ok": False, "error": raw.get("message") or raw.get("errorCode") or "拉取失败"}
 
 
 # 语音合成相关模型的关键字（用于从 /models 列表里筛出 TTS 模型）

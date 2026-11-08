@@ -5,7 +5,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, xuekubao
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -28,6 +28,27 @@ def _warn_insecure_auth_env() -> None:
 
 
 app = FastAPI(title="知学伴 API")
+
+
+@app.on_event("startup")
+def _ensure_db_tables() -> None:
+    """已有 SQLite/MySQL 库不会自动补新表；启动时幂等 create_all（与 seed 首步一致）。"""
+    if "pytest" in sys.modules:
+        return
+    from .database import SessionLocal
+    from .models import Base  # noqa: F401 — 注册全部表
+    from .database import engine
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        from .migrate_question_bank import _sqlite_relax_questions_lesson_id
+
+        _sqlite_relax_questions_lesson_id(db)
+    except Exception as exc:
+        _log.warning("questions.lesson_id 放宽迁移失败: %s", exc)
+    finally:
+        db.close()
+
 
 # 开发阶段放开跨域，便于前端本地联调
 app.add_middleware(
@@ -71,6 +92,7 @@ app.include_router(users.children_router)
 app.include_router(buckets.router)
 app.include_router(screen_time.router)
 app.include_router(bank.router)
+app.include_router(xuekubao.router)
 
 _warn_insecure_auth_env()
 

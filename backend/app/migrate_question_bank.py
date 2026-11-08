@@ -45,13 +45,39 @@ def migrate(db: Session) -> None:
         db.execute(text(f"ALTER TABLE questions ADD COLUMN {name} {ctype}{d}"))
     db.commit()
 
-    # 2) 放宽 lesson_id 非空
+    # 2) 放宽 lesson_id 非空（独立题库题不要求挂 lesson）
     if backend == "mysql":
         db.execute(text("ALTER TABLE questions MODIFY lesson_id INTEGER NULL"))
         db.commit()
     else:
-        # SQLite 不支持 DROP NOT NULL；dev 库由 create_all 重建即可，这里仅提示。
-        print("[warn] SQLite 不支持直接删 NOT NULL；若需独立成题，请删库后用 create_all 重建，或改用 MySQL。")
+        _sqlite_relax_questions_lesson_id(db)
+
+
+def _sqlite_relax_questions_lesson_id(db: Session) -> None:
+    """SQLite 无法 ALTER 删 NOT NULL：按当前表结构重建 questions，lesson_id 可空。"""
+    if engine.url.get_backend_name() != "sqlite":
+        return
+    insp = inspect(engine)
+    lesson = next((c for c in insp.get_columns("questions") if c["name"] == "lesson_id"), None)
+    if lesson is None or lesson.get("nullable"):
+        return
+    row = db.execute(
+        text("SELECT sql FROM sqlite_master WHERE type='table' AND name='questions'")
+    ).scalar()
+    if not row or "lesson_id INTEGER NOT NULL" not in row:
+        return
+    new_sql = row.replace("lesson_id INTEGER NOT NULL", "lesson_id INTEGER").replace(
+        "CREATE TABLE questions ", "CREATE TABLE questions__mig ",
+    )
+    cols = [c["name"] for c in insp.get_columns("questions")]
+    col_list = ", ".join(cols)
+    db.execute(text("PRAGMA foreign_keys=OFF"))
+    db.execute(text(new_sql))
+    db.execute(text(f"INSERT INTO questions__mig ({col_list}) SELECT {col_list} FROM questions"))
+    db.execute(text("DROP TABLE questions"))
+    db.execute(text("ALTER TABLE questions__mig RENAME TO questions"))
+    db.execute(text("PRAGMA foreign_keys=ON"))
+    db.commit()
 
     # 3) 回填 qtype_category 与 qtype（旧 4 粗粒度值 → taxonomy 最近项）
     rows = db.query(Question).all()

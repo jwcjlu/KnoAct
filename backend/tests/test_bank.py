@@ -127,6 +127,23 @@ def test_submit_wrong_records_mistake(client, setup_db):
     db.close()
 
 
+def test_import_third_party_tiku(client, setup_db):
+    h, bank_id, _ = _seed_bank_with_question()
+    body = {
+        "source": "tiku.cn",
+        "items": [{
+            "question": "2+2=?",
+            "type": "single_choice",
+            "options": [{"label": "3", "value": 0}, {"label": "4", "value": 1}],
+            "answer_json": {"correct_index": 1},
+            "answer": "4",
+        }],
+    }
+    r = client.post(f"/api/banks/{bank_id}/import-third-party", json=body, headers=h)
+    assert r.status_code == 200
+    assert r.json()["count"] == 1
+
+
 def test_photo_import_empty_without_ocr(client, setup_db):
     h, bank_id, _ = _seed_bank_with_question()
     # 1x1 png

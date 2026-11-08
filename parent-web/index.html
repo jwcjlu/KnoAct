@@ -439,6 +439,59 @@
   .pdf-row .st{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600}
   .pdf-row .st.processing{color:var(--orange2)}
   .pdf-row .st.done{color:var(--green)}
+  .bank-create{margin:0 0 20px;padding:16px 18px;border-radius:16px;background:#f7f9fc;border:1px solid #e8ecf4}
+  .bank-create-grid{display:grid;grid-template-columns:minmax(180px,1.5fr) repeat(2,minmax(110px,.75fr));gap:12px 14px}
+  @media(max-width:720px){.bank-create-grid{grid-template-columns:1fr}}
+  .bank-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .bank-field-label{font-size:12px;font-weight:600;color:#6b746e}
+  .bank-field .inp{width:100%;margin:0;padding:9px 12px;border-radius:10px;border:1px solid var(--line3);font-size:13px}
+  .bank-create-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid #e3e8f0}
+  .bank-daily{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-size:13px;font-weight:600;color:var(--ink2);cursor:pointer}
+  .bank-daily input{width:16px;height:16px;accent-color:var(--blue2)}
+  .bank-daily-hint{font-size:12px;font-weight:500;color:#8e9691}
+  .bank-list-head{font-size:12px;font-weight:700;color:var(--gray2);letter-spacing:.04em;margin-bottom:8px}
+  .bank-list{display:flex;flex-direction:column;gap:10px}
+  .bank-empty{color:#8e9691;font-size:13px;padding:16px 4px}
+  .bank-row{cursor:pointer;transition:border-color .15s,background .15s}
+  .bank-row-on{background:#f5f7ff!important;border-color:#c5d0ff!important}
+  .bank-row-body{flex:1;min-width:0}
+  .bank-tag{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:#e8f5ee;color:#2d7a52;vertical-align:2px}
+  .xkb-modal{position:fixed;inset:0;z-index:80;background:rgba(15,20,18,.45);align-items:center;justify-content:center;padding:20px}
+  .xkb-panel{width:min(640px,100%);max-height:min(88vh,760px);background:#fff;border-radius:20px;border:1px solid #e6ebe6;box-shadow:0 24px 48px rgba(0,0,0,.18);display:flex;flex-direction:column;overflow:hidden}
+  .xkb-panel .hd{padding:18px 20px 12px;border-bottom:1px solid #eef1ec}
+  .xkb-panel .hd h4{margin:0;font-size:17px;font-weight:700}
+  .xkb-panel .hd p{margin:6px 0 0;font-size:12px;color:#8e9691}
+  .xkb-panel .bd{padding:16px 20px;overflow:auto;flex:1}
+  .xkb-cascade{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
+  @media(max-width:560px){.xkb-cascade{grid-template-columns:1fr}}
+  .xkb-cascade label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:600;color:#6b746e}
+  .xkb-cascade select{padding:8px 10px;border-radius:10px;border:1px solid var(--line3);font-size:13px}
+  .xkb-kp-list{margin-top:14px;border:1px solid #e8ece8;border-radius:12px;max-height:280px;overflow:auto}
+  .xkb-kp-item{display:block;width:100%;text-align:left;padding:10px 12px;border:none;border-bottom:1px solid #f0f2f0;background:#fff;cursor:pointer;font-size:13px}
+  .xkb-kp-item:last-child{border-bottom:none}
+  .xkb-kp-item:hover{background:#f7faf8}
+  .xkb-kp-item.on{background:#eef3ff;border-left:3px solid var(--blue2);padding-left:9px}
+  .xkb-kp-path{display:block;font-size:11px;color:#8e9691;margin-top:2px}
+  .xkb-foot{padding:12px 20px 16px;border-top:1px solid #eef1ec;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:flex-end}
+  .xkb-search{width:100%;margin-top:12px;padding:8px 12px;border-radius:10px;border:1px solid var(--line3);font-size:13px}
+  .bank-qform .bank-q-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px}
+  @media(max-width:560px){.bank-qform .bank-q-meta{grid-template-columns:1fr}}
+  .bank-qform .bank-field{display:flex;flex-direction:column;gap:6px}
+  .bank-qform .bank-field-label{font-size:12px;font-weight:600;color:#6b746e}
+  .bank-qform .inp,.bank-qform select,.bank-qform textarea{width:100%;box-sizing:border-box;margin:0;padding:10px 12px;border-radius:10px;border:1px solid var(--line3);font-size:13px;font-family:inherit;line-height:1.45;resize:vertical}
+  .bank-qform select{resize:none;padding:9px 12px}
+  .bank-qform textarea{min-height:88px}
+  .bank-qform .bank-q-block{margin-top:16px}
+  .bank-qform .bank-opt-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .bank-qform .bank-opt-row{display:grid;grid-template-columns:36px 1fr auto;gap:10px;align-items:center}
+  .bank-qform .bank-opt-letter{width:36px;height:36px;border-radius:10px;background:#eef2ff;color:#3158e8;font-size:13px;font-weight:700;display:grid;place-items:center}
+  .bank-qform .bank-opt-mark{font-size:12px;color:#6b746e;display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .bank-qform .bank-actions{margin-top:20px;padding-top:18px;border-top:1px solid #eef1ec}
+  .bank-qform .bank-actions-primary{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .bank-qform .bank-import-bar{margin-top:14px;padding:12px 14px;border-radius:12px;background:#f7f9fc;border:1px dashed #d8dee8}
+  .bank-qform .bank-import-title{font-size:12px;font-weight:700;color:#6b746e;margin-bottom:10px}
+  .bank-qform .bank-import-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .bank-qform .bank-import-hint{font-size:12px;color:#8e9691;margin-top:8px}
   .upload-drop{margin-top:16px;border:2px dashed var(--blue-border);border-radius:16px;padding:40px 24px;text-align:center;cursor:pointer;transition:.15s}
   .upload-drop:hover{border-color:var(--blue3);background:var(--blue-soft2)}
   .upload-drop .ic{width:56px;height:56px;margin:0 auto;border-radius:16px;background:var(--blue-soft);color:var(--blue2);display:grid;place-items:center}
@@ -865,9 +918,10 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="xkbModal" class="xkb-modal" style="display:none" aria-hidden="true"></div>
 
 <!-- 改 app.js 后把 v= 后面的数字 +1，避免浏览器缓存旧脚本 -->
 <script src="config.js?v=1"></script>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

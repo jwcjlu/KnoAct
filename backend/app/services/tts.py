@@ -57,11 +57,22 @@ class MiniMaxTTS(TTSProvider):
 class XunfeiTTS(TTSProvider):
     name = "xunfei"
 
+    def __init__(self, voice: str = "", api_key: str = "", app_id: str = "", api_secret: str = ""):
+        super().__init__(voice=voice, api_key=api_key)
+        self.app_id = app_id
+        self.api_secret = api_secret
+
     def synthesize(self, text, voice="", speed=1.0):
-        if not self.api_key:
-            raise RuntimeError("讯飞 API Key 未配置")
-        # TODO: 讯飞在线语音合成需 WebSocket + 鉴权签名，未实现（前端用浏览器 speechSynthesis 兜底）
-        raise NotImplementedError("讯飞 TTS 待接入")
+        from .xunfei_tts import synthesize_xunfei
+
+        return synthesize_xunfei(
+            text=text,
+            app_id=self.app_id,
+            api_key=self.api_key,
+            api_secret=self.api_secret,
+            voice=voice or self.voice,
+            speed=speed,
+        )
 
 
 class OpenAITTS(TTSProvider):
@@ -105,6 +116,14 @@ class FakeTTS(TTSProvider):
 PROVIDERS = {"minimax": MiniMaxTTS, "xunfei": XunfeiTTS, "openai": OpenAITTS, "fake": FakeTTS}
 
 
+def _xunfei_credentials(r) -> tuple[str, str]:
+    opts = r.options or {}
+    hdr = r.extra_headers if isinstance(r.extra_headers, dict) else {}
+    app_id = (opts.get("app_id") or hdr.get("app_id") or "").strip()
+    api_secret = (opts.get("api_secret") or hdr.get("api_secret") or "").strip()
+    return app_id, api_secret
+
+
 def get_tts(db: Session, child_id: int | None = None) -> TTSProvider:
     from .model_config import resolve
     r = resolve(db, "tts", child_id)
@@ -112,4 +131,7 @@ def get_tts(db: Session, child_id: int | None = None) -> TTSProvider:
     cls = PROVIDERS.get(r.provider, FakeTTS)
     if cls is OpenAITTS:
         return cls(voice=voice, api_key=r.api_key, base_url=r.base_url, model=r.model)
+    if cls is XunfeiTTS:
+        app_id, api_secret = _xunfei_credentials(r)
+        return cls(voice=voice, api_key=r.api_key, app_id=app_id, api_secret=api_secret)
     return cls(voice=voice, api_key=r.api_key)

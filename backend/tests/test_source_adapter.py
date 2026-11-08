@@ -19,7 +19,16 @@ def test_third_party_registry_has_tiku():
     assert adapter.name == "tiku.cn"
 
 
-def test_tiku_stub_returns_empty():
+def test_third_party_registry_has_xuekubao():
+    from app.core.xuekubao_adapter import XuekubaoAdapter
+
+    assert "xuekubao" in SOURCE_REGISTRY
+    adapter = SOURCE_REGISTRY["xuekubao"]
+    assert isinstance(adapter, XuekubaoAdapter)
+    assert adapter.name == "xuekubao"
+
+
+def test_tiku_normalize_unknown_shape_returns_empty():
     assert SOURCE_REGISTRY["tiku.cn"].normalize({"raw": "x"}) == []
 
 
