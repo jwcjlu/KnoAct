@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..core.access import require_learning_user
 from ..core.deps import get_current_user, require_role
 from ..database import get_db
-from ..models import Question, Lesson, Text, User
+from ..models import Question, Lesson, QuestionBank, Text, User
 from ..services.question_gen import generate_reading_questions
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
@@ -62,6 +62,11 @@ def add_question(req: AddReq, _auth: User = Depends(require_role("parent", "admi
         raise HTTPException(status_code=400, detail="题目内容不能为空")
     from ..core.question_types import CATEGORY_OF_QTYPE
     category = CATEGORY_OF_QTYPE.get(req.qtype, "subjective")
+    subject = ""
+    if req.bank_id:
+        bank = db.get(QuestionBank, req.bank_id)
+        if bank:
+            subject = (bank.subject or "").strip()
     q = Question(
         lesson_id=req.lesson_id,
         bank_id=req.bank_id,
@@ -74,6 +79,8 @@ def add_question(req: AddReq, _auth: User = Depends(require_role("parent", "admi
         analysis=req.analysis.strip(),
         difficulty=req.difficulty,
         tags=json.dumps(req.tags, ensure_ascii=False),
+        subject=subject,
+        date=date_type.today(),
         status="pending",  # 人工录入默认进审核队列
     )
     db.add(q)
@@ -103,20 +110,45 @@ def review_questions(d: date_type, subject: str = "",
         q = q.filter(Question.date == d)
     if subject:
         q = q.filter(Question.subject == subject)
-    qs = q.order_by(Question.subject, Question.lesson_id, Question.id).all()
-    grouped = {}
-    lesson_titles = {}
+    qs = q.order_by(Question.subject, Question.lesson_id, Question.bank_id, Question.id).all()
+    grouped: dict[tuple, list] = {}
+    group_meta: dict[tuple, dict] = {}
+
+    def _group_key(item: Question) -> tuple:
+        if item.lesson_id:
+            return ("lesson", item.lesson_id)
+        if item.bank_id:
+            return ("bank", item.bank_id)
+        return ("solo", item.id)
+
     for item in qs:
-        grouped.setdefault((item.subject, item.lesson_id), []).append({
-            "id": item.id, "qtype": item.qtype, "question": item.question,
-            "answer": item.answer, "extra": item.extra, "task_type": item.task_type,
+        gkey = _group_key(item)
+        grouped.setdefault(gkey, []).append({
+            "id": item.id, "qtype": item.qtype, "qtype_category": item.qtype_category,
+            "question": item.question, "answer": item.answer, "extra": item.extra,
+            "task_type": item.task_type, "analysis": item.analysis or "",
+            "options": json.loads(item.options or "[]"),
+            "answer_json": json.loads(item.answer_json or "{}"),
+            "bank_id": item.bank_id,
         })
-        if item.lesson_id not in lesson_titles:
-            lesson = db.get(Lesson, item.lesson_id)
-            lesson_titles[item.lesson_id] = lesson.title if lesson else f"课程{item.lesson_id}"
+        if gkey not in group_meta:
+            subj = (item.subject or "").strip() or "未分类"
+            if gkey[0] == "lesson":
+                lesson = db.get(Lesson, gkey[1])
+                title = lesson.title if lesson else f"课程{gkey[1]}"
+                group_meta[gkey] = {"subject": subj, "lesson_id": gkey[1], "bank_id": None, "lesson_title": title}
+            elif gkey[0] == "bank":
+                bank = db.get(QuestionBank, gkey[1])
+                title = bank.title if bank else f"题库卷{gkey[1]}"
+                if bank and (bank.subject or "").strip():
+                    subj = bank.subject.strip()
+                group_meta[gkey] = {"subject": subj, "lesson_id": None, "bank_id": gkey[1], "lesson_title": title}
+            else:
+                group_meta[gkey] = {"subject": subj, "lesson_id": None, "bank_id": None, "lesson_title": "独立录入"}
+
     return {"groups": [
-        {"subject": subj, "lesson_id": lid, "lesson_title": lesson_titles.get(lid, ""), "questions": items}
-        for (subj, lid), items in grouped.items()
+        {**group_meta[gkey], "questions": items}
+        for gkey, items in grouped.items()
     ]}
 
 
@@ -157,6 +189,16 @@ def approve_by_subject(subject: str, d: date_type,
                        _auth: User = Depends(require_role("parent", "admin")),
                        db: Session = Depends(get_db)):
     db.query(Question).filter_by(subject=subject, date=d, status="pending").update(
+        {"status": "published"}, synchronize_session=False)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/approve-by-bank")
+def approve_by_bank(bank_id: int, d: date_type,
+                    _auth: User = Depends(require_role("parent", "admin")),
+                    db: Session = Depends(get_db)):
+    db.query(Question).filter_by(bank_id=bank_id, date=d, status="pending").update(
         {"status": "published"}, synchronize_session=False)
     db.commit()
     return {"ok": True}
