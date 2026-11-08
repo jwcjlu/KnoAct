@@ -859,6 +859,8 @@ git commit -m "feat(bank): bank CRUD + submit grading router"
 
 ### Task 8: `add_question` 扩展富结构 + 审核流复用
 
+> **实现注意（来自 Task 5 评审）**：`QuestionDraft`/`AddReq` 的 `qtype` 是 taxonomy 细值（`single_choice` 等），而 `Question.qtype_category`（`choice|blank|match|subjective`）须由 `CATEGORY_OF_QTYPE.get(qtype, "subjective")` 派生——下方 Step 3 已含此逻辑。另 `subject` 不在 `QuestionDraft`/`AddReq` 里、但 `Question.subject` 有列（默认 `""`），第一版可让 `add_question` 不设 `subject`（用默认 `""`），或从 `bank_id` 归属卷继承 `subject`——选后者更完整，但属增强；第一版默认 `""` 即可，本题库检索暂不依赖 subject。
+
 **Files:**
 - Modify: `backend/app/routers/questions.py`（`AddReq` 与 `add_question`）
 - Test: `backend/tests/test_questions_review.py`（追加）
