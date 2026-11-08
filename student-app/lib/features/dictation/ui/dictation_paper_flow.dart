@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme.dart';
+import '../../shell/task_page_app_bar.dart';
 import '../../../core/widgets.dart';
 import '../../center/speech_player.dart';
 import '../dictation_controller.dart';
@@ -61,15 +62,14 @@ class _DictationPaperFlowState extends ConsumerState<DictationPaperFlow> {
 
     if (widget.base.words.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: Text(widget.base.title.isEmpty ? '生词听写' : widget.base.title), backgroundColor: AppColors.bg),
+        appBar: TaskPageAppBar(title: widget.base.title.isEmpty ? '生词听写' : widget.base.title),
         body: const Center(child: Text('当前词库暂无生词', style: TextStyle(color: AppColors.gray))),
       );
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.base.title.isEmpty ? '生词听写' : widget.base.title),
-        backgroundColor: AppColors.bg,
+      appBar: TaskPageAppBar(
+        title: widget.base.title.isEmpty ? '生词听写' : widget.base.title,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),

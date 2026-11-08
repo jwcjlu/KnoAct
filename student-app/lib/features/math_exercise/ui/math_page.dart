@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
+import '../../shell/task_page_app_bar.dart';
 import '../data/math_models.dart';
 import '../math_controller.dart';
 
@@ -34,14 +35,14 @@ class _MathPageState extends ConsumerState<MathPage> {
 
     if (s.loading) {
       return Scaffold(
-        appBar: AppBar(title: Text(s.title.isEmpty ? '数学练习' : s.title), backgroundColor: AppColors.bg, scrolledUnderElevation: 0),
+        appBar: TaskPageAppBar(title: s.title.isEmpty ? '数学练习' : s.title),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     final empty = !s.hasCalc && !s.hasWord;
     return Scaffold(
-      appBar: AppBar(title: Text(s.title.isEmpty ? '数学练习' : s.title), backgroundColor: AppColors.bg, scrolledUnderElevation: 0),
+      appBar: TaskPageAppBar(title: s.title.isEmpty ? '数学练习' : s.title),
       body: empty
           ? const Center(child: Text('本次数学练习暂无题目', style: TextStyle(color: AppColors.gray)))
           : ListView(

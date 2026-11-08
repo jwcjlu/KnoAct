@@ -12,6 +12,7 @@ import '../../math_exercise/math_controller.dart';
 import '../../reader/reader_controller.dart';
 import '../data/home_models.dart';
 import '../home_controller.dart';
+import '../../shell/task_nav.dart';
 import '../home_logic.dart';
 import 'home_sections.dart';
 
@@ -26,23 +27,24 @@ class _HomePageState extends ConsumerState<HomePage> {
   final _tasksKey = GlobalKey();
   bool _redeeming = false;
 
-  void _onTask(StudyTask t) {
+  Future<void> _onTask(StudyTask t) async {
     switch (taskAction(t)) {
       case TaskAction.openReading:
-        ref.read(readerControllerProvider.notifier).loadDocuments();
-        context.go('/reader');
+        await ref.read(readerControllerProvider.notifier).enterCatalog();
+        if (!context.mounted) return;
+        context.push(taskRoute('/reader', returnTo: '/home'));
       case TaskAction.openListening:
         ref.read(centerControllerProvider.notifier).openForTask(t.id);
         context.go('/center');
       case TaskAction.openMath:
         ref.read(mathControllerProvider.notifier).init(taskId: t.id, title: t.title, content: t.content); // content 作 material 失败兜底
-        context.go('/math');
+        context.push(taskRoute('/math', returnTo: '/home'));
       case TaskAction.openKnowledge:
         ref.read(knowledgeControllerProvider.notifier).init(taskId: t.id, title: t.title, content: t.content);
-        context.go('/knowledge');
+        context.push(taskRoute('/knowledge', returnTo: '/home'));
       case TaskAction.openDictation:
         ref.read(dictationControllerProvider.notifier).init(taskId: t.id, title: t.title, subject: t.subject, content: t.content);
-        context.go('/dictation');
+        context.push(taskRoute('/dictation', returnTo: '/home'));
       case TaskAction.comingSoon:
         showMessage(context, '该练习即将在 App 上线，可先在网页版完成');
       case TaskAction.done:
@@ -118,9 +120,10 @@ class _HomePageState extends ConsumerState<HomePage> {
               title: const Text('个性化学习', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
               subtitle: const Text('选教材读原文，划词查释义、记笔记', style: TextStyle(color: Colors.white70)),
               trailing: const Icon(Icons.chevron_right, color: Colors.white),
-              onTap: () {
-                ref.read(readerControllerProvider.notifier).loadDocuments();
-                context.go('/reader');
+              onTap: () async {
+                await ref.read(readerControllerProvider.notifier).enterCatalog();
+                if (!context.mounted) return;
+                context.push(taskRoute('/reader', returnTo: '/home'));
               },
             ),
           ),

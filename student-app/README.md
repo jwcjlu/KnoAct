@@ -13,7 +13,13 @@ flutter run -d emulator-5554 --dart-define=API_BASE=http://10.0.2.2:8010   # 安
 flutter build web --release --no-web-resources-cdn --dart-define=API_BASE= # 空值：Web 走页面同源，由 nginx 反代 /api
 ```
 
-`API_BASE`：不传时连 `http://127.0.0.1:8010`；传空值时 Web 使用页面同源；其他值即后端地址。
+`API_BASE`：Web 未定义时连 `http://127.0.0.1:8010`；**Release APK 未定义时**连 [defaultProdApiBase](lib/core/config.dart)（生产为 ECS 学生端 nginx 端口，非 8010）；传空值时 Web 使用页面同源；`--dart-define=API_BASE=...` 覆盖上述默认。
+
+任务全屏页（阅读/听写等）使用 `push` + `returnTo` 查询参数；顶栏 **返回** 回上一屏，**房子图标** 回首页。见 `lib/features/shell/task_nav.dart`。
+
+```bash
+flutter build apk --release   # 使用 config.dart 中的 defaultProdApiBase
+```
 
 ## 测试
 

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
+import '../../shell/task_page_app_bar.dart';
 import '../knowledge_controller.dart';
 import '../data/knowledge_repository.dart';
 
@@ -15,7 +16,7 @@ class KnowledgePage extends ConsumerWidget {
     final ctl = ref.read(knowledgeControllerProvider.notifier);
     final allGraded = s.results.every((r) => r != null);
     return Scaffold(
-      appBar: AppBar(title: Text(s.title.isEmpty ? '基础知识' : s.title), backgroundColor: AppColors.bg, scrolledUnderElevation: 0),
+      appBar: TaskPageAppBar(title: s.title.isEmpty ? '基础知识' : s.title),
       body: s.points.isEmpty
           ? const Center(child: Text('本次任务暂无知识点', style: TextStyle(color: AppColors.gray)))
           : ListView(padding: const EdgeInsets.all(20), children: [

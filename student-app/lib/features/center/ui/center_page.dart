@@ -8,6 +8,7 @@ import '../../reader/reader_controller.dart';
 import '../center_controller.dart';
 import '../center_logic.dart';
 import '../data/center_models.dart';
+import '../../shell/task_nav.dart';
 import '../speech_player.dart';
 
 class CenterPage extends ConsumerWidget {
@@ -32,9 +33,10 @@ class CenterPage extends ConsumerWidget {
           title: const Text('个性化学习', style: TextStyle(fontWeight: FontWeight.w600)),
           subtitle: const Text('选教材读原文，划词查释义、记笔记', style: TextStyle(fontSize: 12)),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            ref.read(readerControllerProvider.notifier).loadDocuments();
-            context.go('/reader');
+          onTap: () async {
+            await ref.read(readerControllerProvider.notifier).enterCatalog();
+            if (!context.mounted) return;
+            context.push(taskRoute('/reader', returnTo: '/center'));
           },
         ),
       ),

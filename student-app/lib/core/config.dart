@@ -5,8 +5,8 @@ const String _apiBase = String.fromEnvironment('API_BASE');
 /// 本地 Web / 模拟器开发默认后端
 const String localApiBase = 'http://127.0.0.1:8010';
 
-/// 未配置 `--dart-define=API_BASE` 时，Android/iOS 安装包默认连此地址
-const String defaultProdApiBase = 'http://8.163.40.224:8010';
+/// 未配置 `--dart-define=API_BASE` 时，Android/iOS 安装包默认连此地址（ECS 对外入口，nginx 反代 /api、/uploads）
+const String defaultProdApiBase = 'http://8.163.40.224:8082';
 
 /// 本地 Web（localhost / 127.0.0.1 随机端口）加载教材页图时，与页面使用同一 host，
 /// 避免 `localhost` 与 `127.0.0.1` 混用导致 Cookie / 行为不一致。

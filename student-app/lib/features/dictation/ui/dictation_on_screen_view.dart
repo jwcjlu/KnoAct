@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme.dart';
+import '../../shell/task_page_app_bar.dart';
 import '../../../core/widgets.dart';
 import '../../center/speech_player.dart';
 import '../dictation_controller.dart';
@@ -27,7 +28,7 @@ class _DictationOnScreenViewState extends ConsumerState<DictationOnScreenView> {
     if (s.done) return _doneView(context, s);
     if (s.words.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: Text(s.title.isEmpty ? '生词听写' : s.title), backgroundColor: AppColors.bg),
+        appBar: TaskPageAppBar(title: s.title.isEmpty ? '生词听写' : s.title),
         body: const Center(child: Text('当前词库暂无生词', style: TextStyle(color: AppColors.gray))),
       );
     }
@@ -37,10 +38,7 @@ class _DictationOnScreenViewState extends ConsumerState<DictationOnScreenView> {
     final isLast = s.currentIndex == s.words.length - 1;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text('${s.title.isEmpty ? '生词听写' : s.title}（${s.currentIndex + 1}/${s.words.length}）'),
-        backgroundColor: AppColors.bg,
-      ),
+      appBar: TaskPageAppBar(title: '${s.title.isEmpty ? '生词听写' : s.title}（${s.currentIndex + 1}/${s.words.length}）'),
       body: ListView(padding: const EdgeInsets.all(20), children: [
         SectionCard(
           child: Column(children: [
@@ -120,7 +118,7 @@ class _DictationOnScreenViewState extends ConsumerState<DictationOnScreenView> {
     final correct = results.where((r) => r.isCorrect).length;
     final wrong = results.length - correct;
     return Scaffold(
-      appBar: AppBar(title: Text(s.title.isEmpty ? '生词听写' : s.title), backgroundColor: AppColors.bg),
+      appBar: TaskPageAppBar(title: s.title.isEmpty ? '生词听写' : s.title),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(children: [

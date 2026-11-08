@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme.dart';
+import '../../shell/task_page_app_bar.dart';
 import '../data/dictation_input_mode.dart';
 import '../dictation_controller.dart';
 import '../dictation_input_mode_provider.dart';
@@ -18,7 +18,7 @@ class DictationPage extends ConsumerWidget {
 
     return modeAsync.when(
       loading: () => Scaffold(
-        appBar: AppBar(title: Text(base.title.isEmpty ? '生词听写' : base.title), backgroundColor: AppColors.bg),
+        appBar: TaskPageAppBar(title: base.title.isEmpty ? '生词听写' : base.title),
         body: const Center(child: CircularProgressIndicator()),
       ),
       // 偏好拉取失败时与后端默认一致：纸上听写（勿回落屏写）

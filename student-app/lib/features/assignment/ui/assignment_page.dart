@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
+import '../../shell/task_page_app_bar.dart';
 import '../assignment_controller.dart';
 import '../data/assignment_models.dart';
 
@@ -14,7 +15,7 @@ class AssignmentPage extends ConsumerWidget {
     final s = ref.watch(assignmentControllerProvider);
     final ctl = ref.read(assignmentControllerProvider.notifier);
     return Scaffold(
-      appBar: AppBar(title: const Text('本课作业'), backgroundColor: AppColors.bg, scrolledUnderElevation: 0),
+      appBar: const TaskPageAppBar(title: '本课作业'),
       body: ListView(padding: const EdgeInsets.all(20), children: [
         if (s.busy)
           _BusyCard(label: s.busyLabel ?? '请稍候…')

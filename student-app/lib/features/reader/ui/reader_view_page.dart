@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/config.dart';
 import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
+import '../../shell/task_nav.dart';
 import '../../ask/ask_controller.dart';
 import '../../ask/ui/ask_panel.dart';
 import '../../assignment/assignment_controller.dart';
@@ -72,7 +73,13 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
     if (ref.read(readerControllerProvider).currentLesson == null) {
       try {
         final ok = await ctl.prepareView(lessonIdHint: widget.initialLessonId);
-        if (!ok && mounted) _bootError = '没有可用的教材或课文';
+        if (!ok && mounted) {
+          if (widget.initialLessonId == null) {
+            context.go(taskRoute('/reader', returnTo: returnToFromState(context)));
+            return;
+          }
+          _bootError = '没有可用的教材或课文';
+        }
       } catch (_) {
         if (mounted) _bootError = '加载失败，请检查网络或后端 8010';
       }
@@ -333,17 +340,37 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
         ),
       );
     }
+    final returnTo = returnToFromState(context);
     if (lesson == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('阅读')),
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(_bootError ?? '请先选择课文', style: const TextStyle(color: AppColors.gray)),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: () => context.go('/reader'), child: const Text('去选择教材')),
+      return PopScope(
+        canPop: context.canPop(),
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) popOrReturn(context, returnTo: returnTo);
+        },
+        child: Scaffold(
+          appBar: AppBar(
+            leading: BackButton(onPressed: () => popOrReturn(context, returnTo: returnTo)),
+            title: const Text('阅读'),
+            actions: [
+              TextButton.icon(
+                onPressed: () => goHome(ref, context),
+                icon: const Icon(Icons.home_rounded, color: AppColors.blue),
+                label: const Text('首页', style: TextStyle(color: AppColors.blue, fontWeight: FontWeight.w600)),
+              ),
             ],
+          ),
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_bootError ?? '请先选择课文', style: const TextStyle(color: AppColors.gray)),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => popOrReturn(context, returnTo: returnTo),
+                  child: const Text('去选择教材'),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -362,7 +389,12 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
         ? '${lesson.startPage}–${lesson.endPage} 页'
         : '第 ${lesson.startPage}–${lesson.endPage} 页';
 
-    return Scaffold(
+    return PopScope(
+      canPop: context.canPop(),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) popOrReturn(context, returnTo: returnTo);
+      },
+      child: Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Column(
@@ -376,7 +408,7 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
                 child: Row(children: [
                   IconButton(
                     tooltip: '返回',
-                    onPressed: () => context.go('/reader'),
+                    onPressed: () => popOrReturn(context, returnTo: returnTo),
                     icon: const Icon(Icons.arrow_back),
                   ),
                   Expanded(
@@ -394,6 +426,17 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
                     tooltip: _chatOpen ? '收起对话' : '展开对话',
                     onPressed: () => setState(() => _chatOpen = !_chatOpen),
                     icon: Icon(_chatOpen ? Icons.chat_bubble : Icons.chat_bubble_outline),
+                  ),
+                  TextButton(
+                    onPressed: () => goHome(ref, context),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.home_rounded, color: AppColors.blue, size: 22),
+                        SizedBox(width: 4),
+                        Text('首页', style: TextStyle(color: AppColors.blue, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
                   ),
                 ]),
               ),
@@ -444,6 +487,7 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

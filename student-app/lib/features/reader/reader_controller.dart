@@ -78,6 +78,22 @@ class ReaderController extends Notifier<ReaderState> {
     return null;
   }
 
+  /// 回到教材列表（保留已加载的 documents，清空课节列表）。
+  void backToDocumentList() {
+    state = state.copyWith(
+      lessons: const [],
+      currentLesson: () => null,
+      currentDocumentId: () => null,
+      storagePath: () => null,
+    );
+  }
+
+  /// 进入个性化学习目录：先展示教材列表，不保留上次未完成的选课步骤。
+  Future<void> enterCatalog() async {
+    backToDocumentList();
+    await loadDocuments();
+  }
+
   Future<void> loadLessons(int documentId, {String subject = '语文'}) async {
     if (state.documents.asData?.value == null) {
       await loadDocuments();
@@ -145,14 +161,8 @@ class ReaderController extends Notifier<ReaderState> {
       }
     }
 
-    // 无记录：第一本教材第一课
-    await loadDocuments();
-    final docs = state.documents.asData?.value;
-    if (docs == null || docs.isEmpty) return false;
-    await loadLessons(docs.first.id, subject: docs.first.subject);
-    if (state.lessons.isEmpty) return false;
-    await openLesson(state.lessons.first);
-    return state.currentLesson != null;
+    // 无缓存课文：不自动打开第一课，回 /reader 让用户选教材与课文
+    return false;
   }
 
   String _subjectForDoc(int docId) {
