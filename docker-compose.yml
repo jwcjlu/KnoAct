@@ -114,6 +114,7 @@ services:
       context: ./student-app
       args:
         APT_MIRROR: ${APT_MIRROR:-deb.debian.org}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.27-alpine}
         PUB_HOSTED_URL: ${PUB_HOSTED_URL:-https://pub.dev}
         FLUTTER_STORAGE_BASE_URL: ${FLUTTER_STORAGE_BASE_URL:-https://storage.googleapis.com}
         PUB_FALLBACK_URL: ${PUB_FALLBACK_URL:-https://pub.dev}

@@ -18,12 +18,13 @@ ENV PUB_HOSTED_URL=${PUB_HOSTED_URL} \
 
 RUN set -eux; \
     if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
-      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
-      elif [ -f /etc/apt/sources.list ]; then \
-        sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list; \
-      fi; \
+      for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do \
+        [ -f "$f" ] || continue; \
+        sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" "$f"; \
+      done; \
     fi; \
+    echo "=== apt sources (APT_MIRROR=${APT_MIRROR}) ==="; \
+    (cat /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true); \
     apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git unzip xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
@@ -64,7 +65,8 @@ RUN set -eux; \
     flutter build web --release --no-web-resources-cdn --no-wasm-dry-run --no-pub \
         --dart-define=API_BASE=""
 
-FROM nginx:1.27-alpine
+ARG NGINX_IMAGE=nginx:1.27-alpine
+FROM ${NGINX_IMAGE}
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/build/web /usr/share/nginx/html
 EXPOSE 80

@@ -73,6 +73,28 @@ def test_migrate_multi_student_columns_idempotent(setup_db):
         assert conn.exec_driver_sql("SELECT COUNT(*) FROM pdf_documents").scalar() == 1
 
 
+def test_migrate_account_columns_interests_idempotent(setup_db):
+    """陈旧 users 表补 interests 列：SQLite 可走 DEFAULT，幂等。"""
+    from app.database import engine
+    from app.seed import _migrate_account_columns
+
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE IF EXISTS users")
+        conn.exec_driver_sql(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(64), role VARCHAR(16))"
+        )
+        conn.exec_driver_sql("INSERT INTO users (id, name, role) VALUES (1, '晨晨', 'child')")
+
+    _migrate_account_columns(backfill=False)
+    _migrate_account_columns(backfill=False)
+
+    with engine.connect() as conn:
+        cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(users)")}
+        interests = conn.exec_driver_sql("SELECT interests FROM users WHERE id = 1").scalar()
+    assert "interests" in cols
+    assert interests == ""
+
+
 def test_migrate_bucket_columns_idempotent(setup_db):
     """陈旧库补 bucket_id 迁移：给业务表补可空 bucket_id，幂等、不丢数据。"""
     from app.database import engine

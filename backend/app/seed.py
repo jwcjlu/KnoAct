@@ -125,7 +125,12 @@ def _migrate_account_columns(*, backfill: bool = True):
         if "gender" not in cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN gender VARCHAR(16) DEFAULT 'unknown'"))
         if "interests" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN interests TEXT DEFAULT ''"))
+            # MySQL 禁止 TEXT/BLOB 默认值；与 models.LongText 的 MEDIUMTEXT 对齐
+            if engine.dialect.name == "mysql":
+                conn.execute(text("ALTER TABLE users ADD COLUMN interests MEDIUMTEXT"))
+                conn.execute(text("UPDATE users SET interests = '' WHERE interests IS NULL"))
+            else:
+                conn.execute(text("ALTER TABLE users ADD COLUMN interests TEXT DEFAULT ''"))
         if "phone" not in cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(20) DEFAULT ''"))
         if "email" not in cols:
