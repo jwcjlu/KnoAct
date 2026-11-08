@@ -864,6 +864,10 @@ async function approveByBank(bankId){
   await api(`/api/questions/approve-by-bank?bank_id=${bankId}&d=${todayStr()}`, {method:'POST'});
   await loadReviewQuestions(); render();
 }
+async function approveByPassage(passageId){
+  await api(`/api/questions/approve-by-passage?passage_id=${passageId}&d=${todayStr()}`, {method:'POST'});
+  await loadReviewQuestions(); render();
+}
 async function syncBankFromTiku(){
   if(!bankSelectedId){ toast('请先选择卷子'); return; }
   const keyword = (prompt('tiku.cn 搜索关键词（可空）','')||'').trim();
@@ -1081,6 +1085,7 @@ async function approveAllQuestions(){
   await loadReviewQuestions(); render();
 }
 function reviewGroupKey(g){
+  if(g.passage_id) return `passage-${g.passage_id}`;
   if(g.bank_id) return `bank-${g.bank_id}`;
   if(g.lesson_id != null && g.lesson_id !== '') return String(g.lesson_id);
   return `solo-${(g.questions && g.questions[0] && g.questions[0].id) || 0}`;
@@ -1195,6 +1200,9 @@ function renderQuestionTab(){
           </div>
         </div>`;
       }).join('');
+      const passageHtml = (g.passage && g.passage.content)
+        ? `<div class="passage-preview" style="margin:8px 0 12px">${renderPassageMarkup(g.passage.content)}</div>`
+        : '';
 
       return `<div class="lesson-group" style="border-top:1px solid var(--line2);padding:12px 20px">
         <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="toggleLesson('${gkey}')">
@@ -1204,9 +1212,10 @@ function renderQuestionTab(){
           <div style="margin-left:auto;display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
             ${g.lesson_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByLesson('${g.lesson_id}')">通过本课</button>`:''}
             ${g.bank_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByBank('${g.bank_id}')">通过本卷</button>`:''}
+            ${g.passage_id?`<button class="btn-ghost" style="padding:4px 10px" onclick="approveByPassage('${g.passage_id}')">通过本篇</button>`:''}
           </div>
         </div>
-        <div style="margin-top:10px;padding-left:20px;${open?'':'display:none'}">${qItems}</div>
+        <div style="margin-top:10px;padding-left:20px;${open?'':'display:none'}">${passageHtml}${qItems}</div>
       </div>`;
     }).join('');
 
