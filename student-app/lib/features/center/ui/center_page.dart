@@ -10,6 +10,7 @@ import '../center_logic.dart';
 import '../data/center_models.dart';
 import '../../shell/task_nav.dart';
 import '../speech_player.dart';
+import '../../bank_exercise/practice_banks_provider.dart';
 
 class CenterPage extends ConsumerWidget {
   const CenterPage({super.key});
@@ -41,6 +42,8 @@ class CenterPage extends ConsumerWidget {
         ),
       ),
       const SizedBox(height: 16),
+      const _PracticeBanksSection(),
+      const SizedBox(height: 16),
       if (s.pending == null)
         const _HubHint()
       else
@@ -50,6 +53,46 @@ class CenterPage extends ConsumerWidget {
           data: (m) => m.isEmpty ? const _ListeningEmpty() : _MaterialView(state: s, material: m),
         ),
     ]);
+  }
+}
+
+class _PracticeBanksSection extends ConsumerWidget {
+  const _PracticeBanksSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(practiceBanksProvider);
+    return async.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (banks) {
+        if (banks.isEmpty) return const SizedBox.shrink();
+        return SectionCard(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+                child: Text('题库练习', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+              ),
+              for (final b in banks)
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.assignment_outlined, color: AppColors.blue),
+                  title: Text(b.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    '${b.subject.isNotEmpty ? b.subject : '综合'} · ${b.questionCount} 题',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/bank-exercise?bank_id=${b.id}'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 

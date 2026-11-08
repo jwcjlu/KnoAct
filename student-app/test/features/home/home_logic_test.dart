@@ -43,6 +43,7 @@ void main() {
     expect(taskAction(task(1, '语文', 'dictation', 'not_started')), TaskAction.openDictation);
     expect(taskAction(task(1, '语文', 'math', 'not_started')), TaskAction.openMath);
     expect(taskAction(task(1, '语文', 'knowledge', 'not_started')), TaskAction.openKnowledge);
+    expect(taskAction(task(1, '语文', 'practice', 'not_started')), TaskAction.openBankPractice);
     for (final type in ['review', 'custom']) {
       expect(taskAction(task(1, '语文', type, 'not_started')), TaskAction.comingSoon);
     }

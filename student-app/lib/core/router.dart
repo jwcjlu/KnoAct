@@ -8,6 +8,7 @@ import '../features/auth/ui/login_page.dart';
 import '../features/auth/ui/otp_login_page.dart';
 import '../features/auth/ui/register_page.dart';
 import '../features/assignment/ui/assignment_page.dart';
+import '../features/bank_exercise/ui/bank_exercise_page.dart';
 import '../features/center/ui/center_page.dart';
 import '../features/dictation/ui/dictation_page.dart';
 import '../features/home/ui/home_page.dart';
@@ -51,7 +52,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           path == '/dictation' ||
           path == '/reader' ||
           path == '/reader/view' ||
-          path == '/reader/spike') {
+          path == '/reader/spike' ||
+          path == '/bank-exercise') {
         return null;
       }
       return '/home';
@@ -75,6 +77,19 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/reader/spike',
         builder: (_, _) => const PdfReaderSpikePage(),
+      ),
+      GoRoute(
+        path: '/bank-exercise',
+        builder: (_, state) {
+          final qp = state.uri.queryParameters;
+          final idsRaw = (qp['ids'] ?? '').split(',').where((s) => s.trim().isNotEmpty);
+          final ids = idsRaw.map((s) => int.tryParse(s.trim())).whereType<int>().toList();
+          return BankExercisePage(
+            bankId: int.tryParse(qp['bank_id'] ?? '') ?? 0,
+            questionIds: ids,
+            taskId: int.tryParse(qp['task_id'] ?? ''),
+          );
+        },
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => AppShell(navigationShell: shell),

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -45,6 +47,25 @@ class _HomePageState extends ConsumerState<HomePage> {
       case TaskAction.openDictation:
         ref.read(dictationControllerProvider.notifier).init(taskId: t.id, title: t.title, subject: t.subject, content: t.content);
         context.push(taskRoute('/dictation', returnTo: '/home'));
+      case TaskAction.openBankPractice:
+        var bankId = 0;
+        var ids = <int>[];
+        try {
+          final m = jsonDecode(t.content);
+          if (m is Map) {
+            bankId = (m['bank_id'] as num?)?.toInt() ?? 0;
+            final raw = m['question_ids'];
+            if (raw is List) {
+              ids = raw.map((e) => (e as num).toInt()).toList();
+            }
+          }
+        } catch (_) {}
+        if (bankId <= 0) {
+          showMessage(context, '题库任务配置有误，请联系家长');
+          break;
+        }
+        final q = ids.isEmpty ? 'bank_id=$bankId&task_id=${t.id}' : 'bank_id=$bankId&ids=${ids.join(',')}&task_id=${t.id}';
+        context.push(taskRoute('/bank-exercise?$q', returnTo: '/home'));
       case TaskAction.comingSoon:
         showMessage(context, '该练习即将在 App 上线，可先在网页版完成');
       case TaskAction.done:

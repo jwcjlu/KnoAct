@@ -33,6 +33,7 @@ class MistakeItem {
 /// 来源类型 → 中文名（对齐旧版前端 srcName）
 const mistakeSourceNames = {
   'dictation': '生词听写',
+  'bank': '题库练习',
   'review': '基础知识复习',
   'listening': '单词听写',
   'reading': '阅读理解',
