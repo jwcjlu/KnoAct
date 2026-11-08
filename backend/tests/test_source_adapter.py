@@ -1,4 +1,4 @@
-from app.core.source_adapter import QuestionDraft, ManualAdapter, ThirdPartyAdapter
+from app.core.source_adapter import QuestionDraft, ManualAdapter, ThirdPartyAdapter, OcrAdapter
 from app.core.source_registry import SOURCE_REGISTRY
 
 
@@ -21,3 +21,18 @@ def test_third_party_registry_has_tiku():
 
 def test_tiku_stub_returns_empty():
     assert SOURCE_REGISTRY["tiku.cn"].normalize({"raw": "x"}) == []
+
+
+def test_ocr_adapter_normalize_dict_and_list():
+    # dict-with-questions 与 prompt/choices 回退分支
+    raw = {"questions": [
+        {"prompt": "3+2=?", "choices": [{"label": "5", "value": 0}], "answer": "5"},
+        {"question": "", "prompt": "", "answer": "忽略空题干"},
+        "not-a-dict",
+    ]}
+    drafts = OcrAdapter().normalize(raw)
+    assert len(drafts) == 1
+    d = drafts[0]
+    assert d.qtype == "short_answer"  # 未给 qtype 默认
+    assert d.question == "3+2=?"
+    assert d.options == [{"label": "5", "value": 0}]
