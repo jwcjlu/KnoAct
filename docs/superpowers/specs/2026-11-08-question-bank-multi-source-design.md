@@ -83,8 +83,10 @@ taxonomy 以**代码常量**定义在 `core/question_types.py`（`CATEGORY_OF_QT
 - `match`：`answer_json.pairs` 校验每对是否匹配。
 - `subjective`：调用 `grade_subjective()`（走 `get_provider`，参考 `rubric`），AI 未配置/fake 返回 `pending`（待家长批改）。
 
-主观题批改结果写回 `Question`（或作答记录）的 `parent_status`/`ai_status` 字段，对齐现有
-数学应用题照片批改（`2026-11-07-math-word-photo-design`）的「AI 不确定 → 待家长确认」约定。
+主观题批改结果写回该次**作答记录**（`Question` 只存题目与标准答案/rubric，不存孩子作答；作答
+记录沿用现有错题本/掌握度之外的轻量「练习作答」结构，或复用 `Mistake` 表 + `source_type=bank`
+承载对错），对齐现有数学应用题照片批改（`2026-11-07-math-word-photo-design`）的「AI 不确定 →
+待家长确认」约定。作答记录的具体承载表在实现计划中确定（优先复用 `Mistake`，避免新表）。
 
 ---
 
@@ -185,9 +187,10 @@ difficulty, tags`）。三个来源各自实现：
 
 - `Question.lesson_id` 改 nullable（SQLite/MySQL 均兼容）。
 - 新增列 `answer_json`/`options`/`analysis`/`difficulty`/`tags`/`qtype_category`/`bank_id` 均带默认值。
-- 旧 `qtype` 4 值迁移映射：`reading→subjective`、`listening→choice`、`knowledge→subjective`、
-  `math→subjective`（`qtype_category` 回填）；`qtype` 具体值保留原样或映射到 taxonomy 最近项，
-  `answer` 不动（老数据仍可用 `answer` 展示）。
+- 旧 `qtype` 4 值迁移：`qtype` 统一映射到 taxonomy 最近项——`reading→short_answer`、
+  `listening→single_choice`、`knowledge→short_answer`、`math→application`；`qtype_category` 相应
+  回填（`subjective`/`choice`/`subjective`/`subjective`）。`answer` 不动（老数据仍可用 `answer`
+  展示，`answer_json` 为空表示「无结构化判分依据」，判分时回落到仅展示、人工批改）。
 
 ---
 
