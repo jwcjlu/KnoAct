@@ -1,3 +1,18 @@
+class ReadingPassageInfo {
+  const ReadingPassageInfo({required this.id, required this.title, required this.content, this.subject = ''});
+  final int id;
+  final String title;
+  final String content;
+  final String subject;
+
+  factory ReadingPassageInfo.fromJson(Map<String, dynamic> json) => ReadingPassageInfo(
+        id: (json['id'] as num?)?.toInt() ?? 0,
+        title: '${json['title'] ?? ''}',
+        content: '${json['content'] ?? ''}',
+        subject: '${json['subject'] ?? ''}',
+      );
+}
+
 class PracticeBank {
   const PracticeBank({
     required this.id,
@@ -30,6 +45,8 @@ class BankQuestion {
     required this.question,
     required this.options,
     this.analysis = '',
+    this.passageId,
+    this.passage,
   });
 
   final int id;
@@ -38,6 +55,8 @@ class BankQuestion {
   final String question;
   final List<BankOption> options;
   final String analysis;
+  final int? passageId;
+  final ReadingPassageInfo? passage;
 
   factory BankQuestion.fromJson(Map<String, dynamic> json) {
     final optsRaw = json['options'];
@@ -47,6 +66,9 @@ class BankQuestion {
         if (o is Map) opts.add(BankOption.fromJson(Map<String, dynamic>.from(o)));
       }
     }
+    ReadingPassageInfo? passage;
+    final pRaw = json['passage'];
+    if (pRaw is Map) passage = ReadingPassageInfo.fromJson(Map<String, dynamic>.from(pRaw));
     return BankQuestion(
       id: (json['id'] as num?)?.toInt() ?? 0,
       qtype: '${json['qtype'] ?? ''}',
@@ -54,6 +76,8 @@ class BankQuestion {
       question: '${json['question'] ?? ''}',
       options: opts,
       analysis: '${json['analysis'] ?? ''}',
+      passageId: (json['passage_id'] as num?)?.toInt(),
+      passage: passage,
     );
   }
 }

@@ -6,6 +6,7 @@ import '../../../core/widgets.dart';
 import '../../shell/task_page_app_bar.dart';
 import '../bank_exercise_controller.dart';
 import '../data/bank_models.dart';
+import '../passage_markup.dart';
 
 class BankExercisePage extends ConsumerStatefulWidget {
   const BankExercisePage({
@@ -75,25 +76,16 @@ class _BankExercisePageState extends ConsumerState<BankExercisePage> {
                     ),
                   ),
                 const SizedBox(height: 12),
-                for (var i = 0; i < s.questions.length; i++) ...[
-                  _QuestionCard(
-                    index: i,
-                    question: s.questions[i],
-                    submitted: s.submitted,
-                    result: resultByQid[s.questions[i].id],
-                    selectedSingle: s.selectedSingle[s.questions[i].id],
-                    selectedMulti: s.selectedMulti[s.questions[i].id] ?? const [],
-                    blankText: _firstBlank(s.blanks[s.questions[i].id]),
-                    textAnswer: s.texts[s.questions[i].id] ?? '',
-                    onSingle: s.submitted ? null : (v) => ctl.setSingle(s.questions[i].id, v),
-                    onMulti: s.submitted
-                        ? null
-                        : (v, on) => ctl.toggleMulti(s.questions[i].id, v, on),
-                    onBlank: s.submitted ? null : (v) => ctl.setBlank(s.questions[i].id, 0, v),
-                    onText: s.submitted ? null : (v) => ctl.setText(s.questions[i].id, v),
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                ..._buildQuestionBlocks(
+                  questions: s.questions,
+                  submitted: s.submitted,
+                  resultByQid: resultByQid,
+                  selectedSingle: s.selectedSingle,
+                  selectedMulti: s.selectedMulti,
+                  blanks: s.blanks,
+                  texts: s.texts,
+                  ctl: ctl,
+                ),
                 if (!s.submitted)
                   FilledButton(
                     onPressed: s.busy ? null : ctl.submit,
@@ -107,6 +99,51 @@ class _BankExercisePageState extends ConsumerState<BankExercisePage> {
   static String _firstBlank(List<String>? blanks) {
     if (blanks == null || blanks.isEmpty) return '';
     return blanks.first;
+  }
+
+  List<Widget> _buildQuestionBlocks({
+    required List<BankQuestion> questions,
+    required bool submitted,
+    required Map<int, BankAnswerResult> resultByQid,
+    required Map<int, int?> selectedSingle,
+    required Map<int, List<int>> selectedMulti,
+    required Map<int, List<String>> blanks,
+    required Map<int, String> texts,
+    required BankExerciseController ctl,
+  }) {
+    final shown = <int>{};
+    final widgets = <Widget>[];
+    for (var i = 0; i < questions.length; i++) {
+      final q = questions[i];
+      final pid = q.passageId;
+      if (pid != null && !shown.contains(pid)) {
+        shown.add(pid);
+        final p = q.passage;
+        if (p != null && p.content.isNotEmpty) {
+          widgets.add(SectionCard(
+            padding: const EdgeInsets.all(16),
+            child: PassageContentView(title: p.title, content: p.content),
+          ));
+          widgets.add(const SizedBox(height: 12));
+        }
+      }
+      widgets.add(_QuestionCard(
+        index: i,
+        question: q,
+        submitted: submitted,
+        result: resultByQid[q.id],
+        selectedSingle: selectedSingle[q.id],
+        selectedMulti: selectedMulti[q.id] ?? const [],
+        blankText: _firstBlank(blanks[q.id]),
+        textAnswer: texts[q.id] ?? '',
+        onSingle: submitted ? null : (v) => ctl.setSingle(q.id, v),
+        onMulti: submitted ? null : (v, on) => ctl.toggleMulti(q.id, v, on),
+        onBlank: submitted ? null : (v) => ctl.setBlank(q.id, 0, v),
+        onText: submitted ? null : (v) => ctl.setText(q.id, v),
+      ));
+      widgets.add(const SizedBox(height: 12));
+    }
+    return widgets;
   }
 }
 
