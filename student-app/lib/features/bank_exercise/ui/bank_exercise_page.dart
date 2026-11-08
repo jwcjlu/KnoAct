@@ -122,7 +122,14 @@ class _BankExercisePageState extends ConsumerState<BankExercisePage> {
         if (p != null && p.content.isNotEmpty) {
           widgets.add(SectionCard(
             padding: const EdgeInsets.all(16),
-            child: PassageContentView(title: p.title, content: p.content),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('阅读材料', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.gray)),
+                const SizedBox(height: 8),
+                PassageContentView(title: p.title, content: p.content),
+              ],
+            ),
           ));
           widgets.add(const SizedBox(height: 12));
         }

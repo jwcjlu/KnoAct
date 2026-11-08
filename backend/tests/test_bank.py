@@ -146,18 +146,46 @@ def test_import_third_party_tiku(client, setup_db):
     assert r.json()["count"] == 1
 
 
+_TINY_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
 def test_photo_import_empty_without_ocr(client, setup_db):
     h, bank_id, _ = _seed_bank_with_question()
-    # 1x1 png
-    png = (
-        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
-        b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
-    )
     r = client.post(f"/api/banks/{bank_id}/photo-import",
-                    files={"file": ("x.png", png, "image/png")}, headers=h)
+                    files={"file": ("x.png", _TINY_PNG, "image/png")}, headers=h)
     assert r.status_code == 200
     assert r.json()["count"] == 0
+
+
+def test_photo_import_concatenates_pages_in_filename_order(client, setup_db, monkeypatch):
+    captured = {}
+
+    def fake_ocr(db, data, instruction=""):
+        return {b"page-a": "假如没有灰尘", b"page-b": "1.默读文章"}[data]
+
+    def fake_struct(db, text):
+        captured["text"] = text
+        return []
+
+    monkeypatch.setattr("app.routers.bank.ocr_image", fake_ocr)
+    monkeypatch.setattr("app.routers.bank.structure_questions_from_text", fake_struct)
+    h, bank_id, _ = _seed_bank_with_question()
+    r = client.post(
+        f"/api/banks/{bank_id}/photo-import",
+        files=[
+            ("files", ("2.png", b"page-b", "image/png")),
+            ("files", ("1.png", b"page-a", "image/png")),
+        ],
+        headers=h,
+    )
+    assert r.status_code == 200
+    text = captured["text"]
+    assert text.index("【第1页】") < text.index("【第2页】")
+    assert text.index("假如没有灰尘") < text.index("1.默读文章")
 
 
 def test_persist_drafts_groups_passage(client, setup_db):

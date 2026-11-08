@@ -1,6 +1,7 @@
 """独立题库/卷：建卷、列卷、拉题、做题判分。"""
 import json
 import os
+import re
 from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -22,7 +23,29 @@ from ..services.grade_question import grade_question, grade_subjective_with_ai
 from ..services.ocr_import import structure_questions_from_text
 
 _PHOTO_MAX_BYTES = 8 * 1024 * 1024
+_PHOTO_MAX_PAGES = 8
 _PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+_PHOTO_OCR_INSTRUCTION = (
+    "识别试卷图片中的全部文字，保留题号、选项与表格。"
+    "若是阅读理解，短文与题目都要原样输出，不要省略。"
+)
+
+
+def _photo_sort_key(name: str):
+    return [int(p) if p.isdigit() else p.lower() for p in re.split(r"(\d+)", name or "")]
+
+
+def _collect_photo_uploads(
+    files: list[UploadFile] | None, file: UploadFile | None,
+) -> list[UploadFile]:
+    uploads: list[UploadFile] = []
+    for f in files or []:
+        if f is not None and (f.filename or "").strip():
+            uploads.append(f)
+    if file is not None and (file.filename or "").strip():
+        uploads.append(file)
+    uploads.sort(key=lambda f: _photo_sort_key(f.filename or ""))
+    return uploads
 
 router = APIRouter(prefix="/api/banks", tags=["bank"])
 
@@ -291,22 +314,34 @@ def submit_bank(req: BankSubmitReq, user: User = Depends(require_learning_user),
 @router.post("/{bank_id}/photo-import")
 async def photo_import_bank(
     bank_id: int,
-    file: UploadFile = File(...),
+    files: list[UploadFile] | None = File(None),
+    file: UploadFile | None = File(None),
     user: User = Depends(require_role("parent", "admin")),
     db: Session = Depends(get_db),
 ):
-    """卷子拍照 → OCR → LLM 结构化 → 待审核题目批量入库。"""
+    """卷子拍照（可多页）→ OCR 按文件名顺序拼接 → LLM 结构化 → 待审核入库。"""
     bank = _require_bank(bank_id, user, db)
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in _PHOTO_EXT:
-        raise HTTPException(status_code=400, detail="不支持的图片格式")
-    data = await file.read()
-    if len(data) > _PHOTO_MAX_BYTES:
-        raise HTTPException(status_code=400, detail="图片过大")
-    try:
-        ocr_text = ocr_image(db, data, instruction="识别试卷图片中的全部题目文字，保留题号与选项。")
-    except Exception:
-        ocr_text = ""
+    uploads = _collect_photo_uploads(files, file)
+    if not uploads:
+        raise HTTPException(status_code=400, detail="请上传图片")
+    if len(uploads) > _PHOTO_MAX_PAGES:
+        raise HTTPException(status_code=400, detail=f"一次最多 {_PHOTO_MAX_PAGES} 张")
+    pages: list[str] = []
+    for i, up in enumerate(uploads, 1):
+        ext = os.path.splitext(up.filename or "")[1].lower()
+        if ext not in _PHOTO_EXT:
+            raise HTTPException(status_code=400, detail="不支持的图片格式")
+        data = await up.read()
+        if len(data) > _PHOTO_MAX_BYTES:
+            raise HTTPException(status_code=400, detail="图片过大")
+        try:
+            text = ocr_image(db, data, instruction=_PHOTO_OCR_INSTRUCTION)
+        except Exception:
+            text = ""
+        text = (text or "").strip()
+        if text:
+            pages.append(f"【第{i}页】\n{text}")
+    ocr_text = "\n\n".join(pages)
     drafts = structure_questions_from_text(db, ocr_text or "")
     if not drafts:
         return {"count": 0, "ids": [], "message": "未能识别题目，请换更清晰照片或改用手工录入"}

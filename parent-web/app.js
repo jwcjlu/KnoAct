@@ -784,10 +784,10 @@ function renderBankQuestionForm(){
             <button type="button" class="btn-ghost" onclick="syncBankFromXuekubao()">${icon('search',16)} 学库宝选题</button>
             <label class="btn-ghost" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer;margin:0">
               ${icon('camera',16)} 拍照导入
-              <input type="file" accept="image/*" style="display:none" onchange="uploadBankPhoto(this)">
+              <input type="file" accept="image/*" multiple style="display:none" onchange="uploadBankPhoto(this)">
             </label>
           </div>
-          <div class="bank-import-hint">拍照与第三方同步的题目均需先审核，通过后才会进入练习。</div>
+          <div class="bank-import-hint">阅读理解可一次选多页（按文件名顺序拼接，如 1.png、2.png）。导入后需先审核。</div>
         </div>`;
   const body = bankEntryMode==='reading'
     ? `${modeBar}${renderReadingForm()}${importBar}`
@@ -1109,11 +1109,13 @@ async function syncBankFromXuekubao(){
 }
 async function uploadBankPhoto(input){
   if(!bankSelectedId || !input.files || !input.files[0]) return;
+  const list = [...input.files].sort((a,b)=>a.name.localeCompare(b.name, 'zh', {numeric:true}));
   const fd = new FormData();
-  fd.append('file', input.files[0]);
+  list.forEach(f=>fd.append('files', f));
   const h = {};
   const t = getAccessToken();
   if(t) h.Authorization = `Bearer ${t}`;
+  toast(`正在识别 ${list.length} 张图片…`);
   try{
     const r = await fetch(API + `/api/banks/${bankSelectedId}/photo-import`, {method:'POST', headers:h, body:fd});
     const data = await r.json();
