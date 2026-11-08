@@ -1,6 +1,6 @@
 from app import models  # noqa: F401  ensure all models registered on Base.metadata
-from conftest import make_lesson
-from app.models import Question, QuestionBank
+from conftest import make_lesson, make_user
+from app.models import Question, QuestionBank, ReadingPassage
 from sqlalchemy import inspect
 
 
@@ -27,7 +27,8 @@ def test_create_all_tables():
     expected = {
         "users", "pdf_documents", "pdf_pages", "lessons", "textbooks",
         "learning_progress", "word_banks", "knowledge_points", "texts", "notes",
-        "word_mastery", "mistakes", "learning_records", "points", "goals", "rewards", "model_config",
+        "word_mastery", "mistakes", "learning_records", "points", "goals", "rewards",         "model_config",
+        "reading_passages",
     }
     assert expected.issubset(tables)
 
@@ -53,3 +54,35 @@ def test_question_has_new_fields():
     assert q.extra == '{"keywords":["a"]}'
     assert q.task_type == "knowledge"
     db.close()
+
+
+def test_reading_passage_table():
+    cols = {c.name for c in inspect(ReadingPassage).columns}
+    for name in ("user_id", "bank_id", "subject", "title", "content", "grade", "status", "created_at"):
+        assert name in cols, f"ReadingPassage 缺列 {name}"
+    assert ReadingPassage.__table__.c.bank_id.nullable is True
+    assert ReadingPassage.__table__.c.grade.nullable is True
+
+
+def test_question_passage_id_nullable():
+    assert "passage_id" in {c.name for c in inspect(Question).columns}
+    assert Question.__table__.c.passage_id.nullable is True
+
+
+def test_reading_passage_roundtrip(db):
+    parent = make_user(db, name="rp_parent", role="parent")
+    p = ReadingPassage(
+        user_id=parent.id, subject="语文", title="春天", content="春天来了。",
+        status="pending",
+    )
+    db.add(p)
+    db.flush()
+    q = Question(
+        passage_id=p.id, qtype="short_answer", qtype_category="subjective",
+        question="写了什么季节？", answer="春天", status="pending",
+    )
+    db.add(q)
+    db.commit()
+    got = db.get(ReadingPassage, p.id)
+    assert got.content == "春天来了。"
+    assert db.get(Question, q.id).passage_id == p.id

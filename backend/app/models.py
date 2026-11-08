@@ -101,6 +101,7 @@ class Question(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)  # 改 nullable：可独立成题
     bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"), nullable=True)  # 归属的卷
+    passage_id: Mapped[int] = mapped_column(ForeignKey("reading_passages.id"), nullable=True)  # 阅读材料子题；独立题为 NULL
     qtype: Mapped[str] = mapped_column(String(16), default="reading")   # 旧值 reading/listening/...；新值 taxonomy（single_choice 等），经 LEGACY_QTYPE_MAP 迁移
     qtype_category: Mapped[str] = mapped_column(String(16), default="subjective")  # choice|blank|match|subjective
     question: Mapped[str] = mapped_column(LongText)
@@ -462,4 +463,18 @@ class QuestionBank(Base):
     tags: Mapped[str] = mapped_column(LongText, default="")   # JSON 文本
     source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|photo|third_party
     status: Mapped[str] = mapped_column(String(16), default="active")  # active|archived
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ReadingPassage(Base):
+    """阅读理解材料。子题挂 Question.passage_id，不新增 qtype。"""
+    __tablename__ = "reading_passages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"), nullable=True)
+    subject: Mapped[str] = mapped_column(String(16), default="")
+    title: Mapped[str] = mapped_column(String(255), default="")
+    content: Mapped[str] = mapped_column(LongText, default="")
+    grade: Mapped[int] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | published
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
