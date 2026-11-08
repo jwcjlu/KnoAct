@@ -101,7 +101,7 @@ class Question(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)  # 改 nullable：可独立成题
     bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"), nullable=True)  # 归属的卷
-    qtype: Mapped[str] = mapped_column(String(16), default="reading")   # taxonomy 值（single_choice/fill_blank/...）
+    qtype: Mapped[str] = mapped_column(String(16), default="reading")   # 旧值 reading/listening/...；新值 taxonomy（single_choice 等），经 LEGACY_QTYPE_MAP 迁移
     qtype_category: Mapped[str] = mapped_column(String(16), default="subjective")  # choice|blank|match|subjective
     question: Mapped[str] = mapped_column(LongText)
     answer: Mapped[str] = mapped_column(LongText, default="")
