@@ -15,7 +15,7 @@ from ..core.source_adapter import QuestionDraft
 from ..core.source_registry import SOURCE_REGISTRY
 from ..services.source_config import tiku_cn_adapter, xuekubao_adapter
 from ..database import get_db
-from ..models import Mistake, Question, QuestionBank, User
+from ..models import Mistake, Question, QuestionBank, ReadingPassage, User
 from ..services.ai import ocr_image
 from ..services.bucket_guard import resolve_bucket_id
 from ..services.grade_question import grade_question, grade_subjective_with_ai
@@ -211,12 +211,19 @@ def list_bank_questions(
         if qids:
             q = q.filter(Question.id.in_(qids))
     qs = q.order_by(Question.id).all()
+    pids = {x.passage_id for x in qs if x.passage_id}
+    passages = {}
+    if pids:
+        for p in db.query(ReadingPassage).filter(ReadingPassage.id.in_(pids)).all():
+            passages[p.id] = {"id": p.id, "title": p.title, "content": p.content, "subject": p.subject}
     return [{
-        "id": q.id, "qtype": q.qtype, "qtype_category": q.qtype_category,
-        "question": q.question, "options": json.loads(q.options or "[]"),
-        "answer": q.answer, "analysis": q.analysis, "difficulty": q.difficulty,
-        "tags": json.loads(q.tags or "{}"),
-    } for q in qs]
+        "id": item.id, "qtype": item.qtype, "qtype_category": item.qtype_category,
+        "question": item.question, "options": json.loads(item.options or "[]"),
+        "answer": item.answer, "analysis": item.analysis, "difficulty": item.difficulty,
+        "tags": json.loads(item.tags or "{}"),
+        "passage_id": item.passage_id,
+        "passage": passages.get(item.passage_id),
+    } for item in qs]
 
 
 @router.post("/submit")

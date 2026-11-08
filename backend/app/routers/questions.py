@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..core.access import require_learning_user
 from ..core.deps import get_current_user, require_role
 from ..database import get_db
-from ..models import Question, Lesson, QuestionBank, Text, User
+from ..models import Question, Lesson, QuestionBank, ReadingPassage, Text, User
 from ..services.question_gen import generate_reading_questions
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
@@ -22,6 +22,7 @@ class GenerateReq(BaseModel):
 class AddReq(BaseModel):
     lesson_id: int | None = None
     bank_id: int | None = None
+    passage_id: int | None = None
     qtype: str = "short_answer"
     question: str
     answer: str = ""
@@ -63,13 +64,19 @@ def add_question(req: AddReq, _auth: User = Depends(require_role("parent", "admi
     from ..core.question_types import CATEGORY_OF_QTYPE
     category = CATEGORY_OF_QTYPE.get(req.qtype, "subjective")
     subject = ""
+    if req.passage_id:
+        psg = db.get(ReadingPassage, req.passage_id)
+        if not psg:
+            raise HTTPException(status_code=404, detail="阅读材料不存在")
+        subject = (psg.subject or "").strip()
     if req.bank_id:
         bank = db.get(QuestionBank, req.bank_id)
         if bank:
-            subject = (bank.subject or "").strip()
+            subject = subject or (bank.subject or "").strip()
     q = Question(
         lesson_id=req.lesson_id,
         bank_id=req.bank_id,
+        passage_id=req.passage_id,
         qtype=req.qtype,
         qtype_category=category,
         question=question,

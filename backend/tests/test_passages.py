@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.database import SessionLocal
 from app.models import Question, QuestionBank, ReadingPassage
-from conftest import auth_headers, make_account
+from conftest import auth_headers, make_account, parent_child
 
 client = TestClient(app)
 
@@ -89,3 +89,52 @@ def test_list_passages_by_bank(client, setup_db):
     assert len(rows) >= 1
     assert rows[0]["title"] == "A"
     assert rows[0]["question_count"] == 0
+
+
+def test_list_bank_questions_embeds_passage(client, setup_db):
+    h, bid, _ = _parent_with_bank()
+    cr = client.post("/api/passages", json={
+        "title": "短文", "content": "**春天**来了。", "bank_id": bid,
+        "questions": [{"qtype": "short_answer", "question": "什么季节？", "answer": "春天"}],
+    }, headers=h)
+    qid = cr.json()["question_ids"][0]
+    db = SessionLocal()
+    db.get(Question, qid).status = "published"
+    db.commit()
+    db.close()
+    r = client.get(f"/api/banks/{bid}/questions", headers=h)
+    assert r.status_code == 200
+    items = r.json()
+    assert len(items) == 1
+    assert items[0]["passage_id"] == cr.json()["id"]
+    assert items[0]["passage"]["title"] == "短文"
+    assert items[0]["passage"]["content"] == "**春天**来了。"
+
+
+def test_submit_passage_child_reuses_grade(client, setup_db):
+    db = SessionLocal()
+    parent, child, _, ch = parent_child(db, "psg_grade")
+    bank = QuestionBank(user_id=parent.id, title="阅读卷", subject="语文", source="manual")
+    db.add(bank)
+    db.flush()
+    psg = ReadingPassage(user_id=parent.id, bank_id=bank.id, subject="语文",
+                         title="春天", content="春天来了。", status="published")
+    db.add(psg)
+    db.flush()
+    q = Question(
+        bank_id=bank.id, passage_id=psg.id,
+        qtype="single_choice", qtype_category="choice",
+        question="写了什么季节？",
+        options='[{"label":"春天","value":0},{"label":"冬天","value":1}]',
+        answer_json='{"correct_index":0}', answer="春天", status="published",
+    )
+    db.add(q)
+    db.commit()
+    bid, qid = bank.id, q.id
+    db.close()
+    r = client.post("/api/banks/submit",
+                    json={"bank_id": bid, "answers": [{"question_id": qid, "selected_index": 0}]},
+                    headers=ch)
+    assert r.status_code == 200
+    assert r.json()["score"] == 1
+    assert r.json()["answers"][0]["is_correct"] is True

@@ -3,7 +3,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 from app.main import app
 from app.database import SessionLocal
-from app.models import PdfDocument, Lesson, Question, User
+from app.models import PdfDocument, Lesson, Question, ReadingPassage, User
 from conftest import auth_headers, make_account
 
 client = TestClient(app)
@@ -159,3 +159,26 @@ def test_add_question_rich_structure(client, setup_db):
     assert q.qtype_category == "choice"
     assert q.status == "pending"  # 人工录入默认进审核队列
     assert "2" in q.options
+
+
+def test_add_question_with_passage_id(client, setup_db):
+    db = SessionLocal()
+    parent = make_account(db, "add_psg_parent", "parent")
+    psg = ReadingPassage(user_id=parent.id, subject="英语", title="Apple",
+                         content="I have an /ˈæpl/.", status="pending")
+    db.add(psg)
+    db.commit()
+    pid = psg.id
+    h = auth_headers(parent)
+    db.close()
+    body = {
+        "lesson_id": None, "bank_id": None, "passage_id": pid,
+        "qtype": "short_answer", "question": "What fruit?", "answer": "apple",
+    }
+    r = client.post("/api/questions", json=body, headers=h)
+    assert r.status_code == 200
+    db = SessionLocal()
+    q = db.get(Question, r.json()["id"])
+    db.close()
+    assert q.passage_id == pid
+    assert q.status == "pending"
