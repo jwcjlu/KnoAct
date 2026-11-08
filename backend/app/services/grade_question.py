@@ -58,3 +58,39 @@ def grade_subjective(answer_json: dict, student_answer: dict) -> dict:
     if not text:
         return {"is_correct": False, "correct_answer_text": sample, "detail": "empty"}
     return {"is_correct": None, "correct_answer_text": sample, "detail": "pending"}
+
+
+def grade_subjective_with_ai(db, answer_json: dict, student_answer: dict) -> dict:
+    """主观题 AI 判分。返回 {is_correct: bool|None, correct_answer_text, detail}。
+
+    AI 未配置 / fake / 返回无法解析 → is_correct=None, detail="pending"（待家长批改）。
+    """
+    from .ai import get_provider
+
+    rubric = (answer_json.get("rubric") or "").strip()
+    sample = (answer_json.get("sample") or "").strip()
+    text = (student_answer.get("text") or "").strip()
+    if not text:
+        return {"is_correct": False, "correct_answer_text": sample, "detail": "empty"}
+
+    provider = get_provider(db)
+    if provider.name == "fake":
+        return {"is_correct": None, "correct_answer_text": sample, "detail": "pending"}
+
+    prompt = (
+        f"你是一位小学老师，正在批改一道主观题。\n"
+        f"评分要点（rubric）：{rubric or '未提供'}\n"
+        f"参考答案：{sample or '未提供'}\n"
+        f"学生作答：{text}\n"
+        '只返回 JSON：{"is_correct": true 或 false, "reason": "简短评语"}'
+    )
+    try:
+        raw = provider.generate(prompt=prompt, system="你是小学老师，公正批改。", json_mode=True)
+        data = json.loads(raw)
+        return {
+            "is_correct": bool(data.get("is_correct", False)),
+            "correct_answer_text": sample,
+            "detail": data.get("reason", ""),
+        }
+    except Exception:
+        return {"is_correct": None, "correct_answer_text": sample, "detail": "pending"}

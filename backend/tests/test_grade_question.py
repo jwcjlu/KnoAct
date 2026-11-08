@@ -1,4 +1,4 @@
-from app.services.grade_question import grade_question, normalize_answer
+from app.services.grade_question import grade_question, normalize_answer, grade_subjective_with_ai
 
 
 def test_grade_single_choice():
@@ -46,3 +46,26 @@ def test_normalize_answer_fullwidth_to_halfwidth():
 def test_choice_bool_not_treated_as_index():
     r = grade_question("choice", {"correct_index": 1}, {"selected_index": True})
     assert r["is_correct"] is False
+
+
+def test_grade_subjective_fake_returns_pending(client, setup_db):
+    # fake provider：generate 返回 "[fake] ..."，无法解析 → pending
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        r = grade_subjective_with_ai(db, {"rubric": "要点", "sample": "参考"}, {"text": "我的回答"})
+    finally:
+        db.close()
+    assert r["is_correct"] is None
+    assert r["detail"] == "pending"
+
+
+def test_grade_subjective_empty_text(client, setup_db):
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        r = grade_subjective_with_ai(db, {"rubric": "要点", "sample": "参考"}, {"text": ""})
+    finally:
+        db.close()
+    assert r["is_correct"] is False
+    assert r["detail"] == "empty"
