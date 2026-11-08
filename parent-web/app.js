@@ -197,6 +197,7 @@ function renderNav(){
 }
 function render(){
   document.getElementById('main').innerHTML = renderParent();
+  if(parentTab==='题库管理') updateReadingPreview();
 }
 
 // ===== 家长端 =====
@@ -467,6 +468,41 @@ const BANK_QTYPE_CATEGORY = {
   short_answer:'subjective', essay:'subjective', application:'subjective', oral:'subjective',
 };
 const BANK_QTYPES = Object.keys(BANK_QTYPE_LABEL);
+let bankEntryMode = 'single'; // single | reading
+let readingSubs = [{qtype:'single_choice'}];
+
+function setBankEntryMode(m){
+  bankEntryMode = m;
+  if(m==='reading' && (!readingSubs || !readingSubs.length)) readingSubs = [{qtype:'single_choice'}];
+  render();
+}
+function setReadingSubQtype(i, v){ readingSubs[i].qtype = v; render(); }
+function addReadingSub(){ readingSubs.push({qtype:'single_choice'}); render(); }
+function removeReadingSub(i){ if(readingSubs.length>1){ readingSubs.splice(i,1); render(); } }
+
+function escapeHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function renderPassageInline(escaped){
+  return escaped
+    .replace(/____/g, '<span class="passage-blank"></span>')
+    .replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/\/([^\/:\n]{1,40})\//g, '<span class="passage-ipa">/$1/</span>');
+}
+function renderPassageMarkup(src){
+  return (src||'').split('\n').map(line=>{
+    const raw = line.replace(/\s+$/,'');
+    if(/^##\s+/.test(raw)){
+      return '<h2>'+renderPassageInline(escapeHtml(raw.replace(/^##\s+/,'')))+'</h2>';
+    }
+    if(/^#\s+/.test(raw)){
+      return '<h1>'+renderPassageInline(escapeHtml(raw.replace(/^#\s+/,'')))+'</h1>';
+    }
+    return renderPassageInline(escapeHtml(raw)) || '<br>';
+  }).join('<br>');
+}
 let bankList = [];
 let bankSelectedId = null;
 let bankAddQtype = 'single_choice';
@@ -495,43 +531,37 @@ async function createBankFromForm(){
 function selectBank(id){ bankSelectedId = Number(id)||null; bankAddQtype = 'single_choice'; render(); }
 function setBankAddQtype(v){ bankAddQtype = v; render(); }
 
-function bankChoiceOptionsFromForm(){
-  const n = Math.max(2, Math.min(8, parseInt(document.getElementById('bankOptCount')?.value||'4', 10)||4));
-  const opts = [];
-  for(let i=0;i<n;i++){
-    const label = (document.getElementById(`bankOptLabel${i}`)?.value||'').trim() || `选项${String.fromCharCode(65+i)}`;
-    opts.push({label, value:i});
-  }
-  return opts;
-}
-function buildBankQuestionPayload(){
-  const qtype = bankAddQtype;
-  const question = (document.getElementById('bankQText')?.value||'').trim();
-  const analysis = (document.getElementById('bankAnalysis')?.value||'').trim();
-  const difficulty = document.getElementById('bankDifficulty')?.value||'medium';
+function _fieldSuf(idx){ return (idx==null || idx===undefined) ? '' : '-'+idx; }
+function buildBankQuestionPayload(idx){
+  const suf = _fieldSuf(idx);
+  const qtype = idx==null ? bankAddQtype : readingSubs[idx].qtype;
+  const question = (document.getElementById('bankQText'+suf)?.value||'').trim();
+  const analysis = (document.getElementById('bankAnalysis'+suf)?.value||'').trim();
+  const difficulty = document.getElementById('bankDifficulty'+suf)?.value
+    || document.getElementById('bankDifficulty')?.value || 'medium';
   const cat = BANK_QTYPE_CATEGORY[qtype]||'subjective';
   let options = [], answer_json = {}, answer = '';
   if(cat==='choice'){
-    options = bankChoiceOptionsFromForm();
-  if(qtype==='multi_choice'){
-      const checks = document.querySelectorAll('input[name="bankMultiCorrect"]:checked');
-      const idx = [...checks].map(el=>Number(el.value)).filter(n=>!Number.isNaN(n));
-      answer_json = {correct_index: idx.length?idx:[0]};
-      answer = idx.map(i=>options[i]?.label).filter(Boolean).join('、');
+    options = bankChoiceOptionsFromForm(idx);
+    if(qtype==='multi_choice'){
+      const checks = document.querySelectorAll('input[name="bankMultiCorrect'+suf+'"]:checked');
+      const ix = [...checks].map(el=>Number(el.value)).filter(n=>!Number.isNaN(n));
+      answer_json = {correct_index: ix.length?ix:[0]};
+      answer = ix.map(i=>options[i]?.label).filter(Boolean).join('、');
     }else{
-      const picked = document.querySelector('input[name="bankSingleCorrect"]:checked');
+      const picked = document.querySelector('input[name="bankSingleCorrect'+suf+'"]:checked');
       const ci = picked ? Number(picked.value) : 0;
       const correct = Number.isNaN(ci)?0:ci;
       answer_json = {correct_index: correct};
       answer = options[correct]?.label || '';
     }
   }else if(cat==='blank'){
-    const raw = (document.getElementById('bankBlanks')?.value||'').trim();
+    const raw = (document.getElementById('bankBlanks'+suf)?.value||'').trim();
     const blanks = raw.split(/[,，;；\n]+/).map(s=>s.trim()).filter(Boolean);
     answer_json = {blanks};
     answer = blanks.join('；');
   }else if(cat==='match'){
-    const raw = (document.getElementById('bankPairs')?.value||'').trim();
+    const raw = (document.getElementById('bankPairs'+suf)?.value||'').trim();
     const pairs = [];
     raw.split('\n').forEach(line=>{
       const p = line.split(/[→\-=]/).map(s=>s.trim()).filter(Boolean);
@@ -540,11 +570,21 @@ function buildBankQuestionPayload(){
     answer_json = {pairs};
     answer = pairs.map(p=>p.join('→')).join('；');
   }else{
-    answer = (document.getElementById('bankSubjAnswer')?.value||'').trim();
-    const rubric = (document.getElementById('bankRubric')?.value||'').trim();
+    answer = (document.getElementById('bankSubjAnswer'+suf)?.value||'').trim();
+    const rubric = (document.getElementById('bankRubric'+suf)?.value||'').trim();
     answer_json = {sample: answer, rubric};
   }
   return {lesson_id:null, bank_id:bankSelectedId, qtype, question, answer, options, answer_json, analysis, difficulty, tags:{}};
+}
+function bankChoiceOptionsFromForm(idx){
+  const suf = _fieldSuf(idx);
+  const n = Math.max(2, Math.min(8, parseInt(document.getElementById('bankOptCount'+suf)?.value||'4', 10)||4));
+  const opts = [];
+  for(let i=0;i<n;i++){
+    const label = (document.getElementById(`bankOptLabel${i}${suf}`)?.value||'').trim() || `选项${String.fromCharCode(65+i)}`;
+    opts.push({label, value:i});
+  }
+  return opts;
 }
 async function submitBankQuestion(){
   if(!bankSelectedId){ toast('请先选择一张卷子'); return; }
@@ -558,17 +598,19 @@ async function submitBankQuestion(){
   }else toast(apiErrorMsg(r, '提交失败'));
 }
 
-function renderBankChoiceFields(){
-  const multi = bankAddQtype==='multi_choice';
+function renderBankChoiceFields(idx){
+  const suf = _fieldSuf(idx);
+  const qtype = idx==null ? bankAddQtype : readingSubs[idx].qtype;
+  const multi = qtype==='multi_choice';
   const n = 4;
   const optRows = [...Array(n)].map((_,i)=>{
     const letter = String.fromCharCode(65+i);
     const mark = multi
-      ? `<label class="bank-opt-mark"><input type="checkbox" name="bankMultiCorrect" value="${i}"/>正确答案</label>`
-      : `<label class="bank-opt-mark"><input type="radio" name="bankSingleCorrect" value="${i}" ${i===0?'checked':''}/>正确答案</label>`;
+      ? `<label class="bank-opt-mark"><input type="checkbox" name="bankMultiCorrect${suf}" value="${i}"/>正确答案</label>`
+      : `<label class="bank-opt-mark"><input type="radio" name="bankSingleCorrect${suf}" value="${i}" ${i===0?'checked':''}/>正确答案</label>`;
     return `<div class="bank-opt-row">
       <span class="bank-opt-letter">${letter}</span>
-      <input id="bankOptLabel${i}" class="inp" placeholder="选项 ${letter} 内容，可含公式或图片链接" />
+      <input id="bankOptLabel${i}${suf}" class="inp" placeholder="选项 ${letter} 内容" />
       ${mark}
     </div>`;
   }).join('');
@@ -578,31 +620,128 @@ function renderBankChoiceFields(){
     <div class="bank-opt-list">${optRows}</div>
   </div>`;
 }
+function renderBankAnswerFields(qtype, idx){
+  const suf = _fieldSuf(idx);
+  const cat = BANK_QTYPE_CATEGORY[qtype]||'subjective';
+  if(cat==='choice') return renderBankChoiceFields(idx);
+  if(cat==='blank'){
+    return `<div class="bank-q-block"><label class="bank-field-label">参考答案（多空用逗号或换行分隔）</label>
+      <textarea id="bankBlanks${suf}" class="inp" rows="2" placeholder="如：春天,播种"></textarea></div>`;
+  }
+  if(cat==='match'){
+    return `<div class="bank-q-block"><label class="bank-field-label">连线答案（每行一对，用 → 分隔）</label>
+      <textarea id="bankPairs${suf}" class="inp" rows="3" placeholder="苹果→红色"></textarea></div>`;
+  }
+  return `<div class="bank-q-block">
+    <label class="bank-field-label">参考答案 / 范文</label>
+    <textarea id="bankSubjAnswer${suf}" class="inp" rows="2"></textarea>
+    <label class="bank-field-label" style="margin-top:12px">评分要点（可选）</label>
+    <textarea id="bankRubric${suf}" class="inp" rows="2"></textarea>
+  </div>`;
+}
+function renderReadingForm(){
+  const qBlocks = readingSubs.map((sub,i)=>{
+    const qtypeOpts = BANK_QTYPES.map(q=>`<option value="${q}" ${q===sub.qtype?'selected':''}>${BANK_QTYPE_LABEL[q]}</option>`).join('');
+    return `<div class="reading-sub">
+      <div class="reading-sub-head">
+        <strong>子题 ${i+1}</strong>
+        ${readingSubs.length>1?`<button type="button" class="btn-ghost" onclick="removeReadingSub(${i})">删除</button>`:''}
+      </div>
+      <div class="bank-q-meta">
+        <label class="bank-field"><span class="bank-field-label">题型</span>
+          <select onchange="setReadingSubQtype(${i}, this.value)">${qtypeOpts}</select></label>
+        <label class="bank-field"><span class="bank-field-label">难度</span>
+          <select id="bankDifficulty-${i}"><option value="easy">简单</option><option value="medium" selected>中等</option><option value="hard">困难</option></select></label>
+      </div>
+      <div class="bank-q-block">
+        <label class="bank-field-label">题干</label>
+        <textarea id="bankQText-${i}" class="inp" rows="3" placeholder="围绕材料出题"></textarea>
+      </div>
+      ${renderBankAnswerFields(sub.qtype, i)}
+      <div class="bank-q-block">
+        <label class="bank-field-label">解析（可选）</label>
+        <textarea id="bankAnalysis-${i}" class="inp" rows="2"></textarea>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="bank-q-block">
+      <label class="bank-field-label">材料标题</label>
+      <input id="readingTitle" class="inp" placeholder="如：小蝌蚪找妈妈" />
+    </div>
+    <div class="bank-q-block">
+      <label class="bank-field-label">材料正文（可用 # 标题、**加粗**、*斜体*、&lt;u&gt;下划线&lt;/u&gt;、/音标/、____ 挖空）</label>
+      <textarea id="readingContent" class="inp" rows="6" placeholder="在这里粘贴或编写短文" oninput="updateReadingPreview()"></textarea>
+      <div id="readingBlankHint" class="blank-hint"></div>
+      <div class="bank-field-label" style="margin-top:10px">预览</div>
+      <div id="readingPreview" class="passage-preview"></div>
+    </div>
+    ${qBlocks}
+    <div class="bank-actions-primary" style="margin-top:12px">
+      <button type="button" class="btn-ghost" onclick="addReadingSub()">加一道子题</button>
+      <button type="button" class="btn-primary" onclick="submitReadingPassage()">提交整篇审核</button>
+    </div>`;
+}
+function updateReadingPreview(){
+  const content = document.getElementById('readingContent')?.value || '';
+  const box = document.getElementById('readingPreview');
+  if(box) box.innerHTML = renderPassageMarkup(content);
+  const n = (content.match(/____/g)||[]).length;
+  const fillN = (readingSubs||[]).filter(s=>s.qtype==='fill_blank'||s.qtype==='cloze').length;
+  const hint = document.getElementById('readingBlankHint');
+  if(!hint) return;
+  if(fillN===0){ hint.className='blank-hint'; hint.textContent = n?`材料挖空 ${n} 处（无填空子题，挖空仅展示）`:''; return; }
+  const ok = n===fillN;
+  hint.className = 'blank-hint '+(ok?'ok':'bad');
+  hint.textContent = `材料挖空 ${n} 处 / 填空子题 ${fillN} 道`+(ok?'，已对齐':'，须一致才能提交');
+}
+async function submitReadingPassage(){
+  if(!bankSelectedId){ toast('请先选择一张卷子'); return; }
+  const title = (document.getElementById('readingTitle')?.value||'').trim();
+  const content = (document.getElementById('readingContent')?.value||'').trim();
+  if(!title){ toast('请填写材料标题'); return; }
+  if(!content){ toast('请填写材料正文'); return; }
+  const questions = readingSubs.map((_,i)=>{
+    const body = buildBankQuestionPayload(i);
+    return {qtype:body.qtype, question:body.question, answer:body.answer,
+            options:body.options, answer_json:body.answer_json,
+            analysis:body.analysis, difficulty:body.difficulty, tags:body.tags};
+  });
+  if(questions.some(q=>!q.question)){ toast('请填写每道子题的题干'); return; }
+  const blankN = (content.match(/____/g)||[]).length;
+  const fillN = questions.filter(q=>q.qtype==='fill_blank'||q.qtype==='cloze').length;
+  if(fillN>0 && blankN!==fillN){ toast(`材料挖空 ${blankN} 处，填空子题 ${fillN} 道，须一致`); return; }
+  const bank = bankList.find(b=>b.id===bankSelectedId);
+  const r = await api('/api/passages', {method:'POST', body:{
+    title, content, subject: bank?.subject||'语文', grade: bank?.grade??null,
+    bank_id: bankSelectedId, questions
+  }});
+  if(r && r.id){ toast('阅读理解已提交审核'); readingSubs=[{qtype:'single_choice'}]; render(); }
+  else toast(apiErrorMsg(r, '提交失败'));
+}
 function renderBankQuestionForm(){
-  const cat = BANK_QTYPE_CATEGORY[bankAddQtype]||'subjective';
   const qtypeOpts = BANK_QTYPES.map(q=>`<option value="${q}" ${q===bankAddQtype?'selected':''}>${BANK_QTYPE_LABEL[q]}</option>`).join('');
   const bank = bankList.find(b => b.id === bankSelectedId);
   const bankHint = bank ? `当前卷子：${bank.title}` : '';
-  let extra = '';
-  if(cat==='choice') extra = renderBankChoiceFields();
-  else if(cat==='blank'){
-    extra = `<div class="bank-q-block"><label class="bank-field-label">参考答案（多空用逗号或换行分隔）</label>
-      <textarea id="bankBlanks" class="inp" rows="2" placeholder="如：春天,播种"></textarea></div>`;
-  }else if(cat==='match'){
-    extra = `<div class="bank-q-block"><label class="bank-field-label">连线答案（每行一对，用 → 分隔）</label>
-      <textarea id="bankPairs" class="inp" rows="3" placeholder="苹果→红色&#10;香蕉→黄色"></textarea></div>`;
-  }else{
-    extra = `<div class="bank-q-block">
-      <label class="bank-field-label">参考答案 / 范文</label>
-      <textarea id="bankSubjAnswer" class="inp" rows="2" placeholder="展示给孩子核对或家长审核用"></textarea>
-      <label class="bank-field-label" style="margin-top:12px">评分要点（可选，主观题 AI 判分参考）</label>
-      <textarea id="bankRubric" class="inp" rows="2" placeholder="如：须提到「梗概」与主旨"></textarea>
-    </div>`;
-  }
-  return `<div class="parent-panel bank-qform" style="grid-column:1/-1;margin-top:16px">
-    <div class="head"><div class="ic green">${icon('pen',20)}</div>
-      <div><h3>录入题目</h3><div class="sub">${escapeAttr(bankHint || '提交后进入「题目审核台」，通过后孩子可练习')}</div></div></div>
-    <div class="bd">
+  const extra = renderBankAnswerFields(bankAddQtype);
+  const modeBar = `<div class="bank-mode-toggle">
+    <button type="button" class="${bankEntryMode==='single'?'on':''}" onclick="setBankEntryMode('single')">单题</button>
+    <button type="button" class="${bankEntryMode==='reading'?'on':''}" onclick="setBankEntryMode('reading')">阅读理解</button>
+  </div>`;
+  const importBar = `<div class="bank-import-bar">
+          <div class="bank-import-title">批量导入（进审核台校对）</div>
+          <div class="bank-import-btns">
+            <button type="button" class="btn-ghost" onclick="syncBankFromTiku()">${icon('search',16)} tiku.cn</button>
+            <button type="button" class="btn-ghost" onclick="syncBankFromXuekubao()">${icon('search',16)} 学库宝选题</button>
+            <label class="btn-ghost" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer;margin:0">
+              ${icon('camera',16)} 拍照导入
+              <input type="file" accept="image/*" style="display:none" onchange="uploadBankPhoto(this)">
+            </label>
+          </div>
+          <div class="bank-import-hint">拍照与第三方同步的题目均需先审核，通过后才会进入练习。</div>
+        </div>`;
+  const body = bankEntryMode==='reading'
+    ? `${modeBar}${renderReadingForm()}${importBar}`
+    : `${modeBar}
       <div class="bank-q-meta">
         <label class="bank-field"><span class="bank-field-label">题型</span>
           <select id="bankQtypeSelect" onchange="setBankAddQtype(this.value)">${qtypeOpts}</select></label>
@@ -622,20 +761,12 @@ function renderBankQuestionForm(){
         <div class="bank-actions-primary">
           <button type="button" class="btn-primary" onclick="submitBankQuestion()">提交审核</button>
         </div>
-        <div class="bank-import-bar">
-          <div class="bank-import-title">批量导入（进审核台校对）</div>
-          <div class="bank-import-btns">
-            <button type="button" class="btn-ghost" onclick="syncBankFromTiku()">${icon('search',16)} tiku.cn</button>
-            <button type="button" class="btn-ghost" onclick="syncBankFromXuekubao()">${icon('search',16)} 学库宝选题</button>
-            <label class="btn-ghost" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;cursor:pointer;margin:0">
-              ${icon('camera',16)} 拍照导入
-              <input type="file" accept="image/*" style="display:none" onchange="uploadBankPhoto(this)">
-            </label>
-          </div>
-          <div class="bank-import-hint">拍照与第三方同步的题目均需先审核，通过后才会进入练习。</div>
-        </div>
-      </div>
-    </div>
+        ${importBar}
+      </div>`;
+  return `<div class="parent-panel bank-qform" style="grid-column:1/-1;margin-top:16px">
+    <div class="head"><div class="ic green">${icon('pen',20)}</div>
+      <div><h3>录入题目</h3><div class="sub">${escapeAttr(bankHint || '提交后进入「题目审核台」，通过后孩子可练习')}</div></div></div>
+    <div class="bd">${body}</div>
   </div>`;
 }
 function renderBankManage(){
