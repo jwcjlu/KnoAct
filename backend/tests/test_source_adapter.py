@@ -45,3 +45,16 @@ def test_ocr_adapter_normalize_dict_and_list():
     assert d.qtype == "short_answer"  # 未给 qtype 默认
     assert d.question == "3+2=?"
     assert d.options == [{"label": "5", "value": 0}]
+
+
+def test_ocr_adapter_copies_passage_fields():
+    raw = {"questions": [{
+        "qtype": "short_answer",
+        "question": "主旨？",
+        "answer": "春天",
+        "passage_title": "短文",
+        "passage_content": "春天来了。",
+    }]}
+    drafts = OcrAdapter().normalize(raw)
+    assert drafts[0].passage_title == "短文"
+    assert drafts[0].passage_content == "春天来了。"

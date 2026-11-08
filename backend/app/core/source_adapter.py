@@ -13,6 +13,8 @@ class QuestionDraft:
     analysis: str = ""
     difficulty: str = "medium"
     tags: dict = field(default_factory=dict)
+    passage_title: str = ""
+    passage_content: str = ""
 
 
 class SourceAdapter(ABC):
@@ -36,6 +38,8 @@ class ManualAdapter(SourceAdapter):
             analysis=(raw.get("analysis") or "").strip(),
             difficulty=(raw.get("difficulty") or "medium"),
             tags=raw.get("tags") or {},
+            passage_title=(raw.get("passage_title") or "").strip(),
+            passage_content=(raw.get("passage_content") or raw.get("passage") or "").strip(),
         )
         return [d] if d.question else []
 
@@ -79,5 +83,7 @@ class OcrAdapter(SourceAdapter):
                 analysis=(it.get("analysis") or "").strip(),
                 difficulty=(it.get("difficulty") or "medium"),
                 tags=it.get("tags") or {},
+                passage_title=(it.get("passage_title") or "").strip(),
+                passage_content=(it.get("passage_content") or it.get("passage") or "").strip(),
             ))
         return drafts
