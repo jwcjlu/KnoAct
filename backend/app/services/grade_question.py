@@ -1,13 +1,18 @@
 """多题型判分：客观题精确判，主观题走 AI（未配置回落 pending）。"""
 import json
 import re
+import unicodedata
 
 _SPACING = re.compile(r"[\s\-·、，。,.!！?？:：;；'\"“”‘’()（）\[\]【】]+")
 
 
 def normalize_answer(value: str) -> str:
-    """去空白/标点/大小写，供填空/计算容错比较。"""
-    return _SPACING.sub("", (value or "").casefold())
+    """去空白/标点/大小写/全半角，供填空/计算容错比较。
+
+    NFKC 把全角字母/数字（ＡＢＣ１２３）折成半角，避免孩子或 OCR 输入的全角
+    答案被判错。
+    """
+    return _SPACING.sub("", unicodedata.normalize("NFKC", (value or "").casefold()))
 
 
 def grade_question(qtype_category: str, answer_json: dict, student_answer: dict) -> dict:
@@ -25,7 +30,7 @@ def grade_question(qtype_category: str, answer_json: dict, student_answer: dict)
         if isinstance(ci, list):
             ok = isinstance(sel, list) and sorted(map(int, sel)) == sorted(map(int, ci))
         else:
-            ok = isinstance(sel, int) and sel == ci
+            ok = isinstance(sel, int) and not isinstance(sel, bool) and sel == ci
         return {"is_correct": ok, "correct_answer_text": json.dumps(ci, ensure_ascii=False), "detail": "choice"}
 
     if qtype_category == "blank":

@@ -35,3 +35,14 @@ def test_grade_match():
 def test_normalize_answer():
     assert normalize_answer("  Hello World ") == "helloworld"
     assert normalize_answer("苹果") == "苹果"
+
+
+def test_normalize_answer_fullwidth_to_halfwidth():
+    assert normalize_answer("８") == normalize_answer("8")
+    assert normalize_answer("ＡＢＣ") == normalize_answer("abc")
+    assert normalize_answer("３＋５") == normalize_answer("3+5")
+
+
+def test_choice_bool_not_treated_as_index():
+    r = grade_question("choice", {"correct_index": 1}, {"selected_index": True})
+    assert r["is_correct"] is False
