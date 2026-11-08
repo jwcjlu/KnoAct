@@ -57,6 +57,7 @@ def _dump_question(q: Question) -> dict:
         "difficulty": q.difficulty,
         "status": q.status,
         "bank_id": q.bank_id,
+        "passage_id": q.passage_id,
     }
 
 
@@ -97,7 +98,7 @@ def create_passage(req: PassageCreateReq, user: User = Depends(require_role("par
     for item in req.questions:
         qtext = item.question.strip()
         if not qtext:
-            continue
+            raise HTTPException(status_code=400, detail="子题题干不能为空")
         category = CATEGORY_OF_QTYPE.get(item.qtype, "subjective")
         q = Question(
             bank_id=req.bank_id,
