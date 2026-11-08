@@ -41,11 +41,18 @@ def _ensure_db_tables() -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        from .migrate_question_bank import _sqlite_relax_questions_lesson_id
+        try:
+            from .migrate_question_bank import _sqlite_relax_questions_lesson_id
 
-        _sqlite_relax_questions_lesson_id(db)
-    except Exception as exc:
-        _log.warning("questions.lesson_id 放宽迁移失败: %s", exc)
+            _sqlite_relax_questions_lesson_id(db)
+        except Exception as exc:
+            _log.warning("questions.lesson_id 放宽迁移失败: %s", exc)
+        try:
+            from .migrate_reading_passage import migrate as _migrate_reading_passage
+
+            _migrate_reading_passage(db)
+        except Exception as exc:
+            _log.warning("questions.passage_id 迁移失败: %s", exc)
     finally:
         db.close()
 
