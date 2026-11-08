@@ -5,7 +5,7 @@ from ..core.source_adapter import OcrAdapter, QuestionDraft
 
 
 def _parse_questions(raw: str) -> list[dict]:
-    """解析 LLM 返回的 JSON，容错：直接数组 / {"questions": [...]} / 前缀包裹。"""
+    """解析 LLM 返回的 JSON，容错：直接数组 / {"questions": [...]}；无法解析返回 []。"""
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):
