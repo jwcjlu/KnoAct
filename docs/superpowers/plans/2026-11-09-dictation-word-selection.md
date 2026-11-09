@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 `_gen_dictation` 从「当前课按 id 盲取前 N」改为「遗忘曲线 + 掌握度动态挑词，到期上限/新词下限护栏」，并让听写参数支持孩子级配置（修复家长端写全局、读孩子的 bug）。
+**Goal:** 把 `_gen_dictation` 从「当前课按 id 盲取前 N」改为「已学课范围 + 无限循环复习（到期/错词/新词/轮转四档优先级）」，并让听写参数支持孩子级配置（修复家长端写全局、读孩子的 bug）。
 
-**Architecture:** 重写 `task_gen.py::_gen_dictation` 的取词：候选池 = 孩子绑定教材下所有 `approved` 课的生词，按「到期 > 新词 > 补位」三档 + 比例护栏填充。新增 `get_child_config_float` 读浮点配置；新增孩子级配置写入口（复用 `dictation_input_mode` 的 `ChildConfig` 存储）；家长端 UI 增删键并分流写入。
+**Architecture:** 重写 `task_gen.py::_gen_dictation` 的取词：候选池 = 孩子绑定教材下「当前课及之前」所有 `approved` 课的生词（向前扩展、未学课不进池、已学课永不踢出），按「到期词 → 错词 → 新词 → 轮转补位」四档 + 比例护栏填充。新增 `get_child_config_float` 读浮点配置；新增孩子级配置写入口（复用 `dictation_input_mode` 的 `ChildConfig` 存储）；家长端 UI 增删键并分流写入。
 
 **Tech Stack:** FastAPI + SQLAlchemy（pytest 测试）；原生 JS 家长端（`parent-web/app.js`）。
 
@@ -122,15 +122,20 @@ def test_dictation_due_cap_and_new_floor():
     db = SessionLocal()
     uid, l1_id = _setup(db)  # 第1课：白鹭、矗立（当前课）
     doc = db.query(PdfDocument).first()
-    # 第2课放 3 个词，全部到期
+    # 第2课放 3 个词，全部到期；但第2课 > 当前课(l1)，应不进池
+    # 为验证「已学课范围」，这里改为在第1课内追加到期词，另建第2课验证不进池
     l2 = Lesson(document_id=doc.id, subject="语文", title="第2课",
                 start_page=3, end_page=4, extract_status="done", audit_status="approved")
     db.add(l2); db.flush()
-    _add_words(db, l2, ["到期A", "到期B", "到期C"])
-    for wb in db.query(WordBank).filter_by(lesson_id=l2.id).all():
+    _add_words(db, l2, ["未学课词"])
+    db.commit()
+
+    # 当前课(l1)内造 3 个到期词
+    for wb in db.query(WordBank).filter_by(lesson_id=l1_id).all():
         db.add(WordMastery(word_bank_id=wb.id, is_weak=True,
                            next_review_at=datetime.utcnow() - timedelta(days=1),
-                           user_id=uid, mastery=0.1, attempts=json.dumps([False])))
+                           user_id=uid, mastery=0.1, attempts=json.dumps([False]),
+                           mistake_count=1))
     db.commit()
 
     generate_tasks_for_user(db, uid, date.today())
@@ -138,65 +143,68 @@ def test_dictation_due_cap_and_new_floor():
                                  task_type="dictation").first()
     words = json.loads(t.content)
     got = {w["word"] for w in words}
-    # count=7, due_cap=0.5 → 到期上限 ceil(3.5)=4；3 个到期词都进
-    assert {"到期A", "到期B", "到期C"} <= got
-    # 新词下限 max(1, floor(7*0.3))=2：白鹭、矗立 保留
+    # 未学课(l2)的词不进池
+    assert "未学课词" not in got
+    # 当前课两个词都到期 → 都进；不硬补
     assert {"白鹭", "矗立"} <= got
-    # 无补位词，凑不满 7 → 总数为 3 + 2 = 5，不硬补
-    assert len(words) == 5
+    assert len(words) == 2
     db.close()
 
 
-def test_dictation_excludes_mastered_words():
-    """mastery>=0.9 的词不进入任何一档。"""
+def test_dictation_rotation_includes_mastered_words():
+    """B2 无限循环：已掌握的词不移出，在到期/错词/新词不足时按最久没考补位回来。"""
     db = SessionLocal()
     uid, l1_id = _setup(db)  # 白鹭、矗立
-    for wb in db.query(WordBank).filter_by(lesson_id=l1_id).all():
-        db.add(WordMastery(word_bank_id=wb.id, is_weak=False,
-                           next_review_at=datetime.utcnow() + timedelta(days=30),
-                           user_id=uid, mastery=0.95,
-                           attempts=json.dumps([True, True, True])))
+    # 白鹭：已掌握、未到期（mastery>=0.9, next_review_at 在远期）
+    wb_ba = db.query(WordBank).filter_by(lesson_id=l1_id, word="白鹭").first()
+    db.add(WordMastery(word_bank_id=wb_ba.id, is_weak=False,
+                       next_review_at=datetime.utcnow() + timedelta(days=30),
+                       user_id=uid, mastery=0.95,
+                       attempts=json.dumps([True, True, True]),
+                       mistake_count=0))
     db.commit()
 
     generate_tasks_for_user(db, uid, date.today())
-    # 两个词都掌握且未到期 → 听写任务应为 None（无词可出）
     t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
                                  task_type="dictation").first()
-    assert t is None
+    # 白鹭(已掌握) 与 矗立(新词) 都应进池：白鹭落在「轮转」档，矗立落在「新词」档
+    assert t is not None
+    got = {w["word"] for w in json.loads(t.content)}
+    assert "白鹭" in got
+    assert "矗立" in got
     db.close()
 
 
 def test_dictation_fills_with_low_mastery_words():
-    """到期+新词不足 count 时，用低 mastery 补位词补到 count。"""
+    """到期+新词不足 count 时，用轮转词（已考过、没错、未到期）按最久没考补满 count。"""
     db = SessionLocal()
     uid, l1_id = _setup(db)  # 白鹭、矗立 两个新词
     doc = db.query(PdfDocument).first()
-    l2 = Lesson(document_id=doc.id, subject="语文", title="第2课",
-                start_page=3, end_page=4, extract_status="done", audit_status="approved")
-    db.add(l2); db.flush()
-    # 第2课 5 个「已学未掌握未到期」词
-    _add_words(db, l2, ["巩固1", "巩固2", "巩固3", "巩固4", "巩固5"])
-    for wb in db.query(WordBank).filter_by(lesson_id=l2.id).all():
+    # 在第1课内追加 5 个「已考过、没错、未到期」词（轮转词）
+    _add_words(db, db.query(Lesson).filter_by(id=l1_id).first(),
+               ["轮转1", "轮转2", "轮转3", "轮转4", "轮转5"])
+    for wb in db.query(WordBank).filter_by(lesson_id=l1_id).all():
+        if wb.word in ("白鹭", "矗立"):
+            continue
         db.add(WordMastery(word_bank_id=wb.id, is_weak=False,
                            next_review_at=datetime.utcnow() + timedelta(days=3),
-                           user_id=uid, mastery=0.4, attempts=json.dumps([True])))
+                           user_id=uid, mastery=0.4, attempts=json.dumps([True]),
+                           mistake_count=0))
     db.commit()
 
     generate_tasks_for_user(db, uid, date.today())
     t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
                                  task_type="dictation").first()
     words = json.loads(t.content)
-    # 新词 2 个 + 补位 5 个 = 7，补满 count
+    # 新词 2 个(白鹭、矗立) + 轮转 5 个 = 7，补满 count
     assert len(words) == 7
     db.close()
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd backend && python -m pytest tests/test_task_gen.py::test_dictation_due_cap_and_new_floor tests/test_task_gen.py::test_dictation_excludes_mastered_words tests/test_task_gen.py::test_dictation_fills_with_low_mastery_words -v`
-Expected: FAIL（旧算法 `test_dictation_excludes_mastered_words` 会得到任务而非 None；`test_dictation_due_cap_and_new_floor` 旧算法旧课到期词按 `count-new_ratio=2` 只取 2 个到期词，断言 `3 个都进` 失败）。
-
-注意：`_setup` 里 `new_ratio` 旧逻辑默认 5，旧算法在「新词=2、到期=3」时 `max(0, count-new_ratio)=2`，到期只取 2 个 → 新测试断言 3 个到期词全进，旧代码 FAIL。
+Run: `cd backend && python -m pytest tests/test_task_gen.py::test_dictation_due_cap_and_new_floor tests/test_task_gen.py::test_dictation_rotation_includes_mastered_words tests/test_task_gen.py::test_dictation_fills_with_low_mastery_words -v`
+Expected: FAIL（旧算法只从 `lesson_id=当前课` 取新词、且会跨课取到期词、且不取「已考过未到期」词作为轮转；三个新测试分别断言「未学课不进池」「已掌握词进池」「轮转词补满」，旧代码均不满足）。
 
 - [ ] **Step 3: 实现**
 
@@ -204,23 +212,26 @@ Expected: FAIL（旧算法 `test_dictation_excludes_mastered_words` 会得到任
 
 ```python
 def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
-    """按遗忘曲线 + 掌握度出听写：
-    - 候选池：孩子绑定教材下所有 approved 课的本学科生词（跨课）。
-    - 到期词（next_review_at<=now）按 mastery 升序，最多 ceil(count*due_cap) 个。
-    - 新词（无 WordMastery 或 attempts 为空）按 id 升序，至少 max(1, floor(count*new_floor)) 个。
-    - 不足 count 时用「已学未掌握未到期」词按 mastery 升序补位；仍不足不硬补。
-    - mastery>=0.9 视为已掌握，不进任何一档。
+    """按「已学课范围 + 无限循环」出听写：
+    - 候选池：绑定教材下、audit_status=approved、subject 匹配、且 id <= 当前课(lesson.id)
+      的全部 WordBank（未学课不进池，已学课永不踢出）。
+    - 四档优先级：到期词 → 错词 → 新词 → 轮转补位。
+      - 到期词（next_review_at<=now）+ 错词（mistake_count>0 未到期）合计受 due_n 上限。
+      - 新词（无 WordMastery 或 attempts 为空）受 new_n 下限保障。
+      - 轮转词（已考过、没错、未到期，含已掌握）按「最久没考」补满 count。
+    - 所有词永不移出（B2）；已掌握的词靠轮转档回来。
     """
     import math
     subject = lesson.subject
     now = datetime.utcnow()
 
-    # 候选池：绑定教材下所有 approved 课的生词
+    # 候选池：当前课及之前的所有 approved 课（按 Lesson.id <= lesson.id 截断）
     bound_doc_ids = [r[0] for r in db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
     lesson_ids = [r[0] for r in db.query(Lesson.id).filter(
         Lesson.subject == subject,
         Lesson.document_id.in_(bound_doc_ids),
-        Lesson.audit_status == "approved").all()]
+        Lesson.audit_status == "approved",
+        Lesson.id <= lesson.id).all()]
     if not lesson_ids:
         return None
 
@@ -235,8 +246,11 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
         WordMastery.user_id == user_id,
         WordMastery.word_bank_id.in_([w.id for w in words])).all()}
 
+    def _m(wb):
+        return mrows.get(wb.id)
+
     def _is_new(wb):
-        m = mrows.get(wb.id)
+        m = _m(wb)
         if m is None:
             return True
         try:
@@ -244,40 +258,54 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
         except (ValueError, TypeError):
             return True
 
-    def _mastery_of(wb):
-        m = mrows.get(wb.id)
-        return m.mastery if m else 0.0
-
     def _is_due(wb):
-        m = mrows.get(wb.id)
+        m = _m(wb)
         return bool(m and m.next_review_at and m.next_review_at <= now)
 
-    def _is_mastered(wb):
-        return _mastery_of(wb) >= 0.9
+    def _is_mistaken(wb):
+        m = _m(wb)
+        return bool(m and (m.mistake_count or 0) > 0 and not _is_due(wb))
 
     due_n = int(math.ceil(count * due_cap))
     new_n = max(1, int(math.floor(count * new_floor)))
 
-    due_words = sorted((w for w in words if _is_due(w) and not _is_mastered(w)),
-                       key=_mastery_of)[:due_n]
-    new_words = [w for w in words if _is_new(w)][:new_n]
+    # 1+2: 复习档（到期 + 错词），合计受 due_n 上限
+    due_words = sorted((w for w in words if _is_due(w)),
+                       key=lambda w: _m(w).next_review_at)[:due_n]
+    picked = list(due_words)
+    if len(picked) < due_n:
+        mistaken = sorted((w for w in words if _is_mistaken(w)),
+                          key=lambda w: -(_m(w).mistake_count or 0))
+        picked += mistaken[:due_n - len(picked)]
 
-    picked = due_words + new_words
     picked_ids = {w.id for w in picked}
+
+    # 3: 新词，受 new_n 下限
+    new_words = [w for w in words if _is_new(w) and w.id not in picked_ids][:new_n]
+    picked += new_words
+    picked_ids = {w.id for w in picked}
+
+    # 4: 轮转补位（已考过、没错、未到期，含已掌握），按最久没考排
     if len(picked) < count:
-        fill = sorted((w for w in words
-                       if not _is_mastered(w)
-                       and not _is_due(w)
-                       and not _is_new(w)
-                       and w.id not in picked_ids),
-                      key=_mastery_of)
-        picked += fill[:count - len(picked)]
+        def _last_review(w):
+            m = _m(w)
+            return m.next_review_at or now  # NULL 视为最早，先轮
+        rotation = sorted((w for w in words
+                           if w.id not in picked_ids
+                           and not _is_new(w)
+                           and not _is_due(w)
+                           and not _is_mistaken(w)),
+                          key=_last_review)
+        picked += rotation[:count - len(picked)]
 
     if not picked:
         return None
+    n_review = len(due_words) + len([w for w in picked if _is_due(w) or _is_mistaken(w)])
+    n_new = len(new_words)
+    n_rot = len(picked) - n_review - n_new
     return Task(
         task_type="dictation", subject=subject, title=f"{lesson.title} 生词听写",
-        detail=f"今日听写 · {len(picked)} 个（到期复习 {len(due_words)} + 新课 {len(new_words)} + 巩固 {len(picked)-len(due_words)-len(new_words)}）",
+        detail=f"今日听写 · {len(picked)} 个（复习 {n_review} + 新课 {n_new} + 轮转 {n_rot}）",
         content=json.dumps([{"id": w.id, "word": w.word, "extra": w.extra} for w in picked], ensure_ascii=False),
         points=20,
     )
@@ -303,25 +331,36 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
 - [ ] **Step 5: 跑新测试确认通过 + 旧测试回归**
 
 Run: `cd backend && python -m pytest tests/test_task_gen.py -v`
-Expected: 新增 3 个测试 PASS；`test_dictation_picks_new_and_due_words` 会失败（旧测试断言旧算法「2 新 + 1 旧 = 3」的具体数量），见下一步修复。
+Expected: 新增 3 个测试 PASS；`test_dictation_picks_new_and_due_words` 会失败（该旧测试构造的「第2课」在新「已学课范围」下超出当前课，旧词A/旧词B均不进池），见下一步重写。
 
-- [ ] **Step 6: 修旧测试 `test_dictation_picks_new_and_due_words`**
+- [ ] **Step 6: 重写旧测试 `test_dictation_picks_new_and_due_words`**
 
-该测试（`tests/test_task_gen.py:186-212`）断言旧行为。改为断言新行为：到期词进、新词保留、不硬补。替换其断言段：
+该测试（`tests/test_task_gen.py:186-212`）基于旧「跨课取到期词」行为。在新「已学课范围」下，第 2 课（`id > 当前课`）不进池。重写为验证「当前课内：新词 + 到期词都进，且到期词受上限、不硬补」。整段替换为：
 
 ```python
+def test_dictation_picks_new_and_due_words():
+    """当前课内：新词与到期词都进；到期词不足不硬补。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 第1课：白鹭、矗立 两个生词（当前课）
+    # 白鹭造一条到期记录，矗立保持新词
+    wb_ba = db.query(WordBank).filter_by(lesson_id=l1_id, word="白鹭").first()
+    db.add(WordMastery(word_bank_id=wb_ba.id, is_weak=True,
+                       next_review_at=datetime.utcnow() - timedelta(days=1),
+                       user_id=uid, mastery=0.1, attempts=json.dumps([False]),
+                       mistake_count=1))
+    db.commit()
+
     generate_tasks_for_user(db, uid, date.today())
     t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
                                  task_type="dictation").first()
     assert t is not None
     words = json.loads(t.content)
     got = {w["word"] for w in words}
-    # 新词（当前课白鹭、矗立）与到期旧词（旧词B）都进；到期上限 4、新词下限 2，总词数 = 2 新 + 1 到期 = 3，不硬补
-    assert {"白鹭", "矗立", "旧词B"} <= got
-    assert len(words) == 3
+    # 白鹭（到期）与矗立（新词）都进；只有 2 个候选，不硬补
+    assert {"白鹭", "矗立"} <= got
+    assert len(words) == 2
+    db.close()
 ```
-
-（原测试的「旧词A」非到期、无 mastery → 是「新词」档，但新词下限 `new_n=2` 已由白鹭/矗立占满，故旧词A不进；断言只要求「白鹭/矗立/旧词B」三词在，且总数 3。）
 
 - [ ] **Step 7: 全量回归 task_gen**
 
@@ -332,7 +371,7 @@ Expected: 全部 PASS。
 
 ```bash
 git add backend/app/services/task_gen.py backend/tests/test_task_gen.py
-git commit -m "feat(dictation): pick words by forgetting curve + mastery with due/new guards"
+git commit -m "feat(dictation): pick words within learned lessons with rotation review"
 ```
 
 ---
@@ -623,12 +662,12 @@ git commit -m "chore(dictation): remove deprecated task_new_ratio references"
 ## Self-Review
 
 **Spec coverage：**
-- 取词算法（候选池 + 三档 + 护栏）→ 任务 2 ✓
+- 取词算法（已学课范围 + 四档优先级 + 护栏）→ 任务 2 ✓
 - `get_child_config_float` → 任务 1 ✓
 - 孩子级配置写入口（修复写全局 bug）→ 任务 3 ✓
 - 家长端 UI + 分流 → 任务 4 ✓
 - 废弃 `task_new_ratio` → 任务 5 ✓
-- 测试（到期上限/新词下限/掌握移出/补位/跨用户隔离/配置覆盖/越界夹取）→ 任务 1/2/3 内嵌 ✓
+- 测试（已学课范围/到期+错词上限/新词下限/轮转循环/跨用户隔离/配置覆盖/越界夹取）→ 任务 1/2/3 内嵌 ✓
 
 **Placeholder scan：** 无 TBD/TODO；所有代码步骤含完整代码。
 
@@ -637,4 +676,4 @@ git commit -m "chore(dictation): remove deprecated task_new_ratio references"
 - `_gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3)` 签名在任务 2 定义，`generate_tasks_for_user` 调用一致 ✓
 - `PreferencesReq` 字段（`task_dictation_count_语文`/`task_dictation_due_cap`/`task_dictation_new_floor`）任务 3 定义，任务 4 前端字段名一致 ✓
 
-**已知风险**：任务 2 的 `test_dictation_fills_with_low_mastery_words` 依赖「补位词补满 7」——若 `_setup` 只造 2 个新词、第 2 课 5 个补位词，`new_n=2` 占满新词档，5 个补位词全部进入，总数 7。与算法一致。执行时若 `WordBank` 排序导致补位词不足（其它测试污染），以「运行失败再核」为准，本计划已给出确切断言供对照。
+**已知风险**：任务 2 的 `test_dictation_fills_with_low_mastery_words` 依赖「轮转词补满 7」——`_setup` 造 2 个新词（白鹭、矗立），再在第 1 课内追加 5 个轮转词，`new_n=2` 占满新词档，5 个轮转词全部进入，总数 7。与算法一致。执行时若其它测试的 `WordMastery` 污染导致轮转词不足，以「运行失败再核」为准，本计划已给出确切断言供对照。另注意 `test_dictation_isolates_due_words_across_users` 现断言 `got == {"白鹭","矗立"}`——新算法下第 2 课（B 的到期词）超当前课不进池，A 只出白鹭/矗立，断言仍成立。
