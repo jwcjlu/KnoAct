@@ -120,7 +120,7 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
     if not picked:
         return None
     n_review = len([w for w in picked if _is_due(w) or _is_mistaken(w)])
-    n_new = len(new_words)
+    n_new = len([w for w in picked if _is_new(w) and not _is_due(w) and not _is_mistaken(w)])
     n_rot = len(picked) - n_review - n_new
     return Task(
         task_type="dictation", subject=subject, title=f"{lesson.title} 生词听写",
