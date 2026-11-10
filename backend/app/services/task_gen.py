@@ -116,6 +116,7 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
                           key=_last_review)
         picked += rotation[:count - len(picked)]
 
+    picked = picked[:count]
     if not picked:
         return None
     n_review = len([w for w in picked if _is_due(w) or _is_mistaken(w)])

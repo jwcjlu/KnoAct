@@ -427,3 +427,56 @@ def test_dictation_fills_with_rotation_words():
     words = json.loads(t.content)
     assert len(words) == 7
     db.close()
+
+
+def test_dictation_mistaken_words_fill_review_bucket():
+    """错词（未到期，mistake_count>0）落入复习档，且与到期词共用 due_n 上限。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 白鹭、矗立
+    # 白鹭：到期；矗立：错词但未到期
+    wb_ba = db.query(WordBank).filter_by(lesson_id=l1_id, word="白鹭").first()
+    wb_ch = db.query(WordBank).filter_by(lesson_id=l1_id, word="矗立").first()
+    db.add(WordMastery(word_bank_id=wb_ba.id, is_weak=True,
+                       next_review_at=datetime.utcnow() - timedelta(days=1),
+                       user_id=uid, mastery=0.1, attempts=json.dumps([False]),
+                       mistake_count=2))
+    db.add(WordMastery(word_bank_id=wb_ch.id, is_weak=True,
+                       next_review_at=datetime.utcnow() + timedelta(days=2),
+                       user_id=uid, mastery=0.3, attempts=json.dumps([False]),
+                       mistake_count=3))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    assert t is not None
+    # 白鹭(到期) 与 矗立(错词) 都进复习档
+    got = {w["word"] for w in json.loads(t.content)}
+    assert {"白鹭", "矗立"} <= got
+    # 复习档计数 = 2（1 到期 + 1 错词）
+    assert "复习 2" in t.detail
+    db.close()
+
+
+def test_dictation_due_cap_truncates_excess_due_words():
+    """到期词超过 due_n 上限时被截断，且总数不超过 count。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 白鹭、矗立（当前课）
+    # 追加 5 个到期词，使到期词总数 7 > due_n(=ceil(7*0.5)=4)
+    _add_words(db, db.query(Lesson).filter_by(id=l1_id).first(),
+               ["到期1", "到期2", "到期3", "到期4", "到期5"])
+    for wb in db.query(WordBank).filter_by(lesson_id=l1_id).all():
+        db.add(WordMastery(word_bank_id=wb.id, is_weak=True,
+                           next_review_at=datetime.utcnow() - timedelta(days=1),
+                           user_id=uid, mastery=0.1, attempts=json.dumps([False]),
+                           mistake_count=1))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    assert t is not None
+    words = json.loads(t.content)
+    # 到期词只取 due_n=4 个（截断），不取满 7 个
+    assert len(words) == 4
+    db.close()
