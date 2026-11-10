@@ -19,6 +19,15 @@ def get_child_config_int(db: Session, child_id: int, key: str, fallback: int) ->
         return fallback
 
 
+def get_child_config_float(db: Session, child_id: int, key: str, fallback: float) -> float:
+    val = get_child_config_str(db, child_id, key, "")
+    try:
+        result = float(val) if val else fallback
+    except ValueError:
+        return fallback
+    return max(0.0, min(1.0, result))
+
+
 VALID_DICTATION_MODES = frozenset({"paper_photo", "on_screen"})
 
 

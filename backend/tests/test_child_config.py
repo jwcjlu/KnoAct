@@ -1,5 +1,5 @@
 """孩子配置覆盖：孩子 > 全局 > 默认 三级降级。"""
-from app.services.child_config import get_child_config_int, get_child_config_str
+from app.services.child_config import get_child_config_int, get_child_config_str, get_child_config_float
 from app.models import User, ModelConfig, ChildConfig
 
 
@@ -57,3 +57,31 @@ def test_set_child_config_str_upsert(setup_db, db):
     assert get_dictation_input_mode(db, child.id) == "on_screen"
     set_child_config_str(db, child.id, "dictation_input_mode", "paper_photo")
     assert get_dictation_input_mode(db, child.id) == "paper_photo"
+
+
+def test_get_child_config_float_child_override(setup_db, db):
+    child = _child(db)
+    db.add(ModelConfig(key="task_dictation_due_cap", value="0.5"))
+    db.add(ChildConfig(user_id=child.id, key="task_dictation_due_cap", value="0.3"))
+    db.commit()
+    assert get_child_config_float(db, child.id, "task_dictation_due_cap", 0.5) == 0.3
+
+
+def test_get_child_config_float_falls_back_to_global(setup_db, db):
+    child = _child(db)
+    db.add(ModelConfig(key="task_dictation_new_floor", value="0.4"))
+    db.commit()
+    assert get_child_config_float(db, child.id, "task_dictation_new_floor", 0.3) == 0.4
+
+
+def test_get_child_config_float_falls_back_to_default(setup_db, db):
+    child = _child(db)
+    db.commit()
+    assert get_child_config_float(db, child.id, "nope_float", 0.25) == 0.25
+
+
+def test_get_child_config_float_clamps_to_01(setup_db, db):
+    child = _child(db)
+    db.add(ChildConfig(user_id=child.id, key="task_dictation_due_cap", value="2.5"))
+    db.commit()
+    assert get_child_config_float(db, child.id, "task_dictation_due_cap", 0.5) == 1.0

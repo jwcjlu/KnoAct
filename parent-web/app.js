@@ -432,8 +432,12 @@ async function loadLearningPreferences(){
   if(!uid){ return; }
   try{
     const r = await api(`/api/learning/preferences?user_id=${uid}`);
-    if(r && r.dictation_input_mode) configMap.dictation_input_mode = r.dictation_input_mode;
-    else configMap.dictation_input_mode = configMap.dictation_input_mode || 'paper_photo';
+    if(r && typeof r === 'object'){
+      for(const k in r){
+        configMap[k] = String(r[k]);
+      }
+    }
+    if(!configMap.dictation_input_mode) configMap.dictation_input_mode = 'paper_photo';
   }catch(e){
     configMap.dictation_input_mode = configMap.dictation_input_mode || 'paper_photo';
   }
@@ -2367,7 +2371,8 @@ function renderLearningConfigTab(){
           ${num('task_dictation_count_英语','7','英语每日听写量','每天听写几个英语单词')}
           ${num('task_math_calc_count','2','数学每日计算题数','每天几道屏上计算题（0–10）','0','10')}
           ${num('task_math_word_count','2','数学每日应用题数','每天几道纸上应用题，一题一照（0–10）','0','10')}
-          ${num('task_new_ratio','5','新/旧比例（新名额）','每日任务里「当天新课」的名额，旧=总量-新')}
+          ${num('task_dictation_due_cap','0.5','到期/错词复习上限比例','每天到期+错词复习最多占多少（0~1）','0','1','0.1')}
+          ${num('task_dictation_new_floor','0.3','新课生词下限比例','每天至少留多少比例给未听写过的生词（0~1）','0','1','0.1')}
           ${num('assignment_question_count','4','作业题数','个性化学习每次作业几道题')}
           ${num('assignment_pass_threshold','0.6','通过正确率','0~1，例如 0.6 表示 60%','0','1','0.1')}
           ${sel('difficulty_语文','中等','语文出题难度',['简单','中等','困难'])}
@@ -2385,8 +2390,15 @@ function renderLearningConfigTab(){
 
 async function saveLearningConfig(){
   if(!uid){ toast('请先选择当前孩子'); return; }
-  // 收集所有 [data-key] 输入框/下拉/勾选框的当前值
   const inputs = document.querySelectorAll('[data-key]');
+  const childKeys = new Set([
+    'dictation_input_mode',
+    'task_dictation_count_语文',
+    'task_dictation_count_英语',
+    'task_dictation_due_cap',
+    'task_dictation_new_floor',
+  ]);
+  const childBody = { user_id: uid };
   let dictMode = null;
   for(const el of inputs){
     const key = el.dataset.key;
@@ -2397,11 +2409,20 @@ async function saveLearningConfig(){
     let value;
     if(el.type === 'checkbox'){ value = el.checked ? 'true' : 'false'; }
     else { value = el.value; }
-    await api('/api/config', {method:'POST', body:{key, value}});
+    if(childKeys.has(key)){
+      const isRatio = (key === 'task_dictation_due_cap' || key === 'task_dictation_new_floor');
+      const isCount = (key === 'task_dictation_count_语文' || key === 'task_dictation_count_英语');
+      if(isRatio){ childBody[key] = parseFloat(value); }
+      else if(isCount){ childBody[key] = parseInt(value, 10); }
+      else { childBody[key] = value; }
+    } else {
+      await api('/api/config', {method:'POST', body:{key, value}});
+    }
   }
-  if(uid && dictMode){
-    await api('/api/learning/preferences', {method:'PUT', body:{user_id: uid, dictation_input_mode: dictMode}});
-    configMap.dictation_input_mode = dictMode;
+  if(uid){
+    if(dictMode) childBody.dictation_input_mode = dictMode;
+    await api('/api/learning/preferences', {method:'PUT', body: childBody});
+    if(dictMode) configMap.dictation_input_mode = dictMode;
   }
   toast('学习配置已保存');
   await loadConfig();
