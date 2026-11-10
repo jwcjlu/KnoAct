@@ -208,6 +208,7 @@ def test_dictation_picks_new_and_due_words():
     got = {w["word"] for w in words}
     assert {"白鹭", "矗立"} <= got
     assert len(words) == 2
+    assert "复习 1" in t.detail and "新课 1" in t.detail
     db.close()
 
 

@@ -118,7 +118,7 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
 
     if not picked:
         return None
-    n_review = len(due_words) + len([w for w in picked if _is_due(w) or _is_mistaken(w)])
+    n_review = len([w for w in picked if _is_due(w) or _is_mistaken(w)])
     n_new = len(new_words)
     n_rot = len(picked) - n_review - n_new
     return Task(
