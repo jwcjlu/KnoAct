@@ -459,7 +459,11 @@ def appeal(req: AppealReq, user: User = Depends(require_learning_user),
 
 class PreferencesReq(BaseModel):
     user_id: int
-    dictation_input_mode: str
+    dictation_input_mode: str = ""
+    task_dictation_count_语文: int | None = None
+    task_dictation_count_英语: int | None = None
+    task_dictation_due_cap: float | None = None
+    task_dictation_new_floor: float | None = None
 
 
 @router.get("/api/learning/preferences")
@@ -469,9 +473,17 @@ def get_learning_preferences(
     db: Session = Depends(get_db),
 ):
     ensure_user_access(user, user_id, db)
-    from ..services.child_config import get_dictation_input_mode
+    from ..services.child_config import (
+        get_dictation_input_mode, get_child_config_int, get_child_config_float,
+    )
 
-    return {"dictation_input_mode": get_dictation_input_mode(db, user_id)}
+    return {
+        "dictation_input_mode": get_dictation_input_mode(db, user_id),
+        "task_dictation_count_语文": get_child_config_int(db, user_id, "task_dictation_count_语文", 7),
+        "task_dictation_count_英语": get_child_config_int(db, user_id, "task_dictation_count_英语", 7),
+        "task_dictation_due_cap": get_child_config_float(db, user_id, "task_dictation_due_cap", 0.5),
+        "task_dictation_new_floor": get_child_config_float(db, user_id, "task_dictation_new_floor", 0.3),
+    }
 
 
 @router.put("/api/learning/preferences")
@@ -485,7 +497,16 @@ def put_learning_preferences(
     child = db.get(User, req.user_id)
     if child is None or child.role != "child" or child.parent_id != user.id:
         raise HTTPException(status_code=404, detail={"error": "child_not_found"})
-    if req.dictation_input_mode not in VALID_DICTATION_MODES:
-        raise HTTPException(status_code=400, detail={"error": "invalid_mode"})
-    set_child_config_str(db, req.user_id, "dictation_input_mode", req.dictation_input_mode)
+    if req.dictation_input_mode:
+        if req.dictation_input_mode not in VALID_DICTATION_MODES:
+            raise HTTPException(status_code=400, detail={"error": "invalid_mode"})
+        set_child_config_str(db, req.user_id, "dictation_input_mode", req.dictation_input_mode)
+    if req.task_dictation_count_语文 is not None:
+        set_child_config_str(db, req.user_id, "task_dictation_count_语文", str(req.task_dictation_count_语文))
+    if req.task_dictation_count_英语 is not None:
+        set_child_config_str(db, req.user_id, "task_dictation_count_英语", str(req.task_dictation_count_英语))
+    if req.task_dictation_due_cap is not None:
+        set_child_config_str(db, req.user_id, "task_dictation_due_cap", str(req.task_dictation_due_cap))
+    if req.task_dictation_new_floor is not None:
+        set_child_config_str(db, req.user_id, "task_dictation_new_floor", str(req.task_dictation_new_floor))
     return {"ok": True}
