@@ -34,28 +34,98 @@ def _default_count(db: Session, key: str, fallback: int, child_id=None) -> int:
     return get_child_config_int(db, child_id, key, fallback)
 
 
-def _gen_dictation(db, lesson, user_id, count, new_ratio=5):
-    """按遗忘曲线出听写：当前课取「新」名额，旧课到期词取「旧」名额，凑不满不补。"""
+def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
+    """按「已学课范围 + 无限循环」出听写：
+    - 候选池：绑定教材下、audit_status=approved、subject 匹配、且 id <= 当前课(lesson.id)
+      的全部 WordBank（未学课不进池，已学课永不踢出）。
+    - 四档优先级：到期词 -> 错词 -> 新词 -> 轮转补位。
+      - 到期词（next_review_at<=now）+ 错词（mistake_count>0 未到期）合计受 due_n 上限。
+      - 新词（无 WordMastery 或 attempts 为空）受 new_n 下限保障。
+      - 轮转词（已考过、没错、未到期，含已掌握）按「最久没考」补满 count。
+    - 所有词永不移出（B2）；已掌握的词靠轮转档回来。
+    """
+    import math
     subject = lesson.subject
-    # 新：当前课生词
-    new_words = db.query(WordBank).filter_by(lesson_id=lesson.id).order_by(WordBank.id).limit(new_ratio).all()
-    # 旧：其它课中到期待复习的词（next_review_at <= now），按用户隔离
     now = datetime.utcnow()
-    due_ids = [r[0] for r in db.query(WordMastery.word_bank_id).filter(
-        WordMastery.user_id == user_id,
-        WordMastery.next_review_at.isnot(None), WordMastery.next_review_at <= now).all()]
-    due_words = []
-    if due_ids:
-        due_words = (db.query(WordBank)
-                     .filter(WordBank.id.in_(due_ids), WordBank.lesson_id != lesson.id)
-                     .order_by(WordBank.id).limit(max(0, count - new_ratio)).all())
-    words = new_words + due_words
+
+    bound_doc_ids = [r[0] for r in db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
+    lesson_ids = [r[0] for r in db.query(Lesson.id).filter(
+        Lesson.subject == subject,
+        Lesson.document_id.in_(bound_doc_ids),
+        Lesson.audit_status == "approved",
+        Lesson.id <= lesson.id).all()]
+    if not lesson_ids:
+        return None
+
+    words = (db.query(WordBank)
+             .filter(WordBank.lesson_id.in_(lesson_ids))
+             .order_by(WordBank.id).all())
     if not words:
         return None
+
+    mrows = {m.word_bank_id: m for m in db.query(WordMastery).filter(
+        WordMastery.user_id == user_id,
+        WordMastery.word_bank_id.in_([w.id for w in words])).all()}
+
+    def _m(wb):
+        return mrows.get(wb.id)
+
+    def _is_new(wb):
+        m = _m(wb)
+        if m is None:
+            return True
+        try:
+            return not json.loads(m.attempts or "[]")
+        except (ValueError, TypeError):
+            return True
+
+    def _is_due(wb):
+        m = _m(wb)
+        return bool(m and m.next_review_at and m.next_review_at <= now)
+
+    def _is_mistaken(wb):
+        m = _m(wb)
+        return bool(m and (m.mistake_count or 0) > 0 and not _is_due(wb))
+
+    due_n = int(math.ceil(count * due_cap))
+    new_n = max(1, int(math.floor(count * new_floor)))
+
+    due_words = sorted((w for w in words if _is_due(w)),
+                       key=lambda w: _m(w).next_review_at)[:due_n]
+    picked = list(due_words)
+    if len(picked) < due_n:
+        mistaken = sorted((w for w in words if _is_mistaken(w)),
+                          key=lambda w: -(_m(w).mistake_count or 0))
+        picked += mistaken[:due_n - len(picked)]
+
+    picked_ids = {w.id for w in picked}
+
+    new_words = [w for w in words if _is_new(w) and w.id not in picked_ids][:new_n]
+    picked += new_words
+    picked_ids = {w.id for w in picked}
+
+    if len(picked) < count:
+        def _last_review(w):
+            m = _m(w)
+            return m.next_review_at or now
+        rotation = sorted((w for w in words
+                           if w.id not in picked_ids
+                           and not _is_new(w)
+                           and not _is_due(w)
+                           and not _is_mistaken(w)),
+                          key=_last_review)
+        picked += rotation[:count - len(picked)]
+
+    picked = picked[:count]
+    if not picked:
+        return None
+    n_review = len([w for w in picked if _is_due(w) or _is_mistaken(w)])
+    n_new = len([w for w in picked if _is_new(w) and not _is_due(w) and not _is_mistaken(w)])
+    n_rot = len(picked) - n_review - n_new
     return Task(
         task_type="dictation", subject=subject, title=f"{lesson.title} 生词听写",
-        detail=f"今日听写 · {len(words)} 个（新课 {len(new_words)} + 复习 {len(due_words)}）",
-        content=json.dumps([{"id": w.id, "word": w.word, "extra": w.extra} for w in words], ensure_ascii=False),
+        detail=f"今日听写 · {len(picked)} 个（复习 {n_review} + 新课 {n_new} + 轮转 {n_rot}）",
+        content=json.dumps([{"id": w.id, "word": w.word, "extra": w.extra} for w in picked], ensure_ascii=False),
         points=20,
     )
 
@@ -280,9 +350,11 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
             continue
         n_dict = _default_count(db, f"task_dictation_count_{subject}", 7, child_id=user_id)
         n_know = _default_count(db, "task_knowledge_count", 5, child_id=user_id)
-        new_ratio = _default_count(db, "task_new_ratio", 5, child_id=user_id)
-        gens = [_gen_dictation(db, lesson, user_id, n_dict, new_ratio),
-                _gen_knowledge(db, lesson, user_id, n_know, new_ratio, bucket.id),
+        from .child_config import get_child_config_float
+        due_cap = get_child_config_float(db, user_id, "task_dictation_due_cap", 0.5)
+        new_floor = get_child_config_float(db, user_id, "task_dictation_new_floor", 0.3)
+        gens = [_gen_dictation(db, lesson, user_id, n_dict, due_cap, new_floor),
+                _gen_knowledge(db, lesson, user_id, n_know, 5, bucket.id),
                 _gen_review(db, lesson, user_id, n_dict)]
         if subject == "英语":
             gens.append(_gen_listening(db, lesson, user_id, bucket.id))
