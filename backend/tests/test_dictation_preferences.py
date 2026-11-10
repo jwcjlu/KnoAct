@@ -40,11 +40,23 @@ def test_preferences_put_dictation_counts_child_scoped(setup_db):
     g = client.get(f"/api/learning/preferences?user_id={child_id}", headers=child_h)
     assert g.json()["task_dictation_count_语文"] == 12
     assert g.json()["task_dictation_due_cap"] == 0.6
+    assert g.json()["task_dictation_new_floor"] == 0.2
 
     from app.services.child_config import get_child_config_int, get_child_config_float
     s = SessionLocal()
     assert get_child_config_int(s, other_id, "task_dictation_count_语文", 7) == 7
     s.close()
+
+
+def test_preferences_put_rejects_invalid_count(setup_db):
+    session = SessionLocal()
+    _, child, parent_h, _ = parent_child(session, "badcnt")
+    child_id = child.id
+    session.close()
+    r = client.put("/api/learning/preferences",
+                   json={"user_id": child_id, "task_dictation_count_语文": 0},
+                   headers=parent_h)
+    assert r.status_code == 400
 
 
 def test_preferences_get_returns_defaults_for_unconfigured_child(setup_db):

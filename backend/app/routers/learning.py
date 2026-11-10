@@ -502,8 +502,12 @@ def put_learning_preferences(
             raise HTTPException(status_code=400, detail={"error": "invalid_mode"})
         set_child_config_str(db, req.user_id, "dictation_input_mode", req.dictation_input_mode)
     if req.task_dictation_count_语文 is not None:
+        if req.task_dictation_count_语文 <= 0:
+            raise HTTPException(status_code=400, detail={"error": "invalid_count", "message": "听写量必须为正整数"})
         set_child_config_str(db, req.user_id, "task_dictation_count_语文", str(req.task_dictation_count_语文))
     if req.task_dictation_count_英语 is not None:
+        if req.task_dictation_count_英语 <= 0:
+            raise HTTPException(status_code=400, detail={"error": "invalid_count", "message": "听写量必须为正整数"})
         set_child_config_str(db, req.user_id, "task_dictation_count_英语", str(req.task_dictation_count_英语))
     if req.task_dictation_due_cap is not None:
         set_child_config_str(db, req.user_id, "task_dictation_due_cap", str(req.task_dictation_due_cap))
