@@ -35,6 +35,12 @@ def _setup(db):
     return u.id, l1.id
 
 
+def _add_words(db, lesson, words):
+    for w in words:
+        db.add(WordBank(lesson_id=lesson.id, subject=lesson.subject, word=w, extra=""))
+    db.flush()
+
+
 def test_current_lesson_matches_subject():
     db = SessionLocal()
     uid, l1 = _setup(db)
@@ -184,18 +190,14 @@ def test_gen_knowledge_content_has_question_fields():
 
 
 def test_dictation_picks_new_and_due_words():
+    """当前课内：新词与到期词都进；到期词不足不硬补。"""
     db = SessionLocal()
-    uid, l1_id = _setup(db)  # 第1课：白鹭、矗立 两个生词
-    # 再建第2课，含 2 个生词，其中一个到期
-    doc = db.query(PdfDocument).first()
-    l2 = Lesson(document_id=doc.id, subject="语文", title="第2课", start_page=3, end_page=4,
-                extract_status="done", audit_status="approved")
-    db.add(l2); db.flush()
-    db.add(WordBank(lesson_id=l2.id, subject="语文", word="旧词A", extra=""))
-    wb_b = WordBank(lesson_id=l2.id, subject="语文", word="旧词B", extra="")
-    db.add(wb_b); db.flush()
-    db.add(WordMastery(word_bank_id=wb_b.id, is_weak=True,
-                       next_review_at=datetime.utcnow() - timedelta(days=1), user_id=uid))
+    uid, l1_id = _setup(db)  # 第1课：白鹭、矗立 两个生词（当前课）
+    wb_ba = db.query(WordBank).filter_by(lesson_id=l1_id, word="白鹭").first()
+    db.add(WordMastery(word_bank_id=wb_ba.id, is_weak=True,
+                       next_review_at=datetime.utcnow() - timedelta(days=1),
+                       user_id=uid, mastery=0.1, attempts=json.dumps([False]),
+                       mistake_count=1))
     db.commit()
 
     generate_tasks_for_user(db, uid, date.today())
@@ -204,11 +206,8 @@ def test_dictation_picks_new_and_due_words():
     assert t is not None
     words = json.loads(t.content)
     got = {w["word"] for w in words}
-    # 新（当前进度课=第1课）应含白鹭、矗立；旧（到期）应含旧词B
-    assert "白鹭" in got and "矗立" in got
-    assert "旧词B" in got
-    # 到期旧词只有1个，凑不满2个 → 不硬补，总数为 2(新) + 1(旧) = 3
-    assert len(words) == 3
+    assert {"白鹭", "矗立"} <= got
+    assert len(words) == 2
     db.close()
 
 
@@ -352,4 +351,78 @@ def test_generate_bank_practice_when_flagged():
     payload = json.loads(t.content)
     assert payload["bank_id"] == bank.id
     assert len(payload["question_ids"]) == 1
+    db.close()
+
+
+def test_dictation_due_cap_and_new_floor():
+    """到期词受上限约束；未学课（id>当前课）不进池；不硬补。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 第1课：白鹭、矗立（当前课）
+    doc = db.query(PdfDocument).first()
+    l2 = Lesson(document_id=doc.id, subject="语文", title="第2课",
+                start_page=3, end_page=4, extract_status="done", audit_status="approved")
+    db.add(l2); db.flush()
+    _add_words(db, l2, ["未学课词"])
+    db.commit()
+
+    for wb in db.query(WordBank).filter_by(lesson_id=l1_id).all():
+        db.add(WordMastery(word_bank_id=wb.id, is_weak=True,
+                           next_review_at=datetime.utcnow() - timedelta(days=1),
+                           user_id=uid, mastery=0.1, attempts=json.dumps([False]),
+                           mistake_count=1))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    words = json.loads(t.content)
+    got = {w["word"] for w in words}
+    assert "未学课词" not in got
+    assert {"白鹭", "矗立"} <= got
+    assert len(words) == 2
+    db.close()
+
+
+def test_dictation_rotation_includes_mastered_words():
+    """B2 无限循环：已掌握的词不移出，在轮转档回来。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    wb_ba = db.query(WordBank).filter_by(lesson_id=l1_id, word="白鹭").first()
+    db.add(WordMastery(word_bank_id=wb_ba.id, is_weak=False,
+                       next_review_at=datetime.utcnow() + timedelta(days=30),
+                       user_id=uid, mastery=0.95,
+                       attempts=json.dumps([True, True, True]),
+                       mistake_count=0))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    assert t is not None
+    got = {w["word"] for w in json.loads(t.content)}
+    assert "白鹭" in got
+    assert "矗立" in got
+    db.close()
+
+
+def test_dictation_fills_with_rotation_words():
+    """到期+新词不足 count 时，用轮转词补满。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 白鹭、矗立 两个新词
+    _add_words(db, db.query(Lesson).filter_by(id=l1_id).first(),
+               ["轮转1", "轮转2", "轮转3", "轮转4", "轮转5"])
+    for wb in db.query(WordBank).filter_by(lesson_id=l1_id).all():
+        if wb.word in ("白鹭", "矗立"):
+            continue
+        db.add(WordMastery(word_bank_id=wb.id, is_weak=False,
+                           next_review_at=datetime.utcnow() + timedelta(days=3),
+                           user_id=uid, mastery=0.4, attempts=json.dumps([True]),
+                           mistake_count=0))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    words = json.loads(t.content)
+    assert len(words) == 7
     db.close()
