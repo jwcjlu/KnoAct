@@ -130,28 +130,100 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
     )
 
 
-def _gen_knowledge(db, lesson, user_id, count, new_ratio=5, bucket_id=None):
-    """按遗忘曲线出知识点：当前课取「新」名额，旧课到期知识点取「旧」名额。"""
+def _gen_knowledge(db, lesson, user_id, count, bucket_id=None):
+    """按「已学课范围 + 无限循环」取知识点：
+    - 候选池：绑定教材下、approved、subject 匹配、id <= 当前课的全部知识点。
+    - 四档优先级：到期 -> 错 -> 新 -> 轮转。
+      - 到期（next_review_at<=now）+ 错（最近一次答错、未到期）合计受 ceil(count/2) 上限。
+      - 新（无 KnowledgeMastery 或 attempts 空）至少 1 个。
+      - 轮转（其余，含 mastered）按最久没考补满 count。
+    - 已掌握永不移出（B2 无限循环）。
+    """
+    import math
     subject = lesson.subject
-    new_pts = db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).order_by(KnowledgePoint.id).limit(new_ratio).all()
     now = datetime.utcnow()
-    due_ids = [r[0] for r in db.query(KnowledgeMastery.knowledge_point_id).filter(
-        KnowledgeMastery.user_id == user_id,
-        KnowledgeMastery.next_review_at.isnot(None), KnowledgeMastery.next_review_at <= now).all()]
-    due_pts = []
-    if due_ids:
-        due_pts = (db.query(KnowledgePoint)
-                   .join(KnowledgeMastery, KnowledgeMastery.knowledge_point_id == KnowledgePoint.id)
-                   .filter(KnowledgePoint.id.in_(due_ids), KnowledgePoint.lesson_id != lesson.id,
-                           KnowledgeMastery.user_id == user_id)
-                   .order_by(KnowledgeMastery.mastery.asc(), KnowledgePoint.id)
-                   .limit(max(0, count - new_ratio)).all())
-    pts = new_pts + due_pts
-    if not pts:
+
+    bound_doc_ids = [r[0] for r in db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
+    lesson_ids = [r[0] for r in db.query(Lesson.id).filter(
+        Lesson.subject == subject,
+        Lesson.document_id.in_(bound_doc_ids),
+        Lesson.audit_status == "approved",
+        Lesson.id <= lesson.id).all()]
+    if not lesson_ids:
         return None
+
+    points = (db.query(KnowledgePoint)
+              .filter(KnowledgePoint.lesson_id.in_(lesson_ids))
+              .order_by(KnowledgePoint.id).all())
+    if not points:
+        return None
+
+    mrows = {m.knowledge_point_id: m for m in db.query(KnowledgeMastery).filter(
+        KnowledgeMastery.user_id == user_id,
+        KnowledgeMastery.knowledge_point_id.in_([p.id for p in points])).all()}
+
+    def _m(p):
+        return mrows.get(p.id)
+
+    def _attempts(p):
+        m = _m(p)
+        if m is None:
+            return []
+        try:
+            a = json.loads(m.attempts or "[]")
+            return a if isinstance(a, list) else []
+        except (ValueError, TypeError):
+            return []
+
+    def _is_new(p):
+        return not _attempts(p)
+
+    def _is_due(p):
+        m = _m(p)
+        return bool(m and m.next_review_at and m.next_review_at <= now)
+
+    def _is_mistaken(p):
+        a = _attempts(p)
+        # `a[-1] is False` 依赖 attempts 只存 Python bool（见 mastery._append 的 bool(is_correct) 写入）。
+        # 若未来改用 0/1 或其他序列化，须同步改这里的身份判断。
+        return bool(a and a[-1] is False and not _is_due(p))
+
+    review_n = int(math.ceil(count / 2))
+    # new_n 的 max(1, ...) 仅用于 count=1 时保证至少留 1 个新知识点名额（否则全被到期档占满）；
+    # count>=2 时 review_n + new_n == count。
+    new_n = max(1, count - review_n)
+
+    due_pts = sorted((p for p in points if _is_due(p)),
+                     key=lambda p: _m(p).next_review_at)[:review_n]
+    picked = list(due_pts)
+    if len(picked) < review_n:
+        mistaken = [p for p in points if _is_mistaken(p) and p.id not in {x.id for x in picked}]
+        picked += mistaken[:review_n - len(picked)]
+
+    picked_ids = {p.id for p in picked}
+    new_pts = [p for p in points if _is_new(p) and p.id not in picked_ids][:new_n]
+    picked += new_pts
+    picked_ids = {p.id for p in picked}
+
+    if len(picked) < count:
+        def _last_review(p):
+            m = _m(p)
+            return m.next_review_at or now
+        rotation = sorted((p for p in points
+                           if p.id not in picked_ids
+                           and not _is_new(p)
+                           and not _is_due(p)
+                           and not _is_mistaken(p)),
+                          key=_last_review)
+        picked += rotation[:count - len(picked)]
+
+    picked = picked[:count]
+    if not picked:
+        return None
+
     from .knowledge_quiz import generate_knowledge_questions
     from ..models import Question
-    raw = [{"id": p.id, "content": p.content, "category": p.category} for p in pts]
+    raw = [{"id": p.id, "content": p.content, "category": p.category} for p in picked]
     qs = generate_knowledge_questions(db, raw, subject)
     for item in qs:
         db.add(Question(
@@ -163,9 +235,13 @@ def _gen_knowledge(db, lesson, user_id, count, new_ratio=5, bucket_id=None):
             user_id=user_id, bucket_id=bucket_id,
             extra=json.dumps({"keywords": item.get("keywords") or [], "content": item.get("content") or ""}, ensure_ascii=False),
         ))
+    n_due = len(due_pts)
+    n_mist = len([p for p in picked if _is_mistaken(p)])
+    n_new = len(new_pts)
+    n_rot = len(picked) - n_due - n_mist - n_new
     return Task(
         task_type="knowledge", subject=subject, title=f"{lesson.title} 基础知识",
-        detail=f"重点巩固 · {len(pts)} 个知识点（新课 {len(new_pts)} + 复习 {len(due_pts)}）",
+        detail=f"重点巩固 · {len(picked)} 个知识点（到期 {n_due} + 错 {n_mist} + 新课 {n_new} + 轮转 {n_rot}）",
         content=json.dumps(qs, ensure_ascii=False),
         points=20,
     )
@@ -354,7 +430,7 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
         due_cap = get_child_config_float(db, user_id, "task_dictation_due_cap", 0.5)
         new_floor = get_child_config_float(db, user_id, "task_dictation_new_floor", 0.3)
         gens = [_gen_dictation(db, lesson, user_id, n_dict, due_cap, new_floor),
-                _gen_knowledge(db, lesson, user_id, n_know, 5, bucket.id),
+                _gen_knowledge(db, lesson, user_id, n_know, bucket.id),
                 _gen_review(db, lesson, user_id, n_dict)]
         if subject == "英语":
             gens.append(_gen_listening(db, lesson, user_id, bucket.id))
