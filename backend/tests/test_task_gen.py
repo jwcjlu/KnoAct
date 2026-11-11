@@ -3,7 +3,7 @@ from datetime import datetime, date, timedelta
 from app.database import SessionLocal, Base, engine
 from app.models import (
     User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question,
-    UserDocument, ChildConfig, QuestionBank,
+    UserDocument, ChildConfig, QuestionBank, KnowledgeMastery, LearningProgress,
 )
 from app.services.task_gen import generate_tasks_for_user, _current_lesson
 
@@ -479,4 +479,131 @@ def test_dictation_due_cap_truncates_excess_due_words():
     words = json.loads(t.content)
     # 到期词只取 due_n=4 个（截断），不取满 7 个
     assert len(words) == 4
+    db.close()
+
+
+def _add_kps(db, lesson, contents):
+    for c in contents:
+        db.add(KnowledgePoint(subject=lesson.subject, category="字词", content=c, lesson_id=lesson.id))
+    db.flush()
+
+
+def test_knowledge_learned_lesson_scope():
+    """已学课（id<=当前课）的知识点进池；未学课（id>当前课）不进。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 第1课，1 个知识点「形近字辨析」
+    doc = db.query(PdfDocument).first()
+    # 第2课（已学）含一个到期知识点
+    l2 = Lesson(document_id=doc.id, subject="语文", title="第2课",
+                start_page=3, end_page=4, extract_status="done", audit_status="approved")
+    db.add(l2); db.flush()
+    kp2 = KnowledgePoint(subject="语文", category="字词", content="第2课到期点", lesson_id=l2.id)
+    db.add(kp2); db.flush()
+    db.add(KnowledgeMastery(user_id=uid, knowledge_point_id=kp2.id,
+                            attempts=json.dumps([False]), mastery=0.1, mastered=False,
+                            next_review_at=datetime.utcnow() - timedelta(days=1)))
+    # 第3课（未学）含一个到期知识点
+    l3 = Lesson(document_id=doc.id, subject="语文", title="第3课",
+                start_page=5, end_page=6, extract_status="done", audit_status="approved")
+    db.add(l3); db.flush()
+    kp3 = KnowledgePoint(subject="语文", category="字词", content="第3课到期点", lesson_id=l3.id)
+    db.add(kp3); db.flush()
+    db.add(KnowledgeMastery(user_id=uid, knowledge_point_id=kp3.id,
+                            attempts=json.dumps([False]), mastery=0.1, mastered=False,
+                            next_review_at=datetime.utcnow() - timedelta(days=1)))
+    # 推进进度到第2课
+    db.add(LearningProgress(user_id=uid, subject="语文", current_lesson_id=l2.id))
+    # 降低 new_ratio，使旧算法「跨课到期」路径生效（count-new_ratio>0），
+    # 否则旧算法会因 limit(0) 恰好漏掉第3课到期点，无法区分新旧语义
+    db.add(ChildConfig(user_id=uid, key="task_new_ratio", value="1"))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="knowledge").first()
+    assert t is not None
+    contents = {q.get("content") for q in json.loads(t.content)}
+    assert "第2课到期点" in contents   # 已学课（当前课=第2课）进池
+    assert "第3课到期点" not in contents  # 未学课不进池
+    db.close()
+
+
+def test_knowledge_rotation_includes_mastered():
+    """无限循环：已掌握知识点（在已学但非当前课）仍靠轮转档回来。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 第1课 1 个知识点「形近字辨析」
+    doc = db.query(PdfDocument).first()
+    # 第2课（已学）含一个已掌握知识点
+    l2 = Lesson(document_id=doc.id, subject="语文", title="第2课",
+                start_page=3, end_page=4, extract_status="done", audit_status="approved")
+    db.add(l2); db.flush()
+    kp2 = KnowledgePoint(subject="语文", category="字词", content="已掌握点", lesson_id=l2.id)
+    db.add(kp2); db.flush()
+    db.add(KnowledgeMastery(user_id=uid, knowledge_point_id=kp2.id,
+                            attempts=json.dumps([True, True]),
+                            mastery=0.95, mastered=True,
+                            next_review_at=datetime.utcnow() + timedelta(days=30)))
+    # 第3课（当前课）含一个新知识点，使旧算法只会取到当前课的点而漏掉「已掌握点」
+    l3 = Lesson(document_id=doc.id, subject="语文", title="第3课",
+                start_page=5, end_page=6, extract_status="done", audit_status="approved")
+    db.add(l3); db.flush()
+    db.add(KnowledgePoint(subject="语文", category="字词", content="第3课新点", lesson_id=l3.id))
+    db.add(LearningProgress(user_id=uid, subject="语文", current_lesson_id=l3.id))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="knowledge").first()
+    assert t is not None
+    contents = {q.get("content") for q in json.loads(t.content)}
+    # 已掌握点在已学但非当前课，仍应靠轮转档回来（旧算法只取当前课点，不会取到它）
+    assert "已掌握点" in contents
+    db.close()
+
+
+def test_knowledge_due_priority_over_new():
+    """到期知识点优先于新知识点（排在前面）。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    _add_kps(db, db.query(Lesson).filter_by(id=l1_id).first(), ["新点A", "新点B"])
+    due_kp = KnowledgePoint(subject="语文", category="字词", content="到期点", lesson_id=l1_id)
+    db.add(due_kp); db.flush()
+    db.add(KnowledgeMastery(user_id=uid, knowledge_point_id=due_kp.id,
+                            attempts=json.dumps([False]),
+                            mastery=0.1, mastered=False,
+                            next_review_at=datetime.utcnow() - timedelta(days=1)))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="knowledge").first()
+    assert t is not None
+    contents = [q.get("content") for q in json.loads(t.content)]
+    # 到期点必须排在最前
+    assert contents[0] == "到期点"
+    db.close()
+
+
+def test_knowledge_review_cap_truncates_excess_due():
+    """到期知识点超过 review_n=ceil(count/2) 时被截断。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # count 默认 5 → review_n = 3
+    # 造 5 个到期知识点（> review_n）
+    for i in range(5):
+        kp = KnowledgePoint(subject="语文", category="字词", content=f"到期{i}", lesson_id=l1_id)
+        db.add(kp); db.flush()
+        db.add(KnowledgeMastery(user_id=uid, knowledge_point_id=kp.id,
+                                attempts=json.dumps([False]), mastery=0.1, mastered=False,
+                                next_review_at=datetime.utcnow() - timedelta(days=1)))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="knowledge").first()
+    assert t is not None
+    qs = json.loads(t.content)
+    # 到期档只取 review_n=3 个；新知识点（形近字辨析）至少 1 个；总数不超 count=5
+    due_picked = [q for q in qs if (q.get("content") or "").startswith("到期")]
+    assert len(due_picked) == 3
+    assert len(qs) <= 5
     db.close()
