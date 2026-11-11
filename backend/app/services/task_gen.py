@@ -184,9 +184,13 @@ def _gen_knowledge(db, lesson, user_id, count, bucket_id=None):
 
     def _is_mistaken(p):
         a = _attempts(p)
+        # `a[-1] is False` 依赖 attempts 只存 Python bool（见 mastery._append 的 bool(is_correct) 写入）。
+        # 若未来改用 0/1 或其他序列化，须同步改这里的身份判断。
         return bool(a and a[-1] is False and not _is_due(p))
 
     review_n = int(math.ceil(count / 2))
+    # new_n 的 max(1, ...) 仅用于 count=1 时保证至少留 1 个新知识点名额（否则全被到期档占满）；
+    # count>=2 时 review_n + new_n == count。
     new_n = max(1, count - review_n)
 
     due_pts = sorted((p for p in points if _is_due(p)),
