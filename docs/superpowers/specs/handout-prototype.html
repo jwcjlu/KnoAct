@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>讲义闯关 · 固定短语 原型</title>
+<style>
+:root{
+  --blue:#3158E8; --blueSoft:#EDF1FF; --green:#2E8B5A; --greenSoft:#E8F7EF;
+  --orange:#DC872D; --orangeSoft:#FFF2DF; --gold:#F59D20; --bg:#F7F8F5;
+  --ink:#202723; --gray:#78817B; --line:#E3E7E0; --red:#D64545; --redSoft:#FBECEC;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#E9ECE7;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink)}
+.wrap{max-width:900px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--gray);font-size:13px;margin:0 0 22px}
+.note{background:#fff;border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:8px;padding:10px 14px;font-size:12.5px;color:#5a645c;margin:0 0 24px;line-height:1.7}
+.note b{color:var(--ink)}
+h2{font-size:14px;margin:34px 0 12px;color:var(--ink);display:flex;align-items:center;gap:8px}
+h2 .bar{width:4px;height:16px;background:var(--blue);border-radius:2px}
+.phone{width:393px;height:832px;background:var(--bg);border-radius:40px;margin:0 auto 8px;box-shadow:0 18px 50px rgba(20,30,60,.18);border:1px solid #d7dbd4;overflow:hidden;display:flex;flex-direction:column;position:relative}
+.cap{font-size:11.5px;color:var(--gray);text-align:center;margin:0 0 20px}
+/* top bar */
+.topbar{background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:10px 8px 10px 4px;flex:0 0 auto}
+.topbar .ic{width:40px;height:40px;display:flex;align-items:center;justify-content:center;color:var(--ink);font-size:20px}
+.topbar .t{flex:1;font-weight:700;font-size:16.5px;padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar .home{color:var(--blue);font-weight:600;font-size:14px;padding:6px 10px;display:flex;align-items:center;gap:3px}
+/* progress */
+.prog{background:#fff;border-bottom:1px solid var(--line);padding:10px 16px 12px;flex:0 0 auto}
+.steps{display:flex;align-items:center;justify-content:space-between}
+.steps .s{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1}
+.steps .dot{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:#ECEFEA;color:var(--gray);border:2px solid #ECEFEA}
+.steps .s.on .dot{background:var(--blue);color:#fff;border-color:var(--blue)}
+.steps .s.done .dot{background:var(--green);color:#fff;border-color:var(--green)}
+.steps .s.rev .dot{background:var(--orange);color:#fff;border-color:var(--orange)}
+.steps .lb{font-size:10.5px;color:var(--gray)}
+.steps .s.on .lb{color:var(--blue);font-weight:700}
+.steps .s.done .lb{color:var(--green)}
+.steps .s.rev .lb{color:var(--orange)}
+.bridge{flex:1;height:2px;background:var(--line);margin:0 -2px 0 -2px;position:relative;top:-13px}
+/* body */
+.body{flex:1;overflow-y:auto;padding:16px}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:6px;margin-bottom:10px}
+.badge.rev{background:var(--orangeSoft);color:var(--orange)}
+.badge.new{background:var(--greenSoft);color:var(--green)}
+.card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:18px 18px 20px}
+.card + .card{margin-top:14px}
+.muted{color:var(--gray);font-size:12px}
+.big{font-size:24px;font-weight:800;margin:2px 0 2px}
+.en{color:var(--blue)}
+.zh{font-size:16px;color:var(--ink);margin-bottom:6px}
+.tag{display:inline-block;background:var(--blueSoft);color:var(--blue);font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:6px}
+.row{display:flex;gap:10px;margin-top:14px}
+.btn{flex:1;border-radius:14px;padding:13px 0;font-size:14.5px;font-weight:700;border:none;cursor:pointer}
+.btn.pri{background:var(--blue);color:#fff}
+.btn.sec{background:#fff;color:var(--blue);border:1.5px solid var(--blue)}
+.btn.ghost{background:var(--blueSoft);color:var(--blue)}
+.btn:disabled{background:#E4E8E2;color:#A9B0AA;cursor:default}
+.blanks{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:22px;font-weight:700;margin:8px 0 4px}
+.blanks .w{color:var(--ink)}
+.blank{min-width:96px;border-bottom:2.5px solid var(--blue);color:var(--blue);text-align:center;padding:2px 4px;font-size:22px;font-weight:800}
+.hint{background:var(--gold);color:#fff;font-size:13.5px;padding:2px 6px;border-radius:4px;margin-left:8px;font-weight:700}
+.hintbar{background:var(--orangeSoft);border:1px solid #F3DCB5;border-radius:10px;padding:9px 12px;font-size:13px;color:#9A6A1F;margin-top:12px}
+.hintbar b{color:var(--orange)}
+.recall{font-size:15px;margin-bottom:12px;line-height:1.6}
+.input{width:100%;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;font-size:15px;font-family:inherit;color:var(--ink)}
+.input:focus{outline:none;border-color:var(--blue)}
+.opts{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.opt{display:flex;align-items:center;gap:10px;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;font-size:15px;cursor:pointer;background:#fff}
+.opt.sel{border-color:var(--blue);background:var(--blueSoft)}
+.opt .k{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--gray);flex:0 0 auto}
+.opt.sel .k{background:var(--blue);border-color:var(--blue);color:#fff}
+.fb{display:flex;gap:8px;align-items:flex-start;border-radius:12px;padding:11px 13px;margin-top:12px;font-size:13.5px;line-height:1.6}
+.fb.ok{background:var(--greenSoft);color:var(--green)}
+.fb.no{background:var(--redSoft);color:var(--red)}
+.fb b{font-weight:800}
+.ex{background:var(--bg);border-radius:10px;padding:10px 12px;font-size:13px;color:#5a645c;margin-top:10px;line-height:1.6}
+.ex b{color:var(--ink)}
+.bottom{flex:0 0 auto;background:#fff;border-top:1px solid var(--line);padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
+.bottom .b2{display:flex;gap:10px}
+.link{color:var(--blue);font-weight:600;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.fin{background:var(--green);color:#fff;width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;margin:8px auto 12px}
+.center{text-align:center}
+.center .big2{font-size:19px;font-weight:800;margin-bottom:6px}
+.stat{display:flex;justify-content:center;gap:28px;margin-top:14px}
+.stat .n{font-size:20px;font-weight:800}
+.stat .g{color:var(--green)}
+.stat .r{color:var(--red)}
+.stat .l{font-size:11.5px;color:var(--gray);margin-top:2px}
+/* reader page */
+.rdr{background:#1B1E1B;color:#fff}
+.rdr .topbar{background:#232623;border-color:#333633}
+.rdr .topbar .t,.rdr .topbar .ic{color:#fff}
+.rdr .topbar .home{color:#9BB0FF}
+.pageimg{background:linear-gradient(135deg,#f3f4f1,#e9ebe6);border-radius:8px;color:#7a827b;display:flex;align-items:center;justify-content:center;height:560px;font-size:13px;text-align:center;line-height:1.8;border:1px solid #d7dbd4}
+.pageimg b{color:#4a524a;font-size:15px}
+.foot{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
+.foot .pg{color:var(--gray);font-size:13px}
+/* 归纳结构卡 */
+.point{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+.point:last-child{border-bottom:none}
+.point .pn{width:26px;height:26px;border-radius:50%;background:var(--greenSoft);color:var(--green);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;margin-top:1px}
+.point .pt{font-weight:700;font-size:15px}
+.point .pd{color:var(--gray);font-size:12.5px;margin-top:2px;line-height:1.5}
+code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>讲义闯关 · 固定短语（Phrase）</h1>
+  <p class="sub">孩子端四步自学 + 原页对照 · 对齐现有配色与卡片规范（AppColors / theme.dart）</p>
+
+  <div class="note">
+    <b>原型说明：</b>本流程为 spec「短语四步」——<b>认</b>（看短语）→ <b>记</b>（挖空+提示）→ <b>用</b>（造句，handout-sentence）→ <b>快测</b>（3 题，handout-step）。
+    顶栏为四步进度（<span style="color:var(--blue)">●</span>当前 <span style="color:var(--green)">●</span>完成 <span style="color:var(--orange)">●</span>复习条）；底栏「查看原页」进只读页图。
+    每步最多 2 次提示、第 3 次揭示答案。橙色条 = <b>到期复习条目</b>（review_item_ids），与新节同走四步。
+  </div>
+
+  <!-- ===== 1. 认 ===== -->
+  <h2><span class="bar"></span>第 1 步 · 认（Recognize）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">固定短语 · 第 2 节</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s on"><div class="dot">1</div><div class="lb">认</div></div>
+        <div class="s"><div class="dot">2</div><div class="lb">记</div></div>
+        <div class="s"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s"><div class="dot">4</div><div class="lb">快测</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="badge new">新课 · 1 / 6</span>
+        <div class="muted">固定短语</div>
+        <div class="big en">look after</div>
+        <div class="zh">照顾，照看</div>
+        <div class="ex"><b>例句</b>：I <b>look after</b> my little sister after school.<br>放学后我照顾我的小妹妹。</div>
+        <div class="ex" style="margin-top:6px"><b>来源</b>：《必备固定短语搭配》第 1 页</div>
+      </div>
+    </div>
+    <div class="bottom">
+      <a class="link" href="#">👁 查看原页</a>
+      <div class="b2"><button class="btn sec">听发音</button><button class="btn pri">记住了，下一步 →</button></div>
+    </div>
+  </div>
+  <p class="cap">Step 1「认」：看短语 + 中文 + 例句；底栏「查看原页」对照原讲义页图。</p>
+
+  <!-- ===== 2. 记 ===== -->
+  <h2><span class="bar"></span>第 2 步 · 记（挖空 + 提示）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">固定短语 · 第 2 节</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s done"><div class="dot">1</div><div class="lb">认</div></div>
+        <div class="s on"><div class="dot">2</div><div class="lb">记</div></div>
+        <div class="s"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s"><div class="dot">4</div><div class="lb">快测</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="badge rev">到期复习 · 1 / 2</span>
+        <div class="recall">还记得这个短语吗？补全挖空：</div>
+        <div class="blanks"><span class="w">Don't</span><span class="blank">give up</span><span class="w">!</span></div>
+        <div class="muted">（提示：放弃，别灰心）</div>
+        <div class="hintbar">💡 <b>提示 1/2</b>：第一个词是 g___（放弃）</div>
+        <input class="input" placeholder="输入完整短语…" style="margin-top:12px">
+      </div>
+      <div class="card">
+        <span class="badge new">新课 · 2 / 6</span>
+        <div class="recall">补全短语：</div>
+        <div class="blanks"><span class="w">She</span><span class="blank">looks after</span><span class="w">her brother.</span></div>
+        <div class="muted">（照顾，照看）</div>
+        <div class="ex" style="margin-top:10px"><b>提示</b>：l___ a___</div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">提示剩余 <b style="color:var(--orange)">1</b></div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">提交</button>
+    </div>
+  </div>
+  <p class="cap">Step 2「记」：橙色条为到期复习条（give up），新课条（look after）同走挖空 + 提示（≤2 次）。</p>
+
+  <!-- ===== 3. 用 ===== -->
+  <h2><span class="bar"></span>第 3 步 · 用（造句 handout-sentence）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">固定短语 · 第 2 节</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s done"><div class="dot">1</div><div class="lb">认</div></div>
+        <div class="s done"><div class="dot">2</div><div class="lb">记</div></div>
+        <div class="s on"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s"><div class="dot">4</div><div class="lb">快测</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="badge new">造句 · 3 / 6</span>
+        <div class="big en" style="font-size:20px">look after</div>
+        <div class="muted" style="margin-bottom:12px">用这个短语造一个句子</div>
+        <textarea class="input" rows="3" style="resize:none">I look after my cat every day.</textarea>
+        <div class="fb ok">✅ <div><b>搭配正确！</b> look after 用对了，句子完整。</div></div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">判分 · 规则/LLM</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">提交</button>
+    </div>
+  </div>
+  <p class="cap">Step 3「用」：handout-sentence 判分（规则：短语子串 + 最小长度；失败可重试 1 次）。</p>
+
+  <!-- ===== 4. 快测 ===== -->
+  <h2><span class="bar"></span>第 4 步 · 快测（3 题 handout-step）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">固定短语 · 第 2 节</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s done"><div class="dot">1</div><div class="lb">认</div></div>
+        <div class="s done"><div class="dot">2</div><div class="lb">记</div></div>
+        <div class="s done"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s on"><div class="dot">4</div><div class="lb">快测</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="badge new">快测 · 1 / 3</span>
+        <div class="recall" style="font-weight:700">选出正确搭配：</div>
+        <div class="opts">
+          <div class="opt"><span class="k">A</span>look after</div>
+          <div class="opt sel"><span class="k">B</span>look for</div>
+          <div class="opt"><span class="k">C</span>look at</div>
+          <div class="opt"><span class="k">D</span>look up</div>
+        </div>
+        <div class="fb no">✗ <div><b>再想想</b>：「照顾」是 look after，不是 look for（寻找）。</div></div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">已答 0 / 3</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">下一题</button>
+    </div>
+  </div>
+  <p class="cap">Step 4「快测」：3 题选择/填空，handout-step 判分；答错记 mastery。</p>
+
+  <!-- ===== 完成 ===== -->
+  <h2><span class="bar"></span>完成屏（走完四步）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">固定短语 · 第 2 节</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s done"><div class="dot">1</div><div class="lb">认</div></div>
+        <div class="s done"><div class="dot">2</div><div class="lb">记</div></div>
+        <div class="s done"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s done"><div class="dot">4</div><div class="lb">快测</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card center">
+        <div class="fin">✓</div>
+        <div class="big2">本节闯关完成！</div>
+        <div class="muted" style="margin-bottom:4px">固定短语 · 第 2 节 · 已提交家长确认</div>
+        <div class="stat">
+          <div><div class="n g">5</div><div class="l">掌握</div></div>
+          <div><div class="n r">1</div><div class="l">需加强</div></div>
+        </div>
+        <div class="ex" style="text-align:left;margin-top:14px">📅 需加强的短语将进入<b>间隔复习</b>，过几天会再次出现。</div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div></div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 40px">回到首页</button>
+    </div>
+  </div>
+  <p class="cap">完成屏：submitTask → submitted，家长在运营端 confirm 后 approve；到期条目进复习池。</p>
+
+  <!-- ===== 原页 ===== -->
+  <h2><span class="bar"></span>查看原页（只读）</h2>
+  <div class="phone rdr">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">原页 · 第 1 页</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="body">
+      <div class="pageimg">
+        <div>
+          <b>《必备固定短语搭配》第 1 页</b><br>
+          扫描版页图（PdfPage.image_path）<br>
+          只读浏览，无可选文字
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <div class="pg">第 1 页 / 共 10 页</div>
+      <div class="pg">← →</div>
+    </div>
+  </div>
+  <p class="cap">原页：/reader/view?documentId=1&amp;page=1，reader 新只读分支，讲义无 Lesson，按 documentId 拉页图。</p>
+
+  <!-- ===== 归纳型（语文） ===== -->
+  <h2><span class="bar" style="background:var(--green)"></span>归纳型 · 语文（Outline）· 四步</h2>
+  <div class="note" style="border-left-color:var(--green)">
+    <b>出题机制：</b>归纳型题目由 <code>generate_knowledge_questions()</code>（knowledge_quiz.py 服务函数）把知识点转成简答题，返回
+    <code>{question, answer, keywords}</code>；判分走 <code>grade_knowledge_answer</code>（关键词命中 ≥0.6 判对，中间态 AI 兜底）。
+    <b>drill</b> = 逐知识点简答，<b>apply</b> = 1 道综合应用题，<b>closure</b> = 句首/关键词填空。
+  </div>
+
+  <!-- 归纳 · 结构卡 -->
+  <h2><span class="bar"></span>归纳 · 结构卡（Structure）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">第 6 单元知识点归纳</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s on"><div class="dot">1</div><div class="lb">结构</div></div>
+        <div class="s"><div class="dot">2</div><div class="lb">练</div></div>
+        <div class="s"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s"><div class="dot">4</div><div class="lb">收尾</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="badge new">本单元 · 结构总览</span>
+        <div class="big" style="font-size:20px">第 6 单元 · 知识点归纳</div>
+        <div class="muted" style="margin:6px 0 12px">先看清本单元讲了什么，再逐个闯关</div>
+        <div class="point">
+          <div class="pn">1</div>
+          <div><div class="pt">修辞手法</div><div class="pd">比喻、拟人、排比的判断与作用</div></div>
+        </div>
+        <div class="point">
+          <div class="pn">2</div>
+          <div><div class="pt">说明方法</div><div class="pd">举例子、列数字、作比较的辨析</div></div>
+        </div>
+        <div class="point">
+          <div class="pn">3</div>
+          <div><div class="pt">关联词</div><div class="pd">不但…而且…、因为…所以…、虽然…但是…</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="bottom">
+      <a class="link" href="#">👁 查看原页</a>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">开始闯关 →</button>
+    </div>
+  </div>
+  <p class="cap">归纳 · 结构卡：整节知识点的分组总览（block_title 分组标题 + bullet 正文）。</p>
+
+  <!-- 归纳 · drill -->
+  <h2><span class="bar"></span>归纳 · drill（逐知识点简答）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">第 6 单元知识点归纳</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s done"><div class="dot">1</div><div class="lb">结构</div></div>
+        <div class="s on"><div class="dot">2</div><div class="lb">练</div></div>
+        <div class="s"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s"><div class="dot">4</div><div class="lb">收尾</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="badge new">drill · 1 / 3</span>
+        <div class="tag" style="margin-bottom:10px">修辞手法</div>
+        <div class="recall" style="font-weight:700;font-size:16px">「弯弯的月亮像一条小船」用了哪种修辞手法？</div>
+        <input class="input" placeholder="写下你的回答…" style="margin-top:12px">
+        <div class="fb ok" style="margin-top:14px">✅ <div><b>答对了</b> · 比喻（本体：月亮，喻体：小船）</div></div>
+      </div>
+      <div class="card">
+        <span class="badge new">drill · 2 / 3</span>
+        <div class="tag" style="margin-bottom:10px">关联词</div>
+        <div class="recall" style="font-weight:700;font-size:16px">选词填空：他______成绩好，______品德好。（不但…而且… / 虽然…但是…）</div>
+        <div class="opts" style="margin-top:10px">
+          <div class="opt sel"><span class="k">A</span>不但…而且…</div>
+          <div class="opt"><span class="k">B</span>虽然…但是…</div>
+        </div>
+        <div class="fb ok">✅ <div><b>答对了</b> · 递进关系用「不但…而且…」</div></div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">已答 1 / 3</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">下一题</button>
+    </div>
+  </div>
+  <p class="cap">归纳 · drill：逐知识点简答/填空，判分关键词命中（grade_knowledge_answer）。</p>
+
+  <!-- 归纳 · apply -->
+  <h2><span class="bar"></span>归纳 · apply（1 道综合应用）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">第 6 单元知识点归纳</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s done"><div class="dot">1</div><div class="lb">结构</div></div>
+        <div class="s done"><div class="dot">2</div><div class="lb">练</div></div>
+        <div class="s on"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s"><div class="dot">4</div><div class="lb">收尾</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="badge new">应用 · 1 / 1</span>
+        <div class="recall" style="font-size:15px">用本单元学到的修辞手法，写一句描写秋天的句子。</div>
+        <textarea class="input" rows="3" style="resize:none;margin-top:10px">秋风把树叶吹得沙沙响，像在轻声唱歌。</textarea>
+        <div class="fb ok">✅ <div><b>写得好</b> · 用了拟人（树叶唱歌）</div></div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">应用 · 开放式</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">提交</button>
+    </div>
+  </div>
+  <p class="cap">归纳 · apply：1 道综合应用题，验证「用得出来」。</p>
+
+  <!-- 归纳 · closure -->
+  <h2><span class="bar"></span>归纳 · closure（句首/关键词填空）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">第 6 单元知识点归纳</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s done"><div class="dot">1</div><div class="lb">结构</div></div>
+        <div class="s done"><div class="dot">2</div><div class="lb">练</div></div>
+        <div class="s done"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s on"><div class="dot">4</div><div class="lb">收尾</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="badge new">收尾 · 填空</span>
+        <div class="recall" style="font-weight:700;font-size:16px">补全句子首词：</div>
+        <div class="blanks"><span class="blank">因为</span><span class="w">下雨了，</span><span class="blank">所以</span><span class="w">运动会延期。</span></div>
+        <div class="muted" style="margin-top:8px">（关联词：因果）</div>
+        <div class="fb ok" style="margin-top:14px">✅ <div><b>答对了</b> · 因为…所以…</div></div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">已答 0 / 2</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">下一题</button>
+    </div>
+  </div>
+  <p class="cap">归纳 · closure：句首/关键词填空收尾，判分同 drill（关键词/比较）。</p>
+
+  <div class="note" style="border-left-color:var(--orange);margin-top:28px">
+    <b>评审备注（供设计确认）：</b>① 复习条（橙色）与新节条（绿色）混排走同一四步——是否需在视觉上更强调「这是复习」？② 顶栏四步是否含复习条计数（如「新 6 + 复习 2」）可再定。③ 归纳型题型的判分「关键词命中阈值 0.6 + AI 兜底」在语文开放式题目（apply）上可能偏松/偏严，是否要单独调阈值？
+  </div>
+</div>
+</body>
+</html>
