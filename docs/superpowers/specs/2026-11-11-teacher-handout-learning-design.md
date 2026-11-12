@@ -251,7 +251,7 @@ POST /api/drill/groups
 
 归纳 `kind=outline`：`steps` 为 `["structure","drill","apply","closure"]`；`drill` / `closure` 题在创建时调用 `generate_knowledge_questions()`（`knowledge_quiz.py` **服务函数**），题目塞进 `quiz` / `closure` 字段——**不复用** `KnowledgePage` 整页 UX。
 
-> ⚠️ **归纳 apply 判分缺口**：`apply` 是开放式题（如「写一句描写秋天的句子」），不应套用 `grade_knowledge_answer` 的 `0.6` 关键词命中阈值（孩子写得对但没踩中预设关键词会被误判错）。建议 `apply` 用 LLM 判分（`grade_subjective_with_ai` 或专用短 prompt），不套 0.6 阈值——实现前需定判分策略。
+> **归纳 apply 判分（已定）**：`apply` 是开放式题（如「写一句描写秋天的句子」），**用 LLM 判分**（复用 `grade_subjective_with_ai` 或专用短 prompt），**不套** `grade_knowledge_answer` 的 `0.6` 关键词命中阈值（孩子写得对但没踩中预设关键词会被误判错）。返回 `{pass, feedback}`，判分结果记入该条目 mastery。
 
 ## API 契约
 
@@ -368,6 +368,7 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 |------|------|
 | OCR 失败 | Phase 2；MVP 仅手动条目 |
 | AI 造句不可用 | 规则 `pass` + `feedback` 固定文案；可选跳过 produce（`steps` 去掉 `produce`，配置在 group meta） |
+| apply 判分不可用（fake/无 LLM） | 回落规则：若条目有 `keywords` 用关键词命中，否则给 `pass=false` + 固定文案「请家长/老师人工点评」（不编造通过） |
 | 无条目 | 拒绝创建 task，400 |
 | fake provider | `drill-sentence` 规则判 pass |
 
@@ -383,7 +384,7 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 - 趣味性：连击 ×N + 星级（后端算）+ 通关庆祝动画  
 - 重新激活 `POST /api/drill/groups/{id}/reactivate`  
 - Flutter：短语四步 + 归纳四步 + handout 原页 + `drill-step` / `drill-sentence` / `drill-complete`  
-- 测试要点 **P1-1…P1-13**（见下）
+- 测试要点 **P1-1…P1-14**（见下）
 
 ### Phase 2
 
@@ -411,7 +412,8 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 10. **P1-10** SRS：无提示答对 interval×2；有提示答对 interval 不变；答错 interval 重置 1 天 + lapse+1。  
 11. **P1-11** `mastered` 实时判定：interval 达门槛且无提示通过才 true；`reactivate` 后整组 interval 清零、mastered 回 false。  
 12. **P1-12** 建组时 `group_rule` 生成结构化三段（examples/question/reveal，非 fake 时非空）；fake provider 下为空结构、前端不显示规律引导块、步序照常。  
-13. **P1-13** `drill-complete` 返回 `stars`（答错/用提示各扣 1 星，下限 1）。
+13. **P1-13** `drill-complete` 返回 `stars`（答错/用提示各扣 1 星，下限 1）。  
+14. **P1-14** 归纳 `apply` 用 LLM 判分返回 `{pass, feedback}`；fake/无 LLM 时回落规则（有 keywords 用关键词，否则 `pass=false` + 固定文案）。
 
 **Phase 2（P2-x）**
 
