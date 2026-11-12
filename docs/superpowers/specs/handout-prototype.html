@@ -104,17 +104,65 @@ h2 .bar{width:4px;height:16px;background:var(--blue);border-radius:2px}
 .point .pt{font-weight:700;font-size:15px}
 .point .pd{color:var(--gray);font-size:12.5px;margin-top:2px;line-height:1.5}
 code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:4px;font-size:12px}
+/* 规律引导块 */
+.rule{background:linear-gradient(135deg,#EEF2FF,#E8F7EF);border:1px solid #D6E0F5;border-radius:14px;padding:12px 14px;margin-bottom:12px;position:relative}
+.rule .rt{font-weight:800;font-size:13px;color:var(--blue);margin-bottom:4px;display:flex;align-items:center;gap:5px}
+.rule .rb{font-size:13px;color:#3a4a5c;line-height:1.7}
+/* 观察示例 */
+.obsl{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+.obs{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid #D6E0F5;border-radius:10px;padding:8px 12px}
+.obs .oe{font-weight:700;color:var(--ink);font-size:14px}
+.obs .oc{color:var(--gray);font-size:12.5px}
+.ask{font-size:13px;color:#6b4a12;background:#FFF7E6;border:1px dashed #F0C878;border-radius:10px;padding:9px 12px;margin-top:10px;line-height:1.7}
+.reveal{font-size:13px;color:#1f5c3a;background:#E8F7EF;border:1px solid #BFE3CD;border-radius:10px;padding:9px 12px;margin-top:8px;line-height:1.7}
+.reveal b{color:var(--green)}
+
+/* 连击 */
+.combo{position:absolute;top:10px;right:16px;background:var(--gold);color:#fff;font-weight:800;font-size:13px;padding:4px 10px;border-radius:20px;box-shadow:0 3px 10px rgba(245,157,32,.4);display:flex;align-items:center;gap:4px}
+.combo .f{font-size:16px}
+/* 星级 */
+.stars{display:flex;justify-content:center;gap:6px;margin:12px 0 4px}
+.stars .st{font-size:34px;line-height:1}
+.stars .st.on{color:var(--gold)}
+.stars .st.off{color:#E0E4DE}
+/* 庆祝动画 */
+.cele{display:flex;flex-direction:column;align-items:center;padding:8px 0 4px;position:relative}
+/* 彩纸 confetti */
+.confetti{position:absolute;top:0;left:0;right:0;height:120px;overflow:hidden;pointer-events:none}
+.confetti i{position:absolute;top:-20px;width:10px;height:16px;opacity:0;animation:fall linear infinite}
+.confetti i:nth-child(1){left:12%;background:#F59D20;animation-duration:2.2s;animation-delay:0s}
+.confetti i:nth-child(2){left:26%;background:#DC872D;animation-duration:2.6s;animation-delay:.3s}
+.confetti i:nth-child(3){left:40%;background:#3158E8;animation-duration:2.0s;animation-delay:.6s}
+.confetti i:nth-child(4){left:54%;background:#2E8B5A;animation-duration:2.8s;animation-delay:.15s}
+.confetti i:nth-child(5){left:68%;background:#F59D20;animation-duration:2.4s;animation-delay:.45s}
+.confetti i:nth-child(6){left:80%;background:#DC872D;animation-duration:2.2s;animation-delay:.7s}
+.confetti i:nth-child(7){left:90%;background:#3158E8;animation-duration:2.9s;animation-delay:.2s}
+@keyframes fall{0%{transform:translateY(0) rotate(0deg);opacity:0}10%{opacity:1}100%{transform:translateY(130px) rotate(360deg);opacity:0}}
+/* 奖杯/emoji 弹出 */
+.cele .burst{font-size:56px;line-height:1;animation:pop .7s cubic-bezier(.175,.885,.32,1.275)}
+@keyframes pop{0%{transform:scale(0) rotate(-20deg);opacity:0}60%{transform:scale(1.25) rotate(6deg)}100%{transform:scale(1) rotate(0);opacity:1}}
+.cele .cmsg{font-weight:800;font-size:20px;margin-top:8px;color:var(--green);animation:rise .6s ease .2s both}
+@keyframes rise{0%{transform:translateY(12px);opacity:0}100%{transform:translateY(0);opacity:1}}
+.cele .csub{color:var(--gray);font-size:12.5px;margin-top:4px;animation:rise .6s ease .4s both}
+/* 星星逐个点亮 */
+.stars .st.on{color:var(--gold);animation:star .5s ease both}
+.stars .st.on:nth-child(1){animation-delay:.5s}
+.stars .st.on:nth-child(2){animation-delay:.7s}
+.stars .st.on:nth-child(3){animation-delay:.9s}
+@keyframes star{0%{transform:scale(0) rotate(-90deg);opacity:0}70%{transform:scale(1.4)}100%{transform:scale(1) rotate(0);opacity:1}}
+
+
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>讲义闯关 · 固定短语（Phrase）</h1>
-  <p class="sub">孩子端四步自学 + 原页对照 · 对齐现有配色与卡片规范（AppColors / theme.dart）</p>
+  <h1>专项训练 · 闯关四步（Drill）</h1>
+  <p class="sub">孩子端四步自学 + 规律引导 + 释义 + 连击/星级/庆祝 · 对齐现有配色与卡片规范（AppColors / theme.dart）</p>
 
   <div class="note">
-    <b>原型说明：</b>本流程为 spec「短语四步」——<b>认</b>（看短语）→ <b>记</b>（挖空+提示）→ <b>用</b>（造句，handout-sentence）→ <b>快测</b>（3 题，handout-step）。
-    顶栏为四步进度（<span style="color:var(--blue)">●</span>当前 <span style="color:var(--green)">●</span>完成 <span style="color:var(--orange)">●</span>复习条）；底栏「查看原页」进只读页图。
-    每步最多 2 次提示、第 3 次揭示答案。橙色条 = <b>到期复习条目</b>（review_item_ids），与新节同走四步。
+    <b>原型说明：</b>本流程为 spec「短语四步」——<b>认</b>（规律引导 + 释义）→ <b>记</b>（挖空+提示）→ <b>用</b>（造句，drill-sentence）→ <b>快测</b>（3 题，drill-step）。
+    顶栏为四步进度（<span style="color:var(--blue)">●</span>当前 <span style="color:var(--green)">●</span>完成 <span style="color:var(--orange)">●</span>复习条）；底栏「查看原页」进只读页图（仅讲义）。
+    每步最多 2 次提示、第 3 次揭示答案。橙色条 = <b>到期复习条目</b>（review_item_ids）。<b>第一步「观察→自己发现规律」</b>（先看例子提问，孩子自己想，再揭晓）；答对显示<b>连击 ×N</b>；完成屏有<b>星级 + 通关庆祝</b>。
   </div>
 
   <!-- ===== 1. 认 ===== -->
@@ -134,12 +182,24 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
       </div>
     </div>
     <div class="body">
+      <div class="rule">
+        <div class="rt">🔍 先观察，自己发现</div>
+        <div class="rb">看看这几个短语，它们有什么共同点？</div>
+        <div class="obsl">
+          <div class="obs"><span class="oe">look after</span><span class="oc">照顾</span></div>
+          <div class="obs"><span class="oe">look for</span><span class="oc">寻找</span></div>
+          <div class="obs"><span class="oe">look at</span><span class="oc">看</span></div>
+        </div>
+        <div class="ask">🤔 这些短语都以 <b>look + ___</b> 开头，后面跟的「after / for / at」是什么？它们让意思发生了怎样的变化？</div>
+        <div class="reveal">✨ <b>揭晓</b>：look + 不同<b>介词</b> = 不同意思。after「跟在后面」→ 照顾；for「寻找」；at「看」。记住介词的意思，短语就记住了。</div>
+      </div>
       <div class="card">
         <span class="badge new">新课 · 1 / 6</span>
         <div class="muted">固定短语</div>
         <div class="big en">look after</div>
         <div class="zh">照顾，照看</div>
         <div class="ex"><b>例句</b>：I <b>look after</b> my little sister after school.<br>放学后我照顾我的小妹妹。</div>
+        <div class="ex" style="margin-top:6px"><b>意思</b>：after 是「跟在后面」，跟在后面看着 = 照顾</div>
         <div class="ex" style="margin-top:6px"><b>来源</b>：《必备固定短语搭配》第 1 页</div>
       </div>
     </div>
@@ -148,7 +208,7 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
       <div class="b2"><button class="btn sec">听发音</button><button class="btn pri">记住了，下一步 →</button></div>
     </div>
   </div>
-  <p class="cap">Step 1「认」：看短语 + 中文 + 例句；底栏「查看原页」对照原讲义页图。</p>
+  <p class="cap">Step 1「认」：先展示<b>规律引导（group_rule）</b>+ 释义，再看短语/中文/例句；底栏「查看原页」对照原讲义页图。</p>
 
   <!-- ===== 2. 记 ===== -->
   <h2><span class="bar"></span>第 2 步 · 记（挖空 + 提示）</h2>
@@ -239,7 +299,8 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
       </div>
     </div>
     <div class="body">
-      <div class="card">
+      <div class="card" style="position:relative">
+        <div class="combo"><span class="f">🔥</span> 连击 ×3</div>
         <span class="badge new">快测 · 1 / 3</span>
         <div class="recall" style="font-weight:700">选出正确搭配：</div>
         <div class="opts">
@@ -276,14 +337,21 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
     </div>
     <div class="body">
       <div class="card center">
-        <div class="fin">✓</div>
-        <div class="big2">本节闯关完成！</div>
-        <div class="muted" style="margin-bottom:4px">固定短语 · 第 2 节 · 已提交家长确认</div>
+        <div class="cele">
+          <div class="confetti"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="burst">🏆</div>
+          <div class="cmsg">本节闯关完成！</div>
+          <div class="csub">固定短语 · 第 2 节 · 已提交家长确认</div>
+        </div>
+        <div class="stars">
+          <span class="st on">★</span><span class="st on">★</span><span class="st off">★</span>
+        </div>
+        <div class="muted" style="margin-bottom:4px">用了 1 次提示 · 答错 0 题</div>
         <div class="stat">
           <div><div class="n g">5</div><div class="l">掌握</div></div>
           <div><div class="n r">1</div><div class="l">需加强</div></div>
         </div>
-        <div class="ex" style="text-align:left;margin-top:14px">📅 需加强的短语将进入<b>间隔复习</b>，过几天会再次出现。</div>
+        <div class="ex" style="text-align:left;margin-top:14px">📅 需加强的短语将进入<b>间隔复习</b>，过几天会再次出现；连续 15 天都答对才算真正掌握。</div>
       </div>
     </div>
     <div class="bottom">
@@ -291,7 +359,7 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
       <button class="btn pri" style="flex:0 0 auto;padding:13px 40px">回到首页</button>
     </div>
   </div>
-  <p class="cap">完成屏：submitTask → submitted，家长在运营端 confirm 后 approve；到期条目进复习池。</p>
+  <p class="cap">完成屏：通关庆祝 + 星级（答错/用提示各扣 1 星）+ 掌握统计；submitTask → submitted → 家长 confirm → approved。</p>
 
   <!-- ===== 原页 ===== -->
   <h2><span class="bar"></span>查看原页（只读）</h2>
@@ -316,6 +384,52 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
     </div>
   </div>
   <p class="cap">原页：/reader/view?documentId=1&amp;page=1，reader 新只读分支，讲义无 Lesson，按 documentId 拉页图。</p>
+
+  <!-- ===== 自录古诗（custom） ===== -->
+  <h2><span class="bar" style="background:var(--orange)"></span>家长自录 · 必背古诗（source=custom）</h2>
+  <div class="note" style="border-left-color:var(--orange)">
+    <b>新增来源：</b>家长手动录入条目（<code>source=custom</code>），无 PDF、无原页。释义（<code>secondary</code>）与规律（<code>group_rule</code>）由 AI 建组时批量补、家长审组时顺带审。底栏<b>不显示「查看原页」</b>。
+  </div>
+
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">必背古诗 20 首</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s on"><div class="dot">1</div><div class="lb">懂</div></div>
+        <div class="s"><div class="dot">2</div><div class="lb">背</div></div>
+        <div class="s"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s"><div class="dot">4</div><div class="lb">测</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="rule">
+        <div class="rt">🔍 先观察，自己发现</div>
+        <div class="rb">读读这首诗，你发现了什么？</div>
+        <div class="obsl">
+          <div class="obs"><span class="oe">床前明月光</span><span class="oc">举头望明月</span></div>
+          <div class="obs"><span class="oe">低头思故乡</span><span class="oc">——</span></div>
+        </div>
+        <div class="ask">🤔 这首诗里「举头 / 低头」是一组<b>动作对比</b>，「望明月 / 思故乡」藏着什么感情？</div>
+        <div class="reveal">✨ <b>揭晓</b>：这是<b>思乡诗</b>——借「明月」起兴，由「望月」到「思乡」，景里藏着情。</div>
+      </div>
+      <div class="card">
+        <span class="badge new">古诗 · 1 / 20</span>
+        <div class="big" style="font-size:22px">床前明月光，疑是地上霜。</div>
+        <div class="zh">李白《静夜思》</div>
+        <div class="ex"><b>意思</b>：明亮的月光洒在床前，好像地上铺了一层白霜。</div>
+        <div class="ex" style="margin-top:6px"><b>关键词</b>：李白 · 明月 · 思乡</div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">已懂意思，准备背诵</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">开始背 →</button>
+    </div>
+  </div>
+  <p class="cap">source=custom 第一步「懂」：规律引导（思乡诗）+ 古诗正文 + AI 补的释义；无原页对照。</p>
 
   <!-- ===== 归纳型（语文） ===== -->
   <h2><span class="bar" style="background:var(--green)"></span>归纳型 · 语文（Outline）· 四步</h2>
@@ -342,6 +456,17 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
       </div>
     </div>
     <div class="body">
+      <div class="rule">
+        <div class="rt">🔍 先观察，自己发现</div>
+        <div class="rb">比较这几个句子，它们有什么共同点？</div>
+        <div class="obsl">
+          <div class="obs"><span class="oe">月亮像一条小船</span><span class="oc">比喻</span></div>
+          <div class="obs"><span class="oe">秋风在轻声唱歌</span><span class="oc">拟人</span></div>
+          <div class="obs"><span class="oe">春、夏、秋、冬都在笑</span><span class="oc">排比</span></div>
+        </div>
+        <div class="ask">🤔 它们都是「用一样东西表现另一样东西」。怎么判断是比喻、拟人还是排比？</div>
+        <div class="reveal">✨ <b>揭晓</b>：有「像/仿佛」→ 比喻；把物当人写 → 拟人；三个以上并列 → 排比。</div>
+      </div>
       <div class="card">
         <span class="badge new">本单元 · 结构总览</span>
         <div class="big" style="font-size:20px">第 6 单元 · 知识点归纳</div>
@@ -365,7 +490,7 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
       <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">开始闯关 →</button>
     </div>
   </div>
-  <p class="cap">归纳 · 结构卡：整节知识点的分组总览（block_title 分组标题 + bullet 正文）。</p>
+  <p class="cap">归纳 · 结构卡：先<b>规律引导（group_rule）</b>，再整节知识点分组总览（block_title 分组标题 + bullet 正文）。</p>
 
   <!-- 归纳 · drill -->
   <h2><span class="bar"></span>归纳 · drill（逐知识点简答）</h2>
@@ -473,7 +598,7 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
   <p class="cap">归纳 · closure：句首/关键词填空收尾，判分同 drill（关键词/比较）。</p>
 
   <div class="note" style="border-left-color:var(--orange);margin-top:28px">
-    <b>评审备注（供设计确认）：</b>① 复习条（橙色）与新节条（绿色）混排走同一四步——是否需在视觉上更强调「这是复习」？② 顶栏四步是否含复习条计数（如「新 6 + 复习 2」）可再定。③ 归纳型题型的判分「关键词命中阈值 0.6 + AI 兜底」在语文开放式题目（apply）上可能偏松/偏严，是否要单独调阈值？
+    <b>评审备注（供设计确认）：</b>① 复习条（橙色）与新节条（绿色）混排走同一四步——是否需在视觉上更强调「这是复习」？② 顶栏四步是否含复习条计数（如「新 6 + 复习 2」）可再定。③ 归纳 apply 开放式题建议 LLM 判分、不套 0.6 关键词阈值（spec 已标 ⚠️ 待定）。④ 连击 ×N 触发时机（连续答对几次开始显示？）与星级口径（答错/提示各扣 1）已在 spec 定，动画节奏待实现时细调。
   </div>
 </div>
 </body>

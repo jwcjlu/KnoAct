@@ -48,7 +48,7 @@
 | 真掌握判定 | `mastered = interval >= mastery_interval_days 且 最近一次通过无提示`；**实时判定不落库**，可逆（答错回退） |
 | 结束语义 | 单条目 mastered 才毕业；专项**全部条目 mastered 才「完成」**、不再自动推 |
 | 重新激活 | 家长显式触发：**整组重来、间隔清零、mastered 清除**，专项重新进入可布置状态 |
-| 引导思考 | 组级 `group_rule`（共同规律/记忆窍门）+ 条目 `secondary` 释义，AI 建组时生成、家长审组时顺带审；「记」前加「为什么」引导 |
+| 引导思考 | 组级 `group_rule`（结构化：观察示例+引导提问+揭晓结论，孩子**自己发现规律**）+ 条目 `secondary` 释义，AI 建组时生成、家长审组时顺带审；「记」前加「为什么」引导 |
 | 趣味性 | 连击 ×N + 星级（后端算，答错/用提示各扣 1）+ 通关庆祝动画；不做道具/皮肤/排行榜 |
 | 造句判分 | 专用 `drill-sentence` 包装 LLM，返回结构化 `{pass, feedback}`，**不走开放式 chat UI** |
 
@@ -78,7 +78,7 @@
 | `start_page`, `end_page` | PDF 页码（对照原页），仅 handout 有 |
 | `mastery_interval_days` | 判定「真掌握」的门槛间隔（天），建组时家长定，默认 15 |
 | `interval_max_days` | 间隔递增封顶（天），建组时定，默认 60 |
-| `group_rule` | 这组条目的**共同规律 / 记忆窍门**（AI 建组时生成，家长审组时顺带审） |
+| `group_rule` | 这组条目的**规律引导**（结构化三段：观察示例 + 引导提问 + 揭晓结论），AI 建组时生成，家长审组时顺带审 |
 | `audit_status` | `pending` \| `approved` \| `rejected`，默认 `pending`；`approved` 才可进任务池 |
 | `sort_order` | 学习顺序 |
 
@@ -220,7 +220,11 @@ POST /api/drill/groups
   "source": "custom",
   "kind": "phrase",
   "document_id": null,
-  "group_rule": "look + 不同介词 = 不同意思：after 跟在后面（照顾）、for 寻找、at 看、up 查阅",
+  "group_rule": {
+    "examples": [{"oe":"look after","oc":"照顾"},{"oe":"look for","oc":"寻找"},{"oe":"look at","oc":"看"}],
+    "question": "这些短语都以 look + ___ 开头，后面的词让意思发生了怎样的变化？",
+    "reveal": "look + 不同介词 = 不同意思。after 跟在后面→照顾；for 寻找；at 看。"
+  },
   "steps": ["recognize","recall","produce","quiz"],
   "item_ids": [101, 102, 103, 104, 105, 106],
   "review_item_ids": [55, 63],
@@ -336,11 +340,12 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 
 | 环节 | 做法 |
 |------|------|
-| 结构卡（归纳）/ 认（短语）第一步 | 先展示 **`group_rule`**（这组条目的共同规律/记忆窍门，如「look + 不同介词 = 不同意思」「思乡诗：借月、由景入情」），再列条目 |
+| 结构卡（归纳）/ 认（短语）第一步 | 先展示 **`group_rule`** 的「观察示例 + 引导提问」，让孩子**自己思考发现规律**，再点「揭晓」看结论（不直接喂规律），随后列条目 |
 | 记（背） | 挖空前加一句「先想想为什么」的引导（如「after 是『跟在后面』，所以 look after 是照顾」） |
 
 - **生成方式（已定 A）**：`group_rule` 由 AI 在**建组时**生成（`source` 任意），家长审组时顺带审这条规律。
-- 出题实现：扩展 `generate_knowledge_questions` 或新增「规律归纳」服务函数——给一组条目，让 LLM 生成「共同规律 + 记忆窍门」；fake provider 回退为空字符串（前端不显示规律引导块，步序照常）。
+- **结构化**：`group_rule` 不是纯文本，而是三段 JSON：`{"examples":[{oe,oc}...], "question":"引导提问", "reveal":"揭晓结论"}`。前端先渲染 examples + question，孩子自己思考后点「揭晓」才显示 reveal。
+- 出题实现：扩展 `generate_knowledge_questions` 或新增「规律归纳」服务函数——给一组条目，让 LLM 生成「观察示例 + 引导提问 + 揭晓结论」三段；fake provider 回退为空结构（前端不显示规律引导块，步序照常）。
 - **释义（了解意思）**：每个条目第一步必展示 `secondary`（意思/作者/拼音），引导孩子「先看懂再背」；古诗/短语的 `secondary` 由 AI 建组时批量补（家长审），不复用 `annotations.py` 的即时划词。
 
 ### 趣味性 / 游戏化（交互层）
@@ -405,7 +410,7 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 9. **P1-9** `include_due=true` 时到期条目进 `review_item_ids`，受 `ceil(new_slots/2)` 上限，且新组条目至少 1；`drill-complete` 对 `item_ids`+`review_item_ids` 一并写 mastery。  
 10. **P1-10** SRS：无提示答对 interval×2；有提示答对 interval 不变；答错 interval 重置 1 天 + lapse+1。  
 11. **P1-11** `mastered` 实时判定：interval 达门槛且无提示通过才 true；`reactivate` 后整组 interval 清零、mastered 回 false。  
-12. **P1-12** 建组时 `group_rule` 生成（非 fake 时非空）；fake provider 下 `group_rule` 为空、前端不显示规律引导块、步序照常。  
+12. **P1-12** 建组时 `group_rule` 生成结构化三段（examples/question/reveal，非 fake 时非空）；fake provider 下为空结构、前端不显示规律引导块、步序照常。  
 13. **P1-13** `drill-complete` 返回 `stars`（答错/用提示各扣 1 星，下限 1）。
 
 **Phase 2（P2-x）**
