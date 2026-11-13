@@ -457,14 +457,18 @@ def drill_complete(task_id: int, req: DrillCompleteReq, user: User = Depends(req
     content = json.loads(t.content or "{}")
     now = datetime.utcnow()
     hinted_any = wrong_any = False
+    # 本次各条目的提示次数来自 content.progress.hints_used（drill-step 写入），
+    # 而非 mastery 上持久化的 last_hinted（那是「上一次」的状态）。
+    hints_used = (content.get("progress") or {}).get("hints_used", {})
     for item_id, is_correct in req.results.items():
         if not is_correct:
             wrong_any = True
+        used_hint_this_time = (hints_used.get(str(item_id), 0) or 0) > 0
         m = db.query(TrainingItemMastery).filter_by(user_id=user.id, item_id=int(item_id)).first()
         if m is None:
             m = TrainingItemMastery(user_id=user.id, item_id=int(item_id), interval=1, lapse=0, last_hinted=False)
             db.add(m)
-        ni, nl, nh = grade(m.interval, m.last_hinted, is_correct, max_days=60)
+        ni, nl, nh = grade(m.interval, used_hint_this_time, is_correct, max_days=60)
         m.interval = ni; m.lapse += nl; m.last_hinted = nh
         m.attempts = json.dumps(json.loads(m.attempts or "[]") + [bool(is_correct)], ensure_ascii=False)
         m.next_review_at = now + timedelta(days=ni)

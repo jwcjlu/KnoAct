@@ -86,3 +86,23 @@ def test_drill_apply_llm_fallback(client, db):
     tid = _approved_task(client, db, parent_h, child)
     r = client.post(f"/api/tasks/{tid}/drill-apply", json={"item_id": 1, "sentence": "这句对吗"}, headers=child_h)
     assert r.status_code == 200 and "pass" in r.json()
+
+
+def test_drill_complete_hint_blocks_interval_upgrade(client, db):
+    """本次用了提示（drill-step 答错触发 hint）→ interval 不升级、last_hinted=True。"""
+    parent, child, parent_h, child_h = parent_child(db)
+    tid = _approved_task(client, db, parent_h, child)
+    from app.models import Task, TrainingItemMastery
+    import json as _json
+    t = db.get(Task, tid)
+    item_id = _json.loads(t.content)["items_snapshot"][0]["id"]
+    # 答错 → 触发提示，hints_used[item] = 1
+    client.post(f"/api/tasks/{tid}/drill-step",
+                json={"step": "recall", "item_id": item_id, "answer": "错误答案", "request_hint": True},
+                headers=child_h)
+    # 完成时正确（但本次用过提示）→ interval 应保持 1，不翻倍
+    client.post(f"/api/tasks/{tid}/drill-complete", json={"results": {str(item_id): True}}, headers=child_h)
+    m = db.query(TrainingItemMastery).filter_by(user_id=child.id, item_id=item_id).first()
+    assert m is not None
+    assert m.interval == 1
+    assert m.last_hinted is True
