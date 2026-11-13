@@ -51,6 +51,7 @@
 | 引导思考 | 组级 `group_rule`（结构化：观察示例+引导提问+揭晓结论，孩子**自己发现规律**）+ 条目 `secondary` 释义，AI 建组时生成、家长审组时顺带审；「记」前加「为什么」引导 |
 | 趣味性 | 连击 ×N + 星级（后端算，答错/用提示各扣 1）+ 通关庆祝动画；不做道具/皮肤/排行榜 |
 | 游戏化题型（Phase 1） | 「找茬」`qtype=spot_error`（错误句来自 `common_mistake`）+ 归纳「情景造句」（apply 变体：随机抽 2 条目造句，去限时）；「分类消消乐」「徽章收集」留 Phase 2/3 |
+| 规律探究室 | 新增 `kind=explore`（归 `task_type=drill`），探究四步「观察→归类→归纳→陷阱」；`TrainingItem.explore` 存四步内容；**动态可视化动画（Lottie/Rive）留后续单独一期** |
 | 任务引导 | `group.intro`（`{situation, goal, route}`），四步之前展示；AI 建组生成、家长审 |
 | 复盘 | Phase 1 轻量（统计 + 固定鼓励语）；AI 动态总结 + 错因归类留 Phase 2 |
 | 造句判分 | 专用 `drill-sentence` 包装 LLM，返回结构化 `{pass, feedback}`，**不走开放式 chat UI** |
@@ -76,7 +77,7 @@
 | `subject` | 学科 |
 | `title` | 如「固定短语 · 第 2 节」「必背古诗 20 首」 |
 | `source` | `handout` \| `custom` |
-| `kind` | `phrase` \| `outline`（决定四步 vs 归纳步序） |
+| `kind` | `phrase` \| `outline` \| `explore`（决定四步 / 归纳步序 / 探究步序） |
 | `document_id` | FK `pdf_documents`，仅 handout 有，custom 为 null |
 | `start_page`, `end_page` | PDF 页码（对照原页），仅 handout 有 |
 | `mastery_interval_days` | 判定「真掌握」的门槛间隔（天），建组时家长定，默认 15 |
@@ -92,13 +93,14 @@
 |------|------|
 | `id` | PK |
 | `group_id` | FK `TrainingGroup`（source 由此 group 决定，条目表**不冗余存 source**） |
-| `kind` | `phrase` \| `outline_point` \| `drill_item` |
-| `primary` | 主记忆内容：短语原文 / 古诗正文 / 生字 |
+| `kind` | `phrase` \| `outline_point` \| `drill_item` \| `explore`（探究型概念） |
+| `primary` | 主记忆内容：短语原文 / 古诗正文 / 生字 / 概念名（如「周长」） |
 | `secondary` | 中文释义 / 作者 / 拼音 |
 | `block_title` | 归纳型的分组标题（可选） |
 | `example` | 例句 / 可选解释句 |
 | `keywords` | JSON，判分关键词 |
 | `common_mistake` | JSON `{wrong, correct, explain}`：易错点（把正确用法写错 + 正确形式 + 为什么），「找茬」题型用；AI 建组生成，家长审 |
+| `explore` | JSON `{compare, classify, formula, trap}`：探究型（`kind=explore`）的四步内容结构，AI 建组生成，家长审；仅 explore 条目使用 |
 | `source_page` | int，仅 handout 有（原页对照），custom 为 null |
 
 ### `TrainingItemMastery`（新表，SRS 掌握度）
@@ -392,6 +394,44 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 
 星级计算（后端 `drill-complete` 返回）：`stars = 3 - (用了提示的条目数>0 ? 1 : 0) - (答错条目数>0 ? 1 : 0)`，下限 1。
 
+## 规律探究室（`kind=explore`，苏格拉底式引导）
+
+针对「数学/抽象概念」（周长、面积、to do/doing 等）这类需要「具象化 + 发现规律」才能理解的内容，新增第三种 `kind`，走**探究四步**。仍归 `task_type=drill` 管，与 phrase/outline 共用 `TrainingItem`/SRS/壳层，仅步序与内容结构不同。
+
+### 探究四步（`steps = ["observe","classify","formula","trap"]`）
+
+| 步 | 名称 | 交互 | 数据 |
+|----|------|------|------|
+| 1 | 观察对比 | 图文对比，孩子主动点击发现不同 | `explore.compare` |
+| 2 | 具象归类 | **拖拽**抽象概念入具象场景（`to do`→未来、`doing`→正在做、围篱笆=周长） | `explore.classify` |
+| 3 | 归纳公式 | **填空拼图**/点选，自己补全公式（推导 `长×宽`） | `explore.formula` |
+| 4 | 陷阱验证 | 终极反直觉题（周长相等面积相等吗），用刚推导的规律验证 | `explore.trap` |
+
+### `explore` 字段结构（`TrainingItem.explore`，AI 建组生成、家长审）
+
+```json
+"explore": {
+  "compare": [{"a":"正方形","b":"长方形","diff":"边是否相等"}],
+  "classify": [
+    {"label":"to do","box":"未来"},
+    {"label":"doing","box":"正在做"}
+  ],
+  "formula": {"template":"周长 = (长 + 宽) × ___","answer":"2","hint":"一圈有两组「长+宽」"},
+  "trap": {"question":"周长相等的两个长方形，面积一定相等吗？","answer":"不一定","explain":"16 根火柴可摆成不同形状，周长同但面积不同"}
+}
+```
+
+### 判分
+
+- 拖拽归类（classify）：每项拖对/拖错，前端即时判定，完成后 `drill-step` 上报结果写 mastery。
+- 公式填空（formula）：`normalize_answer(填) == normalize_answer(answer)`。
+- 陷阱验证（trap）：选择/填空 + 解释，判分同 drill。
+
+### 交互与动画（分期）
+
+- **Phase 1（本期）**：拖拽归类（Flutter `Draggable`/`DragTarget`）、公式填空、陷阱题——纯 Flutter 现有能力。
+- **动态可视化动画（Lottie/Rive）**：`explore.compare` 的动画对比、周长=点跑动、火柴变形等**概念演示动画**，**单独后续一期**（动画资源生产管线未定，不入本期）。
+
 ## 错误处理
 
 | 场景 | 行为 |
@@ -412,10 +452,11 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 - SRS 掌握引擎 `drill_scheduler.py`（无提示升级/提示不升级/答错重置/15 天门槛实时判定）  
 - 引导思考：`group_rule` 规律引导 + `intro` 任务引导 + `common_mistake` 找茬 + `secondary` 释义（AI 建组时一次批量生成，家长审组时顺带审）  
 - 趣味性：连击 ×N + 星级（后端算）+ 通关庆祝动画 + 找茬题型 + 情景造句  
+- 规律探究室：`kind=explore` + `TrainingItem.explore` + 探究四步（观察/归类/归纳/陷阱，拖拽归类纯 Flutter，不含 Lottie/Rive 动画）  
 - 重新激活 `POST /api/drill/groups/{id}/reactivate`  
 - 会话模板：任务引导（intro）→ 四步 → 复盘（轻量）  
-- Flutter：短语四步 + 归纳四步 + handout 原页 + `drill-step` / `drill-sentence` / `drill-apply` / `drill-complete`  
-- 测试要点 **P1-1…P1-16**（见下）
+- Flutter：短语四步 + 归纳四步 + 探究四步 + handout 原页 + `drill-step` / `drill-sentence` / `drill-apply` / `drill-complete`  
+- 测试要点 **P1-1…P1-17**（见下）
 
 ### Phase 2
 
@@ -448,7 +489,8 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 13. **P1-13** `drill-complete` 返回 `stars`（答错/用提示各扣 1 星，下限 1）。  
 14. **P1-14** 归纳 `apply` 用 LLM 判分返回 `{pass, feedback}`；fake/无 LLM 时回落规则（有 keywords 用关键词，否则 `pass=false` + 固定文案）。  
 15. **P1-15** 有 `common_mistake` 的条目在 `quiz` 里出 `qtype=spot_error` 题（含 `wrong`/`answer`/`explain`）；判分 `normalize_answer(填) == normalize_answer(answer)`。  
-16. **P1-16** 建组时生成 `intro`（`{situation, goal, route}` 三段，非 fake 非空）；fake 下为空结构、前端用 `title`+`steps` 拼默认引导。
+16. **P1-16** 建组时生成 `intro`（`{situation, goal, route}` 三段，非 fake 非空）；fake 下为空结构、前端用 `title`+`steps` 拼默认引导。  
+17. **P1-17** `kind=explore` 时 `steps=["observe","classify","formula","trap"]`，`TrainingItem.explore` 含四段内容；classify 拖拽判分、formula 用 `normalize_answer` 判、trap 用 drill 判分。
 
 **Phase 2（P2-x）**
 
@@ -463,9 +505,10 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 - Phase 1 自动拆条 / 每日自动生成。  
 - 运行时读全局配置改间隔（间隔在**建组时定死**，改需重新激活或编辑组）。  
 - 「分类消消乐」「徽章收集」进 Phase 3（本阶段不做）。  
-- 复盘 AI 动态总结 / 错因归类（Phase 1 只做轻量统计+固定文案）。
+- 复盘 AI 动态总结 / 错因归类（Phase 1 只做轻量统计+固定文案）。  
+- 动态可视化动画（Lottie/Rive 概念演示，如周长=点跑动、火柴变形）——单独后续一期，动画资源生产管线未定，本阶段不做。
 
 ## 参考
 
-- Brainstorming：2026-11-11（自学、闯关+原页）→ 2026-11-12（泛化为专项训练 + SRS 真掌握 + 重新激活 + 引导思考/发现规律 + 趣味性）→ 2026-11-13（游戏化题型：找茬+情景造句；会话模板：任务引导+复盘）  
+- Brainstorming：2026-11-11（自学、闯关+原页）→ 2026-11-12（泛化为专项训练 + SRS 真掌握 + 重新激活 + 引导思考/发现规律 + 趣味性）→ 2026-11-13（游戏化题型：找茬+情景造句；会话模板：任务引导+复盘；规律探究室 kind=explore + 动态可视化留后续）  
 - 代码锚点：`routers/pdf.py` upload、`task_gen.py`、`knowledge_quiz.py`、`KnowledgeController.submitTask`、`ReaderViewPage`、`services/scheduler.py`（INTERVALS）、`services/mastery.py`（现有掌握，勿混用）、`services/grade_question.py`（`grade_subjective_with_ai`）
