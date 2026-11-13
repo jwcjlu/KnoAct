@@ -35,6 +35,8 @@ class PdfDocument(Base):
     storage_path: Mapped[str] = mapped_column(String(512))
     edition: Mapped[str] = mapped_column(String(64), default="")  # 教材版本（人教版/苏教版…）
     grade: Mapped[int] = mapped_column(Integer, nullable=True)  # 年级 1~6
+    content_kind: Mapped[str] = mapped_column(String(16), default="textbook")  # textbook | handout
+    handout_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)  # phrase | outline
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)  # 作页图缓存版本（拼 ?v=）
 
 class PdfPage(Base):
@@ -223,7 +225,7 @@ class Task(Base):
     bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     subject: Mapped[str] = mapped_column(String(16))            # '语文' | '英语'
     date: Mapped[date] = mapped_column(Date)                    # 任务所属日期
-    task_type: Mapped[str] = mapped_column(String(16))          # dictation|knowledge|review|reading|listening|custom
+    task_type: Mapped[str] = mapped_column(String(16))          # dictation|knowledge|review|reading|listening|math|practice|drill|custom
     title: Mapped[str] = mapped_column(String(255))
     detail: Mapped[str] = mapped_column(String(255), default="")
     content: Mapped[str] = mapped_column(LongText, default="")   # JSON 文本快照
@@ -372,6 +374,56 @@ class UserDocument(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     document_id: Mapped[int] = mapped_column(ForeignKey("pdf_documents.id"))
+
+
+class TrainingGroup(Base):
+    """专项训练组：讲义=节，自录=一组条目。"""
+    __tablename__ = "training_groups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    subject: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(255))
+    source: Mapped[str] = mapped_column(String(16))            # handout | custom
+    kind: Mapped[str] = mapped_column(String(16))              # phrase | outline | explore
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("pdf_documents.id"), nullable=True)
+    start_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mastery_interval_days: Mapped[int] = mapped_column(Integer, default=15)
+    interval_max_days: Mapped[int] = mapped_column(Integer, default=60)
+    group_rule: Mapped[str] = mapped_column(LongText, default="")   # JSON {examples,question,reveal}
+    intro: Mapped[str] = mapped_column(LongText, default="")        # JSON {situation,goal,route}
+    audit_status: Mapped[str] = mapped_column(String(16), default="pending")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TrainingItem(Base):
+    """专项训练条目：最小记忆/探究单元。"""
+    __tablename__ = "training_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("training_groups.id"))
+    kind: Mapped[str] = mapped_column(String(16))   # phrase | outline_point | drill_item | explore
+    primary: Mapped[str] = mapped_column(LongText)
+    secondary: Mapped[str] = mapped_column(LongText, default="")
+    block_title: Mapped[str] = mapped_column(String(255), default="")
+    example: Mapped[str] = mapped_column(LongText, default="")
+    keywords: Mapped[str] = mapped_column(LongText, default="[]")
+    common_mistake: Mapped[str] = mapped_column(LongText, default="")  # JSON {wrong,correct,explain}
+    explore: Mapped[str] = mapped_column(LongText, default="{}")       # JSON {compare,classify,formula,trap}
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class TrainingItemMastery(Base):
+    """专项条目 SRS 掌握度。mastered 不落库，实时判定。"""
+    __tablename__ = "training_item_mastery"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    item_id: Mapped[int] = mapped_column(ForeignKey("training_items.id"))
+    bucket_id: Mapped[int | None] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
+    interval: Mapped[int] = mapped_column(Integer, default=1)
+    lapse: Mapped[int] = mapped_column(Integer, default=0)
+    last_hinted: Mapped[bool] = mapped_column(Boolean, default=False)
+    attempts: Mapped[str] = mapped_column(LongText, default="[]")
+    next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
 
 class AppGroup(Base):
