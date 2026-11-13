@@ -151,19 +151,76 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
 .stars .st.on:nth-child(3){animation-delay:.9s}
 @keyframes star{0%{transform:scale(0) rotate(-90deg);opacity:0}70%{transform:scale(1.4)}100%{transform:scale(1) rotate(0);opacity:1}}
 
+/* 任务引导页 */
+.intro-hero{background:linear-gradient(135deg,#3158E8,#4E73F0);border-radius:20px;color:#fff;padding:22px 20px;text-align:center}
+.intro-hero .ih-icon{font-size:44px;line-height:1;margin-bottom:8px}
+.intro-hero .ih-title{font-size:20px;font-weight:800;margin-bottom:6px}
+.intro-hero .ih-sit{font-size:13.5px;opacity:.92;line-height:1.6}
+.route{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
+.route .rs{display:flex;flex-direction:column;align-items:center;gap:5px}
+.route .rd{width:30px;height:30px;border-radius:50%;background:#fff;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:var(--gray)}
+.route .rd.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.route .rd.done{background:var(--green);border-color:var(--green);color:#fff}
+.route .rl{font-size:11px;color:var(--gray)}
+.route .line{flex:1;height:2px;background:var(--line);margin:0 4px;position:relative;top:-9px}
+.goal{background:var(--blueSoft);border-radius:12px;padding:10px 14px;font-size:13.5px;color:var(--blue);font-weight:600;margin-top:12px;line-height:1.6}
+/* 找茬 */
+.spot{background:var(--redSoft);border:1px solid #F0C6C6;border-radius:12px;padding:12px 14px;font-size:15px;color:#8a3a3a;line-height:1.7;margin-bottom:10px}
+.spot b{color:var(--red);text-decoration:underline;text-decoration-style:wavy}
+.spot-tag{display:inline-block;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-bottom:8px}
+/* 复盘 */
+.review-sum{background:var(--bg);border-radius:12px;padding:12px 14px;font-size:13.5px;color:#5a645c;line-height:1.7;margin-top:12px;text-align:left}
+.review-sum b{color:var(--ink)}
+.encourage{background:linear-gradient(135deg,#FFF7E6,#FFF2DF);border:1px solid #F0D9A8;border-radius:12px;padding:10px 14px;font-size:13.5px;color:#9A6A1F;margin-top:10px;line-height:1.7}
+
+
 
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>专项训练 · 闯关四步（Drill）</h1>
-  <p class="sub">孩子端四步自学 + 规律引导 + 释义 + 连击/星级/庆祝 · 对齐现有配色与卡片规范（AppColors / theme.dart）</p>
+  <h1>专项训练 · 完整会话原型（Drill）</h1>
+  <p class="sub">任务引导 → 四步闯关 → 复盘 · 规律引导 + 释义 + 找茬 + 情景造句 + 连击/星级/庆祝</p>
 
   <div class="note">
-    <b>原型说明：</b>本流程为 spec「短语四步」——<b>认</b>（规律引导 + 释义）→ <b>记</b>（挖空+提示）→ <b>用</b>（造句，drill-sentence）→ <b>快测</b>（3 题，drill-step）。
-    顶栏为四步进度（<span style="color:var(--blue)">●</span>当前 <span style="color:var(--green)">●</span>完成 <span style="color:var(--orange)">●</span>复习条）；底栏「查看原页」进只读页图（仅讲义）。
-    每步最多 2 次提示、第 3 次揭示答案。橙色条 = <b>到期复习条目</b>（review_item_ids）。<b>第一步「观察→自己发现规律」</b>（先看例子提问，孩子自己想，再揭晓）；答对显示<b>连击 ×N</b>；完成屏有<b>星级 + 通关庆祝</b>。
+    <b>完整会话流程：</b><b>① 任务引导</b>（intro：情境+目标+路线）→ <b>② 四步闯关</b>（短语：认/记/用/快测；归纳：结构卡/drill/apply/closure）→ <b>③ 复盘</b>（统计+一句话总结）。
+    四步内含：规律引导（<b>观察→自己发现→揭晓</b>）、释义、<b>找茬题（spot_error）</b>、<b>情景造句（apply 抽2条目）</b>；答对显示连击 ×N；完成屏星级 + 通关庆祝。
   </div>
+
+  <!-- ===== 0. 任务引导 ===== -->
+  <h2><span class="bar" style="background:var(--gold)"></span>环节 0 · 任务引导（Intro）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">固定短语 · 第 2 节</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="body">
+      <div class="intro-hero">
+        <div class="ih-icon">🚀</div>
+        <div class="ih-title">look 短语家族</div>
+        <div class="ih-sit">今天我们要攻克「look + 介词」短语家族，学会它们，你就能描述日常动作啦！</div>
+      </div>
+      <div class="goal">🎯 <b>目标</b>：能认、能背、能用 4 个 look 短语（look after / look for / look at / look up）</div>
+      <div class="card" style="margin-top:14px">
+        <div class="muted" style="margin-bottom:10px">🗺️ 路线 · 共 4 关，约 10 分钟</div>
+        <div class="route">
+          <div class="rs"><div class="rd on">1</div><div class="rl">发现规律</div></div>
+          <div class="line"></div>
+          <div class="rs"><div class="rd">2</div><div class="rl">记住</div></div>
+          <div class="line"></div>
+          <div class="rs"><div class="rd">3</div><div class="rl">造句</div></div>
+          <div class="line"></div>
+          <div class="rs"><div class="rd">4</div><div class="rl">快测</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">准备好了吗？</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 34px">开始闯关 →</button>
+    </div>
+  </div>
+  <p class="cap">环节 0「任务引导」：intro.situation（情境）+ intro.goal（目标）+ intro.route（路线，四关）。四步之前展示，激发动机。</p>
 
   <!-- ===== 1. 认 ===== -->
   <h2><span class="bar"></span>第 1 步 · 认（Recognize）</h2>
@@ -319,6 +376,39 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
   </div>
   <p class="cap">Step 4「快测」：3 题选择/填空，handout-step 判分；答错记 mastery。</p>
 
+  <!-- ===== 找茬 ===== -->
+  <h2><span class="bar" style="background:var(--red)"></span>快测 · 找茬题（spot_error）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">固定短语 · 第 2 节</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="prog">
+      <div class="steps">
+        <div class="s done"><div class="dot">1</div><div class="lb">认</div></div>
+        <div class="s done"><div class="dot">2</div><div class="lb">记</div></div>
+        <div class="s done"><div class="dot">3</div><div class="lb">用</div></div>
+        <div class="s on"><div class="dot">4</div><div class="lb">快测</div></div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <span class="spot-tag">🔍 找茬 · 快测 2 / 3</span>
+        <div class="recall" style="font-weight:700;font-size:15px">老师写错了一处，把它找出来并改正：</div>
+        <div class="spot">The vase was made <b>from</b> glass.</div>
+        <div class="muted" style="margin-bottom:8px">提示：玻璃是物理变化，应该用哪个介词？</div>
+        <input class="input" placeholder="把改正后的短语写出来…">
+        <div class="fb ok" style="margin-top:14px">✅ <div><b>找对了！</b> 应是 <b>be made of</b>（物理变化用 of，化学变化才用 from）</div></div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">找茬题 · 检验真掌握</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">下一题</button>
+    </div>
+  </div>
+  <p class="cap">「找茬」（spot_error）：来自 common_mistake（wrong/answer/explain），让孩子找错并改正；判分 normalize_answer 比较。</p>
+
   <!-- ===== 完成 ===== -->
   <h2><span class="bar"></span>完成屏（走完四步）</h2>
   <div class="phone">
@@ -360,6 +450,39 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
     </div>
   </div>
   <p class="cap">完成屏：通关庆祝 + 星级（答错/用提示各扣 1 星）+ 掌握统计；submitTask → submitted → 家长 confirm → approved。</p>
+
+  <!-- ===== 复盘 ===== -->
+  <h2><span class="bar" style="background:var(--green)"></span>环节 3 · 复盘（Review）</h2>
+  <div class="phone">
+    <div class="topbar">
+      <div class="ic">←</div>
+      <div class="t">固定短语 · 第 2 节</div>
+      <div class="home">⌂ 首页</div>
+    </div>
+    <div class="body">
+      <div class="card">
+        <div class="center">
+          <div class="big2">📋 本次闯关回顾</div>
+          <div class="muted" style="margin:6px 0 14px">看看这次做得怎么样</div>
+        </div>
+        <div class="stat">
+          <div><div class="n g">5</div><div class="l">掌握了</div></div>
+          <div><div class="n r">1</div><div class="l">还需加强</div></div>
+          <div><div class="n" style="color:var(--gold)">2</div><div class="l">获得星</div></div>
+        </div>
+        <div class="review-sum">
+          ✅ <b>已经掌握</b>：look after、look for、look at、give up、take a photo<br>
+          ⚠️ <b>还需加强</b>：look up（容易和 look at 混）
+        </div>
+        <div class="encourage">💪 没关系的，记不住很正常！「需加强」的短语会过几天再回来，多见几次就牢啦。今天先到这里，休息一下吧～</div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="muted">明天继续加油</div>
+      <button class="btn pri" style="flex:0 0 auto;padding:13px 34px">回到首页</button>
+    </div>
+  </div>
+  <p class="cap">环节 3「复盘」（Phase 1 轻量）：掌握/需加强统计 + 固定鼓励语；AI 动态总结 + 错因归类留 Phase 2。</p>
 
   <!-- ===== 原页 ===== -->
   <h2><span class="bar"></span>查看原页（只读）</h2>
@@ -535,7 +658,7 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
   <p class="cap">归纳 · drill：逐知识点简答/填空，判分关键词命中（grade_knowledge_answer）。</p>
 
   <!-- 归纳 · apply -->
-  <h2><span class="bar"></span>归纳 · apply（1 道综合应用）</h2>
+  <h2><span class="bar"></span>归纳 · apply（情景造句：抽 2 条目）</h2>
   <div class="phone">
     <div class="topbar">
       <div class="ic">←</div>
@@ -552,18 +675,22 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
     </div>
     <div class="body">
       <div class="card">
-        <span class="badge new">应用 · 1 / 1</span>
-        <div class="recall" style="font-size:15px">用本单元学到的修辞手法，写一句描写秋天的句子。</div>
-        <textarea class="input" rows="3" style="resize:none;margin-top:10px">秋风把树叶吹得沙沙响，像在轻声唱歌。</textarea>
-        <div class="fb ok">✅ <div><b>写得好</b> · 用了拟人（树叶唱歌）</div></div>
+        <span class="badge new">情景造句 · 用 1 / 1</span>
+        <div class="recall" style="font-size:15px">把下面两个短语/知识点<b>用进同一句话</b>里：</div>
+        <div class="opts" style="margin-bottom:10px">
+          <div class="opt" style="cursor:default"><span class="k" style="background:var(--orange);border-color:var(--orange);color:#fff">1</span>be busy doing</div>
+          <div class="opt" style="cursor:default"><span class="k" style="background:var(--orange);border-color:var(--orange);color:#fff">2</span>take a photo</div>
+        </div>
+        <textarea class="input" rows="3" style="resize:none">I am busy taking photos.</textarea>
+        <div class="fb ok">✅ <div><b>太棒了！</b> 两个短语都用对了，句子也通顺。</div></div>
       </div>
     </div>
     <div class="bottom">
-      <div class="muted">应用 · 开放式</div>
+      <div class="muted">随机抽 2 条目 · LLM 判分</div>
       <button class="btn pri" style="flex:0 0 auto;padding:13px 28px">提交</button>
     </div>
   </div>
-  <p class="cap">归纳 · apply：1 道综合应用题，验证「用得出来」。</p>
+  <p class="cap">归纳 · apply（情景造句）：随机抽 2 个条目，造一句同时用上两者的句子（去限时）；drill-apply 端点 LLM 判分。</p>
 
   <!-- 归纳 · closure -->
   <h2><span class="bar"></span>归纳 · closure（句首/关键词填空）</h2>
@@ -598,7 +725,7 @@ code{background:var(--blueSoft);color:var(--blue);padding:1px 5px;border-radius:
   <p class="cap">归纳 · closure：句首/关键词填空收尾，判分同 drill（关键词/比较）。</p>
 
   <div class="note" style="border-left-color:var(--orange);margin-top:28px">
-    <b>评审备注（供设计确认）：</b>① 复习条（橙色）与新节条（绿色）混排走同一四步——是否需在视觉上更强调「这是复习」？② 顶栏四步是否含复习条计数（如「新 6 + 复习 2」）可再定。③ 归纳 apply 开放式题建议 LLM 判分、不套 0.6 关键词阈值（spec 已标 ⚠️ 待定）。④ 连击 ×N 触发时机（连续答对几次开始显示？）与星级口径（答错/提示各扣 1）已在 spec 定，动画节奏待实现时细调。
+    <b>评审备注（供设计确认）：</b>① 复习条（橙色）与新节条（绿色）混排走同一四步——是否需在视觉上更强调「这是复习」？② 顶栏四步是否含复习条计数（如「新 6 + 复习 2」）可再定。③ 找茬题在「快测」里的占比（3 题里几题是找茬）可再调。④ 复盘「需加强」的具体条目列表 Phase 1 是否就展示（本原型展示了），还是只给统计数、具体列表留 Phase 2？
   </div>
 </div>
 </body>
