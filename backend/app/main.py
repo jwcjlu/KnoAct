@@ -5,7 +5,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, passages, xuekubao
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, passages, xuekubao, drill
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -103,6 +103,7 @@ app.include_router(screen_time.router)
 app.include_router(bank.router)
 app.include_router(passages.router)
 app.include_router(xuekubao.router)
+app.include_router(drill.router)
 
 _warn_insecure_auth_env()
 
