@@ -66,6 +66,8 @@ class _HomePageState extends ConsumerState<HomePage> {
         }
         final q = ids.isEmpty ? 'bank_id=$bankId&task_id=${t.id}' : 'bank_id=$bankId&ids=${ids.join(',')}&task_id=${t.id}';
         context.push(taskRoute('/bank-exercise?$q', returnTo: '/home'));
+      case TaskAction.openDrill:
+        context.push(taskRoute('/drill', returnTo: '/home'));
       case TaskAction.comingSoon:
         showMessage(context, '该练习即将在 App 上线，可先在网页版完成');
       case TaskAction.done:

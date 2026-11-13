@@ -11,6 +11,7 @@ import '../features/assignment/ui/assignment_page.dart';
 import '../features/bank_exercise/ui/bank_exercise_page.dart';
 import '../features/center/ui/center_page.dart';
 import '../features/dictation/ui/dictation_page.dart';
+import '../features/drill/ui/drill_page.dart';
 import '../features/home/ui/home_page.dart';
 import '../features/knowledge_review/ui/knowledge_page.dart';
 import '../features/math_exercise/ui/math_page.dart';
@@ -50,6 +51,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           path == '/math' ||
           path == '/knowledge' ||
           path == '/dictation' ||
+          path == '/drill' ||
           path == '/reader' ||
           path == '/reader/view' ||
           path == '/reader/spike' ||
@@ -67,6 +69,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/math', builder: (_, _) => const MathPage()),
       GoRoute(path: '/knowledge', builder: (_, _) => const KnowledgePage()),
       GoRoute(path: '/dictation', builder: (_, _) => const DictationPage()),
+      GoRoute(path: '/drill', builder: (_, _) => const DrillPage()),
       GoRoute(path: '/reader', builder: (_, _) => const ReaderHomePage()),
       GoRoute(
         path: '/reader/view',

@@ -26,7 +26,7 @@ Map<String, ({int done, int total})> subjectProgress(List<StudyTask> tasks) => {
   return (todo: list.where((t) => !isDone(t)).toList(), done: list.where(isDone).toList());
 }
 
-enum TaskAction { done, waiting, openReading, openListening, openMath, openKnowledge, openDictation, openBankPractice, comingSoon }
+enum TaskAction { done, waiting, openReading, openListening, openMath, openKnowledge, openDictation, openBankPractice, openDrill, comingSoon }
 
 TaskAction taskAction(StudyTask t) {
   if (t.submitStatus == 'approved') return TaskAction.done;
@@ -37,6 +37,7 @@ TaskAction taskAction(StudyTask t) {
   if (t.taskType == 'knowledge') return TaskAction.openKnowledge;
   if (t.taskType == 'dictation') return TaskAction.openDictation;
   if (t.taskType == 'practice') return TaskAction.openBankPractice;
+  if (t.taskType == 'drill') return TaskAction.openDrill;
   return TaskAction.comingSoon;
 }
 
@@ -62,6 +63,7 @@ const _metas = {
   'math': TaskMeta('数学练习', '约 10 分钟', Icons.edit, _orange),
   'custom': TaskMeta('自定义', '', Icons.auto_awesome, _orange),
   'practice': TaskMeta('题库抽练', '约 10 分钟', Icons.assignment_outlined, _blue),
+  'drill': TaskMeta('专项训练', '约 10 分钟', Icons.flag, _orange),
 };
 
 TaskMeta taskMeta(String taskType) => _metas[taskType] ?? _metas['custom']!;
