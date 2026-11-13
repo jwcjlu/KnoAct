@@ -245,3 +245,28 @@ def test_child_without_parent_cannot_read_pdf(setup_db):
     c = _client()
     assert c.get("/api/pdf/documents", headers=h).status_code == 403
     assert c.get(f"/api/pdf/documents/{did}/lessons", headers=h).status_code == 403
+
+
+def test_upload_handout_skips_lesson_split(client, db, monkeypatch):
+    from app.models import Lesson
+    from app.routers import pdf as pdf_module
+    monkeypatch.setattr(pdf_module, "render_pages", lambda *a, **k: [])
+    called = {"detect": False}
+
+    def fake_detect(*a, **k):
+        called["detect"] = True
+        return []
+
+    monkeypatch.setattr(pdf_module, "detect_lessons_from_pdf", fake_detect)
+    parent = make_account(db, "ph_parent", "parent")
+    h = auth_headers(parent)
+    files = {"file": ("h.pdf", b"%PDF-1.4 fake", "application/pdf")}
+    r = client.post(
+        "/api/pdf/upload",
+        data={"subject": "英语", "content_kind": "handout", "handout_kind": "phrase"},
+        files=files,
+        headers=h,
+    )
+    assert r.status_code == 200
+    assert called["detect"] is False
+    assert db.query(Lesson).count() == 0
