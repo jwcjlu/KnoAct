@@ -392,6 +392,7 @@ class TrainingGroup(Base):
     interval_max_days: Mapped[int] = mapped_column(Integer, default=60)
     group_rule: Mapped[str] = mapped_column(LongText, default="")   # JSON {examples,question,reveal}
     intro: Mapped[str] = mapped_column(LongText, default="")        # JSON {situation,goal,route}
+    ai_review: Mapped[str] = mapped_column(LongText, default="[]")  # JSON 发布前 AI 预检的疑似问题列表
     audit_status: Mapped[str] = mapped_column(String(16), default="pending")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 

@@ -68,6 +68,9 @@ def create_group(req: GroupCreateReq, user: User = Depends(require_role("parent"
             item_row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
             if item_row:
                 item_row.common_mistake = json.dumps(mistakes[payload["primary"]], ensure_ascii=False)
+    # 发布前 AI 预检（提示式，不阻断）
+    from ..services.drill_review import review_group_items
+    g.ai_review = json.dumps(review_group_items(db, req.subject, req.kind, items_payload), ensure_ascii=False)
     db.commit()
     return {"group_id": g.id}
 
@@ -184,5 +187,7 @@ async def photo_groups(subject: str = Form(...), file: UploadFile = File(...),
             row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
             if row:
                 row.common_mistake = json.dumps(mistakes[payload["primary"]], ensure_ascii=False)
+    from ..services.drill_review import review_group_items
+    g.ai_review = json.dumps(review_group_items(db, subject, kind, items_payload), ensure_ascii=False)
     db.commit()
     return {"group_id": g.id, "items_count": len(items), "kind": kind}
