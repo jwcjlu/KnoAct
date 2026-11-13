@@ -63,3 +63,26 @@ def test_task_no_items_400(client, db):
     client.post(f"/api/drill/groups/{gid}/audit", data={"action": "通过"}, headers=parent_h)
     r = client.post("/api/drill/tasks", json={"group_id": gid, "user_id": child.id, "date": "2026-11-13"}, headers=parent_h)
     assert r.status_code == 400
+
+
+def test_drill_step_and_complete(client, db):
+    parent, child, parent_h, child_h = parent_child(db)
+    tid = _approved_task(client, db, parent_h, child)
+    from app.models import Task
+    t = db.get(Task, tid)
+    import json as _json
+    snap = _json.loads(t.content)["items_snapshot"]
+    primary = snap[0]["primary"]
+    r = client.post(f"/api/tasks/{tid}/drill-step",
+                    json={"step": "recall", "item_id": snap[0]["id"], "answer": primary, "request_hint": False},
+                    headers=child_h)
+    assert r.json().get("correct") is True
+    r2 = client.post(f"/api/tasks/{tid}/drill-complete", json={"results": {str(snap[0]["id"]): True}}, headers=child_h)
+    assert "stars" in r2.json()
+
+
+def test_drill_apply_llm_fallback(client, db):
+    parent, child, parent_h, child_h = parent_child(db)
+    tid = _approved_task(client, db, parent_h, child)
+    r = client.post(f"/api/tasks/{tid}/drill-apply", json={"item_id": 1, "sentence": "这句对吗"}, headers=child_h)
+    assert r.status_code == 200 and "pass" in r.json()

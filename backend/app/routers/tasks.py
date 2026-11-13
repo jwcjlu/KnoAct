@@ -362,3 +362,115 @@ def confirm(task_id: int, user: User = Depends(require_role("parent", "admin")),
                  bucket_id=t.bucket_id))
     db.commit()
     return {"ok": True, "points": t.points}
+
+
+class DrillStepReq(BaseModel):
+    step: str = "recall"
+    item_id: int
+    answer: str = ""
+    request_hint: bool = False
+
+
+class DrillSentenceReq(BaseModel):
+    item_id: int
+    sentence: str = ""
+
+
+class DrillCompleteReq(BaseModel):
+    results: dict[str, bool] = {}
+
+
+@router.post("/{task_id}/drill-step")
+def drill_step(task_id: int, req: DrillStepReq, user: User = Depends(require_learning_user),
+               db: Session = Depends(get_db)):
+    from ..models import TrainingItem
+    from ..services.grade_question import normalize_answer
+    t = db.get(Task, task_id)
+    if not t or t.task_type != "drill":
+        return {"error": "not found"}
+    content = json.loads(t.content or "{}")
+    prog = content.get("progress", {})
+    item = db.get(TrainingItem, req.item_id)
+    expected = item.primary if item else ""
+    correct = bool(expected) and normalize_answer(req.answer) == normalize_answer(expected)
+    used = prog.get("hints_used", {}).get(str(req.item_id), 0)
+    if correct:
+        prog.setdefault("recall_results", {})[str(req.item_id)] = True
+        hint = None
+    else:
+        used += 1
+        prog["hints_used"] = prog.get("hints_used", {})
+        prog["hints_used"][str(req.item_id)] = used
+        prog.setdefault("recall_results", {})[str(req.item_id)] = False
+        hint = f"提示 {used}/2" if used < 3 else None
+    content["progress"] = prog
+    t.content = json.dumps(content, ensure_ascii=False)
+    db.commit()
+    return {"correct": correct, "hints_remaining": max(0, 2 - used),
+            "hint": hint, "reveal_answer": used >= 3, "expected": None}
+
+
+@router.post("/{task_id}/drill-sentence")
+def drill_sentence(task_id: int, req: DrillSentenceReq, user: User = Depends(require_learning_user),
+                   db: Session = Depends(get_db)):
+    from ..models import TrainingItem
+    t = db.get(Task, task_id)
+    if not t or t.task_type != "drill":
+        return {"error": "not found"}
+    item = db.get(TrainingItem, req.item_id)
+    phrase = item.primary if item else ""
+    sent = req.sentence.strip()
+    passed = bool(phrase and phrase.lower() in sent.lower() and len(sent) >= 4)
+    return {"pass": passed, "feedback": "搭配正确。" if passed else "再试试，把短语用进完整句子里。"}
+
+
+@router.post("/{task_id}/drill-apply")
+def drill_apply(task_id: int, req: DrillSentenceReq, user: User = Depends(require_learning_user),
+                db: Session = Depends(get_db)):
+    from ..models import TrainingItem
+    from ..services.grade_question import grade_subjective_with_ai
+    item = db.get(TrainingItem, req.item_id)
+    text = req.sentence.strip()
+    if not text:
+        return {"pass": False, "feedback": "写点什么吧。"}
+    r = grade_subjective_with_ai(db, {"rubric": "用到了本组知识点、表达通顺", "sample": item.example or ""},
+                                 {"text": text})
+    if r["is_correct"] is True:
+        return {"pass": True, "feedback": r.get("detail") or "写得好。"}
+    if r["is_correct"] is False:
+        return {"pass": False, "feedback": r.get("detail") or "再想想。"}
+    kws = json.loads(item.keywords or "[]") if item else []
+    if kws and any(k in text for k in kws):
+        return {"pass": True, "feedback": "用到了关键内容。"}
+    return {"pass": False, "feedback": "请家长/老师人工点评。"}
+
+
+@router.post("/{task_id}/drill-complete")
+def drill_complete(task_id: int, req: DrillCompleteReq, user: User = Depends(require_learning_user),
+                   db: Session = Depends(get_db)):
+    from ..models import TrainingItemMastery
+    from ..services.drill_scheduler import grade
+    from datetime import datetime, timedelta
+    t = db.get(Task, task_id)
+    if not t or t.task_type != "drill":
+        return {"error": "not found"}
+    content = json.loads(t.content or "{}")
+    now = datetime.utcnow()
+    hinted_any = wrong_any = False
+    for item_id, is_correct in req.results.items():
+        if not is_correct:
+            wrong_any = True
+        m = db.query(TrainingItemMastery).filter_by(user_id=user.id, item_id=int(item_id)).first()
+        if m is None:
+            m = TrainingItemMastery(user_id=user.id, item_id=int(item_id), interval=1, lapse=0, last_hinted=False)
+            db.add(m)
+        ni, nl, nh = grade(m.interval, m.last_hinted, is_correct, max_days=60)
+        m.interval = ni; m.lapse += nl; m.last_hinted = nh
+        m.attempts = json.dumps(json.loads(m.attempts or "[]") + [bool(is_correct)], ensure_ascii=False)
+        m.next_review_at = now + timedelta(days=ni)
+        if nh:
+            hinted_any = True
+    t.content = json.dumps(content, ensure_ascii=False)
+    db.commit()
+    stars = max(1, 3 - (1 if hinted_any else 0) - (1 if wrong_any else 0))
+    return {"ok": True, "stars": stars, "review_due_tomorrow": 0}
