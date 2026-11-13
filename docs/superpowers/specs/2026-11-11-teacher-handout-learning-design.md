@@ -50,6 +50,9 @@
 | 重新激活 | 家长显式触发：**整组重来、间隔清零、mastered 清除**，专项重新进入可布置状态 |
 | 引导思考 | 组级 `group_rule`（结构化：观察示例+引导提问+揭晓结论，孩子**自己发现规律**）+ 条目 `secondary` 释义，AI 建组时生成、家长审组时顺带审；「记」前加「为什么」引导 |
 | 趣味性 | 连击 ×N + 星级（后端算，答错/用提示各扣 1）+ 通关庆祝动画；不做道具/皮肤/排行榜 |
+| 游戏化题型（Phase 1） | 「找茬」`qtype=spot_error`（错误句来自 `common_mistake`）+ 归纳「情景造句」（apply 变体：随机抽 2 条目造句，去限时）；「分类消消乐」「徽章收集」留 Phase 2/3 |
+| 任务引导 | `group.intro`（`{situation, goal, route}`），四步之前展示；AI 建组生成、家长审 |
+| 复盘 | Phase 1 轻量（统计 + 固定鼓励语）；AI 动态总结 + 错因归类留 Phase 2 |
 | 造句判分 | 专用 `drill-sentence` 包装 LLM，返回结构化 `{pass, feedback}`，**不走开放式 chat UI** |
 
 ## 数据模型（与教材链隔离）
@@ -79,6 +82,7 @@
 | `mastery_interval_days` | 判定「真掌握」的门槛间隔（天），建组时家长定，默认 15 |
 | `interval_max_days` | 间隔递增封顶（天），建组时定，默认 60 |
 | `group_rule` | 这组条目的**规律引导**（结构化三段：观察示例 + 引导提问 + 揭晓结论），AI 建组时生成，家长审组时顺带审 |
+| `intro` | 这组的**任务引导**（`{situation, goal, route}`：情境 + 目标 + 路线），AI 建组时生成，家长审组时顺带审；四步之前展示 |
 | `audit_status` | `pending` \| `approved` \| `rejected`，默认 `pending`；`approved` 才可进任务池 |
 | `sort_order` | 学习顺序 |
 
@@ -94,6 +98,7 @@
 | `block_title` | 归纳型的分组标题（可选） |
 | `example` | 例句 / 可选解释句 |
 | `keywords` | JSON，判分关键词 |
+| `common_mistake` | JSON `{wrong, correct, explain}`：易错点（把正确用法写错 + 正确形式 + 为什么），「找茬」题型用；AI 建组生成，家长审 |
 | `source_page` | int，仅 handout 有（原页对照），custom 为 null |
 
 ### `TrainingItemMastery`（新表，SRS 掌握度）
@@ -167,6 +172,8 @@ POST /api/drill/groups
 
 响应：`{ "group_ids": [10, ...] }`。
 
+> **建组时 AI 批量生成**：`intro`（任务引导）、`group_rule`（规律）、`common_mistake`（易错点）、`secondary`（释义补全）四项由**一次 LLM 调用**批量生成，家长审组时顺带审这四样；fake provider 回退为空结构/原文，前端按默认呈现。实现集中在 `services/drill_rule.py`。
+
 ## 审核链路（审「组」，任务免审）
 
 审核落在**组**上（`TrainingGroup.audit_status`），不在 `Task.content_status` 上；组审过一次，内容即可信，由它生成的任务免重复审核。
@@ -222,6 +229,11 @@ POST /api/drill/groups
   "source": "custom",
   "kind": "phrase",
   "document_id": null,
+  "intro": {
+    "situation": "今天攻克「look 短语家族」，学会就能描述日常动作啦",
+    "goal": "能认、能背、能用 4 个 look 短语",
+    "route": "4 关：发现规律 → 记住 → 造句 → 快测"
+  },
   "group_rule": {
     "examples": [{"oe":"look after","oc":"照顾"},{"oe":"look for","oc":"寻找"},{"oe":"look at","oc":"看"}],
     "question": "这些短语都以 look + ___ 开头，后面的词让意思发生了怎样的变化？",
@@ -236,7 +248,8 @@ POST /api/drill/groups
   ],
   "quiz": [
     {"item_id":101,"qtype":"blank","prompt":"She ___ her brother.","answer":"looks after"},
-    {"item_id":55,"qtype":"blank","prompt":"Don't ___!","answer":"give up","source":"review"}
+    {"item_id":55,"qtype":"blank","prompt":"Don't ___!","answer":"give up","source":"review"},
+    {"item_id":76,"qtype":"spot_error","prompt":"The vase was made from glass. 哪里错了？","wrong":"was made from","answer":"was made of","explain":"玻璃是物理变化，用 be made of"}
   ],
   "progress": {
     "step": "recall",
@@ -251,7 +264,7 @@ POST /api/drill/groups
 
 > **复习承载位（schema v2）**：`item_ids` 保留为**本新组**条目；`review_item_ids` 存**到期复习条目**（可跨组）。`items_snapshot` / `quiz` 里复习条目以 `"source":"review"` 标记。复习条走与新课相同的步序，`drill-complete` 一并写 mastery。
 
-> **短语型 `quiz` 出题规则**：`quiz` 数组在**创建任务时**生成（`drill_content.build_task_content`）。短语型每条目出一题：`qtype=blank`（挖空填空，`prompt` 用 `example` 例句把 `primary` 挖空，`answer`=正确形式）；每组抽 3 题作为「快测」步，其余题不入 quiz。归纳型 `drill`/`closure` 题走 `generate_knowledge_questions()`（见下）。fake provider 下 `quiz` 可为空，快测步降级为直接展示 `items_snapshot` 让家长核对。
+> **短语型 `quiz` 出题规则**：`quiz` 数组在**创建任务时**生成（`drill_content.build_task_content`）。短语型每条目出一题：`qtype=blank`（挖空填空，`prompt` 用 `example` 例句把 `primary` 挖空，`answer`=正确形式）；有 `common_mistake` 的条目另出一题 `qtype=spot_error`（「找茬」）；每组抽 3 题作为「快测」步，其余题不入 quiz。归纳型 `drill`/`closure` 题走 `generate_knowledge_questions()`（见下）。fake provider 下 `quiz` 可为空，快测步降级为直接展示 `items_snapshot` 让家长核对。
 
 归纳 `kind=outline`：`steps` 为 `["structure","drill","apply","closure"]`；`drill` / `closure` 题在创建时调用 `generate_knowledge_questions()`（`knowledge_quiz.py` **服务函数**），题目塞进 `quiz` / `closure` 字段——**不复用** `KnowledgePage` 整页 UX。
 
@@ -262,13 +275,14 @@ POST /api/drill/groups
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/pdf/upload` | 增参 `content_kind`, `handout_kind`（仅 handout） |
-| POST | `/api/drill/groups` | 建组+条目（`source=handout|custom`），组 `audit_status` 默认 `pending`，间隔天数在此定 |
+| POST | `/api/drill/groups` | 建组+条目（`source=handout|custom`），组 `audit_status` 默认 `pending`，间隔天数在此定；AI 批量生成 `intro`/`group_rule`/`common_mistake`/`secondary` |
 | POST | `/api/drill/groups/{id}/audit` | 审组（`action=通过\|拒绝`，对齐 `/api/pdf/lessons/{id}/audit`） |
 | POST | `/api/drill/groups/{id}/reactivate` | **重新激活**：整组间隔清零、mastered 清除（家长显式触发） |
 | POST | `/api/drill/tasks` | 由 `group_id` 组 `Task.content` 并创建任务（校验/截断/quiz）；subject 取自组、`content_status=published`、同科同天幂等返回 |
 | GET | `/api/tasks/{id}` | 已有；`drill` 返回上述 `content` |
-| POST | `/api/tasks/{id}/drill-step` | 步进式提交（记/测） |
-| POST | `/api/tasks/{id}/drill-sentence` | 造句专用 |
+| POST | `/api/tasks/{id}/drill-step` | 步进式提交（记/测，含找茬 `spot_error`） |
+| POST | `/api/tasks/{id}/drill-sentence` | 短语造句专用 |
+| POST | `/api/tasks/{id}/drill-apply` | 归纳 apply（情景造句）LLM 判分 |
 | POST | `/api/tasks/{id}/drill-complete` | 写 mastery（SRS）、合并 `progress` 回写 content（**不动 `submit_status`**） |
 
 ### `POST .../drill-step`
@@ -330,13 +344,25 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 | 壳层 | 顶栏四步进度；底栏「查看原页」（仅 handout 有）；**连击 ×N 即时反馈 + 通关庆祝动画/音效 + 完成屏星级** |
 | 原页 | 仅 `source=handout`：`/reader/view?documentId={id}&page={source_page}`——**增参 `documentId` + `page`**；勿将 `document_id` 传入现有 `lesson`（该 query 表示 **Lesson.id**）。讲义无 `Lesson` 时按 `documentId` 拉 PDF 页图，只读浏览。此为 reader 的**新只读分支**（现 `reader_view_page.dart` 以 `PdfLesson` 为中心渲染），非「增一个 query 参数」的小改，需评估 `pdf_lesson_reader.dart` 复用边界。`source=custom` 无原页，底栏不显示此入口。 |
 
-## 步序（含引导思考 + 趣味性）
+## 步序（会话模板 + 引导思考 + 趣味性）
 
-### 步序（不变的主体）
+### 会话模板（一次训练的宏观结构）
 
-**短语**：认（规律引导 + 释义）→ 记（挖空+提示，先「为什么」引导）→ 用（drill-sentence）→ 快测（3 题，`drill-step`）。  
+一次 `drill` 任务按「引导 → 四步 → 复盘」走（对齐 6 环节教学法，压缩到 14 分钟内）：
 
-**归纳**：结构卡（规律引导 + 分组总览）→ drill（逐题 drill-step）→ apply（1 题）→ closure（句首填空）。
+| 环节 | 时长 | 内容 | 数据来源 |
+|------|------|------|---------|
+| **任务引导** | ~1 分钟 | 情境 + 目标 + 路线（`intro.situation`/`goal`/`route`） | `group.intro`，四步之前展示 |
+| **四步闯关** | ~10 分钟 | 认/结构卡 → 记/drill → 用/apply → 快测/closure | 现有 `steps` |
+| **复盘** | ~2 分钟 | 掌握/需加强统计 + 一句话总结（Phase 1 轻量：固定鼓励语 + 统计；AI 动态总结+错因归类留 Phase 2） | `drill-complete` 返回的 `stars` + 结果 |
+
+> 「先思考」（暴露认知）由第一步的 `group_rule`（观察→提问→揭晓）承担；「下一轮引导」依赖 Phase 2 的 `_gen_drill`（Phase 1 家长手动布置，无「下一关」概念）。
+
+### 步序（四步主体，不变）
+
+**短语**：认（规律引导 + 释义）→ 记（挖空+提示，先「为什么」引导）→ 用（drill-sentence）→ 快测（3 题，含**填空 + 找茬**，`drill-step`）。  
+
+**归纳**：结构卡（规律引导 + 分组总览）→ drill（逐题 drill-step）→ apply（1 题，**情景造句**：随机抽 2 条目造一句同时用上两者的句子，去限时）→ closure（句首填空）。
 
 ### 引导思考 / 发现规律（内容层）
 
@@ -384,11 +410,12 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 - `source=handout`（上传跳过自动拆课、划组、审组）+ `source=custom`（家长自录条目）  
 - 家长布置 → `task_type=drill`（**手动**，组审后任务 `published`）  
 - SRS 掌握引擎 `drill_scheduler.py`（无提示升级/提示不升级/答错重置/15 天门槛实时判定）  
-- 引导思考：`group_rule` 规律引导 + `secondary` 释义（AI 建组时生成，家长审组时顺带审）  
-- 趣味性：连击 ×N + 星级（后端算）+ 通关庆祝动画  
+- 引导思考：`group_rule` 规律引导 + `intro` 任务引导 + `common_mistake` 找茬 + `secondary` 释义（AI 建组时一次批量生成，家长审组时顺带审）  
+- 趣味性：连击 ×N + 星级（后端算）+ 通关庆祝动画 + 找茬题型 + 情景造句  
 - 重新激活 `POST /api/drill/groups/{id}/reactivate`  
-- Flutter：短语四步 + 归纳四步 + handout 原页 + `drill-step` / `drill-sentence` / `drill-complete`  
-- 测试要点 **P1-1…P1-14**（见下）
+- 会话模板：任务引导（intro）→ 四步 → 复盘（轻量）  
+- Flutter：短语四步 + 归纳四步 + handout 原页 + `drill-step` / `drill-sentence` / `drill-apply` / `drill-complete`  
+- 测试要点 **P1-1…P1-16**（见下）
 
 ### Phase 2
 
@@ -399,6 +426,8 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 ### Phase 3
 
 - 错题本联动、专项进度看板
+- 「分类消消乐」（拖拽归类，需先给条目加「类别」维度）  
+- 「徽章收集」（长期成就收藏册，集齐系列徽章）
 
 ## 测试要点
 
@@ -417,7 +446,9 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 11. **P1-11** `mastered` 实时判定：interval 达门槛且无提示通过才 true；`reactivate` 后整组 interval 清零、mastered 回 false。  
 12. **P1-12** 建组时 `group_rule` 生成结构化三段（examples/question/reveal，非 fake 时非空）；fake provider 下为空结构、前端不显示规律引导块、步序照常。  
 13. **P1-13** `drill-complete` 返回 `stars`（答错/用提示各扣 1 星，下限 1）。  
-14. **P1-14** 归纳 `apply` 用 LLM 判分返回 `{pass, feedback}`；fake/无 LLM 时回落规则（有 keywords 用关键词，否则 `pass=false` + 固定文案）。
+14. **P1-14** 归纳 `apply` 用 LLM 判分返回 `{pass, feedback}`；fake/无 LLM 时回落规则（有 keywords 用关键词，否则 `pass=false` + 固定文案）。  
+15. **P1-15** 有 `common_mistake` 的条目在 `quiz` 里出 `qtype=spot_error` 题（含 `wrong`/`answer`/`explain`）；判分 `normalize_answer(填) == normalize_answer(answer)`。  
+16. **P1-16** 建组时生成 `intro`（`{situation, goal, route}` 三段，非 fake 非空）；fake 下为空结构、前端用 `title`+`steps` 拼默认引导。
 
 **Phase 2（P2-x）**
 
@@ -430,9 +461,11 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 - 语音打分。  
 - 一次学完整本 10 页。  
 - Phase 1 自动拆条 / 每日自动生成。  
-- 运行时读全局配置改间隔（间隔在**建组时定死**，改需重新激活或编辑组）。
+- 运行时读全局配置改间隔（间隔在**建组时定死**，改需重新激活或编辑组）。  
+- 「分类消消乐」「徽章收集」进 Phase 3（本阶段不做）。  
+- 复盘 AI 动态总结 / 错因归类（Phase 1 只做轻量统计+固定文案）。
 
 ## 参考
 
-- Brainstorming：2026-11-11（自学、闯关+原页）→ 2026-11-12（泛化为专项训练 + SRS 真掌握 + 重新激活 + 引导思考/发现规律 + 趣味性）  
+- Brainstorming：2026-11-11（自学、闯关+原页）→ 2026-11-12（泛化为专项训练 + SRS 真掌握 + 重新激活 + 引导思考/发现规律 + 趣味性）→ 2026-11-13（游戏化题型：找茬+情景造句；会话模板：任务引导+复盘）  
 - 代码锚点：`routers/pdf.py` upload、`task_gen.py`、`knowledge_quiz.py`、`KnowledgeController.submitTask`、`ReaderViewPage`、`services/scheduler.py`（INTERVALS）、`services/mastery.py`（现有掌握，勿混用）、`services/grade_question.py`（`grade_subjective_with_ai`）
