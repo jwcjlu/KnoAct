@@ -9,6 +9,7 @@ import '../../../core/widgets.dart';
 import '../../auth/session.dart';
 import '../../center/center_controller.dart';
 import '../../dictation/dictation_controller.dart';
+import '../../drill/drill_controller.dart';
 import '../../knowledge_review/knowledge_controller.dart';
 import '../../math_exercise/math_controller.dart';
 import '../../reader/reader_controller.dart';
@@ -67,6 +68,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         final q = ids.isEmpty ? 'bank_id=$bankId&task_id=${t.id}' : 'bank_id=$bankId&ids=${ids.join(',')}&task_id=${t.id}';
         context.push(taskRoute('/bank-exercise?$q', returnTo: '/home'));
       case TaskAction.openDrill:
+        ref.read(drillControllerProvider.notifier).init(taskId: t.id, title: t.title, content: t.content);
         context.push(taskRoute('/drill', returnTo: '/home'));
       case TaskAction.comingSoon:
         showMessage(context, '该练习即将在 App 上线，可先在网页版完成');
