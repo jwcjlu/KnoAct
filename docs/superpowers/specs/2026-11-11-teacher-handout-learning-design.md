@@ -69,7 +69,7 @@
 | 字段 | 说明 |
 |------|------|
 | `id` | PK |
-| `owner_id` | 归属家长（custom）/ admin（handout 上传者） |
+| `owner_id` | 归属家长（custom）/ 讲义上传者（handout，通常 admin）；**审组权限 = owner 或 admin** |
 | `subject` | 学科 |
 | `title` | 如「固定短语 · 第 2 节」「必背古诗 20 首」 |
 | `source` | `handout` \| `custom` |
@@ -87,8 +87,7 @@
 | 字段 | 说明 |
 |------|------|
 | `id` | PK |
-| `group_id` | FK `TrainingGroup` |
-| `source` | 继承 group（`handout` \| `custom`） |
+| `group_id` | FK `TrainingGroup`（source 由此 group 决定，条目表**不冗余存 source**） |
 | `kind` | `phrase` \| `outline_point` \| `drill_item` |
 | `primary` | 主记忆内容：短语原文 / 古诗正文 / 生字 |
 | `secondary` | 中文释义 / 作者 / 拼音 |
@@ -102,6 +101,7 @@
 | 字段 | 说明 |
 |------|------|
 | `user_id` + `item_id` | 联合 |
+| `bucket_id` | FK `school_year_buckets`，nullable；对齐 `KnowledgeMastery`/`WordMastery`，升年级封存旧桶、掌握记录不跨学年串 |
 | `interval` | 当前间隔天数（1→2→4→7→15→30→60） |
 | `lapse` | 累计遗忘（答错）次数 |
 | `last_hinted` | 最近一次通过是否用了提示 |
@@ -134,6 +134,8 @@ mastered = (interval >= group.mastery_interval_days) 且 (最近一次通过无�
 - 递增序列 `1→2→4→7→15→30→60` 复用 `scheduler.INTERVALS` 的节奏，但**答错重置 interval**（现有 `mastery._append` 答错不降间隔，这里要降）。
 - 提示通过的条目**不升级 interval**，杜绝「靠提示蒙混毕业」。
 - `mastered` 可逆：已毕业条目被重新拉出测、又答错 → interval 重置、自动回池。
+- **interval 初始值 = 1 天**（新条目首次记录 mastery 时 `interval=1`，首次无提示答对后翻倍为 2）。
+- **跨组复习的门槛归属**：`review_item_ids` 里的复习条目「可跨组」只是借用其它组作载体，**`mastered` 判定始终用条目自身所属 group 的 `mastery_interval_days`**（`item.group.mastery_interval_days`），不因复习时挂在哪组而变。
 
 ## 内容来源与建组（`POST /api/drill/groups`）
 
@@ -249,6 +251,8 @@ POST /api/drill/groups
 
 > **复习承载位（schema v2）**：`item_ids` 保留为**本新组**条目；`review_item_ids` 存**到期复习条目**（可跨组）。`items_snapshot` / `quiz` 里复习条目以 `"source":"review"` 标记。复习条走与新课相同的步序，`drill-complete` 一并写 mastery。
 
+> **短语型 `quiz` 出题规则**：`quiz` 数组在**创建任务时**生成（`drill_content.build_task_content`）。短语型每条目出一题：`qtype=blank`（挖空填空，`prompt` 用 `example` 例句把 `primary` 挖空，`answer`=正确形式）；每组抽 3 题作为「快测」步，其余题不入 quiz。归纳型 `drill`/`closure` 题走 `generate_knowledge_questions()`（见下）。fake provider 下 `quiz` 可为空，快测步降级为直接展示 `items_snapshot` 让家长核对。
+
 归纳 `kind=outline`：`steps` 为 `["structure","drill","apply","closure"]`；`drill` / `closure` 题在创建时调用 `generate_knowledge_questions()`（`knowledge_quiz.py` **服务函数**），题目塞进 `quiz` / `closure` 字段——**不复用** `KnowledgePage` 整页 UX。
 
 > **归纳 apply 判分（已定）**：`apply` 是开放式题（如「写一句描写秋天的句子」），**用 LLM 判分**（复用 `grade_subjective_with_ai` 或专用短 prompt），**不套** `grade_knowledge_answer` 的 `0.6` 关键词命中阈值（孩子写得对但没踩中预设关键词会被误判错）。返回 `{pass, feedback}`，判分结果记入该条目 mastery。
@@ -354,7 +358,7 @@ Phase 2：`drill-complete` 额外推进 `TrainingProgress.next_group_id`。
 
 | 趣味点 | 做法 | 成本 |
 |--------|------|------|
-| **连击** | 连续答对显示「连击 ×N」，即时视觉反馈（纯前端状态） | 低 |
+| **连击** | 连续答对显示「连击 ×N」，即时视觉反馈（纯前端状态）；**连续答对 ≥2 题开始显示，答错或用提示则清零** | 低 |
 | **星级** | 每组完成按「正确率 + 是否用提示」给 1–3 星，完成屏展示 | 低（后端算，前端展示） |
 | **通关庆祝** | 四步进度（已有）+ 完成时的庆祝动画/音效 | 低-中（前端动画） |
 
