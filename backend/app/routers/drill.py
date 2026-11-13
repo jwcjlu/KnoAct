@@ -1,6 +1,6 @@
 # backend/app/routers/drill.py
 import json
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, File, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -8,6 +8,8 @@ from ..core.access import ensure_user_access
 from ..core.deps import require_role
 from ..database import get_db
 from ..models import TrainingGroup, TrainingItem, User
+from ..services.ai import ocr_image
+from ..services.drill_rule import extract_drill_items
 
 router = APIRouter(prefix="/api/drill", tags=["drill"])
 
@@ -136,3 +138,51 @@ def create_task(req: TaskCreateReq, user: User = Depends(require_role("parent", 
              title=g.title, content=content, points=20, content_status="published")
     db.add(t); db.commit(); db.refresh(t)
     return {"task_id": t.id}
+
+
+@router.post("/photo-groups")
+async def photo_groups(subject: str = Form(...), file: UploadFile = File(...),
+                       user: User = Depends(require_role("parent", "admin")),
+                       db: Session = Depends(get_db)):
+    """拍照出题：家长拍错题照片 → OCR → 提取识记条目 → 建组（pending 待审）。"""
+    from fastapi import HTTPException
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="请上传图片")
+    try:
+        ocr_text = ocr_image(db, data, instruction="识别这张错题图片中的题目文字、孩子答案和老师批注，原样输出。")
+    except Exception:
+        ocr_text = ""
+    if not (ocr_text or "").strip():
+        raise HTTPException(status_code=400, detail="未能识别图片，请换更清晰的照片")
+    extracted = extract_drill_items(db, ocr_text)
+    items = extracted.get("items") or []
+    if not items:
+        raise HTTPException(status_code=400, detail="未能从错题提炼出知识点，请换清晰照片或手动录入")
+    kind = (extracted.get("kind") or "outline").strip()
+    title = (extracted.get("title") or "").strip() or "拍照错题专项"
+
+    g = TrainingGroup(owner_id=user.id, subject=subject, title=title,
+                      source="custom", kind=kind)
+    db.add(g); db.flush()
+    for it in items:
+        db.add(TrainingItem(group_id=g.id, kind=it.get("kind") or "drill_item",
+                            primary=it.get("primary") or "",
+                            secondary=it.get("secondary") or "",
+                            example=it.get("example") or "",
+                            keywords=json.dumps(it.get("keywords") or [], ensure_ascii=False)))
+    db.flush()
+
+    from ..services.drill_rule import generate_group_content
+    items_payload = [{"primary": it.get("primary", ""), "secondary": it.get("secondary", "")} for it in items]
+    content = generate_group_content(db, subject, kind, items_payload)
+    g.intro = json.dumps(content["intro"], ensure_ascii=False)
+    g.group_rule = json.dumps(content["group_rule"], ensure_ascii=False)
+    mistakes = content["common_mistakes"]
+    for payload in items_payload:
+        if payload["primary"] in mistakes:
+            row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
+            if row:
+                row.common_mistake = json.dumps(mistakes[payload["primary"]], ensure_ascii=False)
+    db.commit()
+    return {"group_id": g.id, "items_count": len(items), "kind": kind}

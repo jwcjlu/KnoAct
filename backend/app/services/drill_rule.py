@@ -54,3 +54,51 @@ def generate_group_content(db: Session | None, subject: str, kind: str, items: l
         }
     except Exception:
         return _empty_copy()
+
+
+def extract_drill_items(db: Session | None, ocr_text: str) -> dict:
+    """从「错题文字」提取识记型训练条目。返回 {kind, title, items}。
+
+    kind 推断：英语短语→phrase，语文古诗/生字→outline，数学概念→explore。
+    fake/无 db/空文本/异常 → 空结构。
+    """
+    empty = {"kind": "", "title": "", "items": []}
+    if db is None or not (ocr_text or "").strip():
+        return empty
+    from .ai import get_provider
+    provider = get_provider(db)
+    if provider.name == "fake":
+        return empty
+
+    prompt = (
+        "下面是一道小学错题的文字（可能含孩子错误答案和老师批注）。请识别它考的「识记知识点」，"
+        "转成专项训练条目。只返回 JSON：\n"
+        '{{"kind":"phrase|outline|explore","title":"一句话标题",'
+        '"items":[{{"kind":"phrase|outline_point|drill_item","primary":"识记内容原文",'
+        '"secondary":"释义/作者/解释","example":"例句或说明","keywords":["关键词"]}}]}}\n'
+        "kind 推断规则：英语短语/固定搭配→phrase；语文古诗/生字/词语→outline；数学概念/公式→explore。\n"
+        f"错题文字：\n{ocr_text[:1200]}"
+    )
+    try:
+        raw = provider.generate(prompt=prompt, system="你是小学老师，善于从错题提炼知识点。", json_mode=True)
+        data = json.loads(raw)
+        items = data.get("items") or []
+        cleaned = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            cleaned.append({
+                "kind": (it.get("kind") or "drill_item").strip(),
+                "primary": (it.get("primary") or "").strip(),
+                "secondary": (it.get("secondary") or "").strip(),
+                "example": (it.get("example") or "").strip(),
+                "keywords": [k.strip() for k in (it.get("keywords") or []) if k.strip()],
+            })
+        cleaned = [it for it in cleaned if it["primary"]]
+        return {
+            "kind": (data.get("kind") or "").strip(),
+            "title": (data.get("title") or "").strip(),
+            "items": cleaned,
+        }
+    except Exception:
+        return empty
