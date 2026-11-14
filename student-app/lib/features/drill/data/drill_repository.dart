@@ -213,7 +213,7 @@ class PlanStep {
   final int? itemId;
 }
 
-/// 按条目类型生成执行序列：先识记段（认→每条目用+测），后探究段（观察→每条目归类/归纳/陷阱）。
+/// 按条目类型生成执行序列：先识记段（认→每条目背+测），后探究段（观察→每条目归类/陷阱）。
 List<PlanStep> buildPlan(DrillSession session) {
   final plan = <PlanStep>[];
   final memorize = session.items.where((it) => it.type != 'explore').toList();
@@ -222,7 +222,7 @@ List<PlanStep> buildPlan(DrillSession session) {
   if (memorize.isNotEmpty) {
     plan.add(const PlanStep('recognize', null));
     for (final item in memorize) {
-      plan.add(PlanStep('produce', item.id));
+      plan.add(PlanStep('recall', item.id));
       plan.add(PlanStep('quiz', item.id));
     }
   }
@@ -231,7 +231,6 @@ List<PlanStep> buildPlan(DrillSession session) {
     plan.add(const PlanStep('observe', null));
     for (final item in explore) {
       plan.add(PlanStep('classify', item.id));
-      plan.add(PlanStep('formula', item.id));
       plan.add(PlanStep('trap', item.id));
     }
   }

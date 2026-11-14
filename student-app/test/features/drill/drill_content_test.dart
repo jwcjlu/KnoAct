@@ -70,16 +70,16 @@ void main() {
       );
     }
 
-    test('识记条目走 认→用→测，探究条目走 观察→归类→归纳→陷阱', () {
+    test('识记条目走 认→背→测，探究条目走 观察→归类→陷阱', () {
       final s = makeSession([
         {'id': 1, 'primary': '古诗', 'type': 'memorize'},
         {'id': 2, 'primary': '比喻', 'type': 'explore'},
       ]);
       final plan = buildPlan(s);
       final steps = plan.map((p) => p.step).toList();
-      expect(steps, ['recognize', 'produce', 'quiz', 'observe', 'classify', 'formula', 'trap']);
+      expect(steps, ['recognize', 'recall', 'quiz', 'observe', 'classify', 'trap']);
       expect(plan[0].itemId, isNull); // recognize 组级
-      expect(plan[1].itemId, 1);       // produce 绑定条目1
+      expect(plan[1].itemId, 1);       // recall 绑定条目1
       expect(plan[4].itemId, 2);       // classify 绑定条目2
     });
 
@@ -90,7 +90,7 @@ void main() {
       ]);
       final plan = buildPlan(s);
       expect(plan.map((p) => p.step).toList(),
-          ['recognize', 'produce', 'quiz', 'produce', 'quiz']);
+          ['recognize', 'recall', 'quiz', 'recall', 'quiz']);
     });
 
     test('纯探究组：无识记段', () {
@@ -99,7 +99,7 @@ void main() {
       ]);
       final plan = buildPlan(s);
       expect(plan.map((p) => p.step).toList(),
-          ['observe', 'classify', 'formula', 'trap']);
+          ['observe', 'classify', 'trap']);
     });
   });
 

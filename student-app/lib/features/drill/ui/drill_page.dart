@@ -238,14 +238,34 @@ class _StepBodyState extends State<_StepBody> {
 
     switch (step) {
       case 'recognize':
-      case 'structure':
       case 'observe':
+        if (item != null && item.guideSteps.isNotEmpty) {
+          return _GuideView(item: item, ctl: ctl);
+        }
+        return _RuleCard(session: session, reveal: s.revealRule, ctl: ctl);
+      case 'structure':
         return _RuleCard(session: session, reveal: s.revealRule, ctl: ctl);
       case 'classify':
         return _ClassifyView(item: item, answered: s.answered, ctl: ctl);
       case 'recall':
+        return _itemCard(
+          context,
+          item,
+          title: '第 ${s.planIndex + 1} 步 · 背一背',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (item != null)
+                Text(_blankPrimary(item.primary), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, height: 1.6)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _answer,
+                decoration: const InputDecoration(hintText: '补全挖空的部分…', isDense: true, border: OutlineInputBorder()),
+              ),
+            ],
+          ),
+        );
       case 'drill':
-      case 'formula':
       case 'closure':
       case 'trap':
         return _itemCard(
@@ -393,6 +413,99 @@ class _StepBodyState extends State<_StepBody> {
       return widget.ctl.submitSentence(itemId: itemId, sentence: answer);
     }
     return widget.ctl.submitStep(itemId: itemId, answer: answer, requestHint: false);
+  }
+}
+
+class _GuideView extends StatefulWidget {
+  const _GuideView({required this.item, required this.ctl});
+  final DrillItem item;
+  final DrillController ctl;
+
+  @override
+  State<_GuideView> createState() => _GuideViewState();
+}
+
+class _GuideViewState extends State<_GuideView> {
+  int _round = 0;
+  bool _revealed = false;
+  final _fill = TextEditingController();
+
+  GuideStep get _current => widget.item.guideSteps[_round.clamp(0, widget.item.guideSteps.length - 1)];
+
+  @override
+  void dispose() { _fill.dispose(); super.dispose(); }
+
+  void _answerChoice() { setState(() => _revealed = true); }
+  void _submitFill() { setState(() => _revealed = true); }
+
+  void _next() {
+    if (_round + 1 < widget.item.guideSteps.length) {
+      setState(() { _round++; _revealed = false; _fill.clear(); });
+    } else {
+      widget.ctl.nextItem();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final g = _current;
+    return _card(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('🔍 第 ${_round + 1}/${widget.item.guideSteps.length} 步 · 一起发现',
+              style: const TextStyle(fontSize: 12, color: AppColors.gray, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 10),
+          Text(g.prompt, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, height: 1.5)),
+          if (g.samples.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            for (final s in g.samples)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(color: AppColors.bg, borderRadius: BorderRadius.circular(8)),
+                  child: Text(s, style: const TextStyle(fontSize: 14)),
+                ),
+              ),
+          ],
+          const SizedBox(height: 14),
+          if (g.isChoice) ...[
+            for (var i = 0; i < g.options.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: _revealed ? null : () => _answerChoice(),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: _revealed && i == g.answerIndex ? AppColors.greenSoft : null,
+                      foregroundColor: _revealed && i == g.answerIndex ? AppColors.green : AppColors.ink,
+                    ),
+                    child: Align(alignment: Alignment.centerLeft, child: Text(g.options[i])),
+                  ),
+                ),
+              ),
+          ] else ...[
+            TextField(controller: _fill, decoration: const InputDecoration(hintText: '写下你的答案…', border: OutlineInputBorder())),
+            const SizedBox(height: 10),
+            SizedBox(width: double.infinity, child: FilledButton(onPressed: _revealed ? null : _submitFill, child: const Text('提交'))),
+          ],
+          if (_revealed) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.greenSoft, borderRadius: BorderRadius.circular(10)),
+              child: Text('✨ ${g.reveal}', style: const TextStyle(fontSize: 13, height: 1.6, color: AppColors.green)),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: FilledButton(onPressed: _next, child: const Text('下一步 →'))),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -684,6 +797,20 @@ class _ReviewView extends StatelessWidget {
 }
 
 // ── 通用 ──────────────────────────────────────────────────
+
+/// 把 primary 按标点切片段，每片段挖掉中间偏后的 1 个字。
+String _blankPrimary(String primary) {
+  final parts = primary.split(RegExp(r'[，。；、,.;\s]+')).where((s) => s.isNotEmpty).toList();
+  if (parts.isEmpty) return primary;
+  final out = <String>[];
+  for (final p in parts) {
+    if (p.length <= 1) { out.add(p); continue; }
+    final idx = (p.length / 2).ceil();
+    out.add(p.substring(0, idx) + '___' + p.substring(idx + 1));
+  }
+  return out.join('，');
+}
+
 Widget _card(Widget child) => Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
