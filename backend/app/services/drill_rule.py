@@ -241,3 +241,44 @@ def extract_drill_items(db: Session | None, ocr_text: str) -> dict:
         }
     except Exception:
         return empty
+
+
+def classify_items(db: Session | None, subject: str, items: list[dict]) -> dict:
+    """AI 自动归类每个条目的类型：memorize（识记）| explore（探究）。返回 {primary: type}。
+
+    判断依据：有可发现规律/易混需辨析/可推导 → explore；纯要记住的内容 → memorize。
+    fake/无 db/无 items/异常 → 空 dict（调用方按默认处理）。
+    """
+    if db is None or not items:
+        return {}
+    from .ai import get_provider
+    provider = get_provider(db)
+    if provider.name == "fake":
+        return {}
+
+    payload = [{"primary": it.get("primary", ""), "secondary": it.get("secondary", "")}
+               for it in items if (it.get("primary") or "").strip()][:20]
+    if not payload:
+        return {}
+
+    prompt = (
+        f"下面是一组{subject}的知识点。请把每个知识点归类成两种类型之一：\n"
+        '1. "memorize"（识记型）：纯要记住的内容，如古诗原文、生字、固定短语、单词，靠背记+使用掌握；\n'
+        '2. "explore"（探究型）：有可发现的规律、易混需要辨析、可推导的概念，如修辞手法、语法规则、数学公式概念，靠观察→归类→归纳→验证掌握。\n'
+        '只返回 JSON：{"items":[{"primary":"知识点原文","type":"memorize 或 explore"}]}。\n'
+        f"知识点列表：{json.dumps(payload, ensure_ascii=False)}"
+    )
+    try:
+        raw = provider.generate(prompt=prompt, system="你是小学老师，善于判断知识点的学习类型。", json_mode=True)
+        data = json.loads(raw)
+        out = {}
+        for it in data.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            primary = (it.get("primary") or "").strip()
+            t = (it.get("type") or "").strip()
+            if primary and t in ("memorize", "explore"):
+                out[primary] = t
+        return out
+    except Exception:
+        return {}

@@ -2952,11 +2952,16 @@ async function viewDrillGroup(groupId){
   if(!g || g.error){ toast('加载详情失败'); return; }
   const el = document.getElementById('xkbModal');
   if(!el) return;
+  const typeTag = t => t==='explore'
+    ? `<span style="font-size:11px;font-weight:600;color:#3158e8;background:#edf1ff;border-radius:4px;padding:1px 6px">探究</span>`
+    : t==='memorize'
+      ? `<span style="font-size:11px;font-weight:600;color:#2e8b5a;background:#e8f7ef;border-radius:4px;padding:1px 6px">识记</span>`
+      : '';
   const rows = (g.items||[]).map((it,i)=>`
     <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #eef0ed">
       <span style="flex-shrink:0;width:24px;text-align:center;color:#8e9691;font-size:12px">${i+1}</span>
       <div style="flex:1">
-        <div style="font-size:14px;font-weight:600">${escapeHtml(it.primary||'')}</div>
+        <div style="font-size:14px;font-weight:600">${escapeHtml(it.primary||'')} ${typeTag(it.kind)}</div>
         ${it.secondary?`<div style="font-size:12px;color:#5c6761;margin-top:2px">${escapeHtml(it.secondary)}</div>`:''}
       </div>
       ${it.source_page?`<span style="flex-shrink:0;font-size:11px;color:#8e9691">第 ${it.source_page} 页</span>`:''}

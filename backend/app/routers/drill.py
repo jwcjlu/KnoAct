@@ -80,15 +80,24 @@ def create_group(req: GroupCreateReq, user: User = Depends(require_role("parent"
             item_row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
             if item_row:
                 item_row.common_mistake = json.dumps(mistakes[payload["primary"]], ensure_ascii=False)
-    # explore 类型：按 4 认知原则生成探究内容，回填到条目 explore 字段
-    if kind == "explore":
-        from ..services.drill_rule import generate_explore_items
-        explore_map = generate_explore_items(db, items_payload)
-        for payload in items_payload:
-            if payload["primary"] in explore_map:
-                item_row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
-                if item_row:
-                    item_row.explore = json.dumps(explore_map[payload["primary"]], ensure_ascii=False)
+    # AI 自动归类条目类型（识记 memorize / 探究 explore），写进条目 kind
+    from ..services.drill_rule import classify_items
+    type_map = classify_items(db, subject, items_payload)
+    for payload in items_payload:
+        t = type_map.get(payload["primary"])
+        if t in ("memorize", "explore"):
+            item_row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
+            if item_row:
+                item_row.kind = t
+    # 归类为 explore 的条目：按 4 认知原则生成探究内容，回填 explore 字段
+    from ..services.drill_rule import generate_explore_items
+    explore_payload = [p for p in items_payload if type_map.get(p["primary"]) == "explore"]
+    explore_map = generate_explore_items(db, explore_payload)
+    for payload in explore_payload:
+        if payload["primary"] in explore_map:
+            item_row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
+            if item_row:
+                item_row.explore = json.dumps(explore_map[payload["primary"]], ensure_ascii=False)
     # 发布前 AI 预检（提示式，不阻断）
     from ..services.drill_review import review_group_items
     g.ai_review = json.dumps(review_group_items(db, subject, kind, items_payload), ensure_ascii=False)
