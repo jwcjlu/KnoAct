@@ -60,6 +60,14 @@ class _IntroView extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         if (session != null) _RouteCard(steps: session.steps),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: () => ctl.startSteps(),
+            child: const Text('开始闯关 →'),
+          ),
+        ),
       ],
     );
   }
@@ -342,10 +350,15 @@ class _StepBodyState extends State<_StepBody> {
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
-            child: FilledButton(
-              onPressed: widget.s.busy ? null : () => _onSubmit(item),
-              child: Text(widget.s.busy ? '正在判分…' : '提交'),
-            ),
+            child: widget.s.answered
+                ? FilledButton(
+                    onPressed: () => widget.ctl.nextItem(),
+                    child: const Text('下一步 →'),
+                  )
+                : FilledButton(
+                    onPressed: widget.s.busy ? null : () => _onSubmit(item),
+                    child: Text(widget.s.busy ? '正在判分…' : '提交'),
+                  ),
           ),
         ],
       ),
@@ -408,17 +421,19 @@ class _RuleCard extends StatelessWidget {
               child: Text('✨ ${rule.reveal}',
                   style: const TextStyle(fontSize: 13, height: 1.6, color: AppColors.green)),
             ),
-          if (!reveal)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () => ctl.revealRuleNow(),
-                  child: const Text('揭晓规律'),
-                ),
-              ),
-            ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: reveal
+                ? FilledButton(
+                    onPressed: () => ctl.nextItem(),
+                    child: const Text('下一步 →'),
+                  )
+                : OutlinedButton(
+                    onPressed: () => ctl.revealRuleNow(),
+                    child: const Text('揭晓规律'),
+                  ),
+          ),
         ],
       ),
     );

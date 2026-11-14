@@ -28,6 +28,7 @@ class DrillState {
     this.stars = 0,
     this.completed = false,
     this.revealRule = false,
+    this.answered = false,
   });
 
   final int? taskId;
@@ -41,6 +42,7 @@ class DrillState {
   final int stars;
   final bool completed;
   final bool revealRule; // 规律引导是否已揭晓
+  final bool answered; // 当前题是否已答（答了显示「下一步」）
 
   DrillState copyWith({
     int? taskId,
@@ -54,6 +56,7 @@ class DrillState {
     int? stars,
     bool? completed,
     bool? revealRule,
+    bool? answered,
   }) =>
       DrillState(
         taskId: taskId ?? this.taskId,
@@ -67,6 +70,7 @@ class DrillState {
         stars: stars ?? this.stars,
         completed: completed ?? this.completed,
         revealRule: revealRule ?? this.revealRule,
+        answered: answered ?? this.answered,
       );
 }
 
@@ -106,9 +110,9 @@ class DrillController extends Notifier<DrillState> {
     if (s == null) return;
     final items = _currentItems(s);
     if (state.itemIndex + 1 < items.length) {
-      state = state.copyWith(itemIndex: state.itemIndex + 1);
+      state = state.copyWith(itemIndex: state.itemIndex + 1, answered: false, npc: null);
     } else if (state.stepIndex + 1 < s.steps.length) {
-      state = state.copyWith(stepIndex: state.stepIndex + 1, itemIndex: 0);
+      state = state.copyWith(stepIndex: state.stepIndex + 1, itemIndex: 0, answered: false, npc: null);
     } else {
       state = state.copyWith(phase: DrillPhase.review);
     }
@@ -138,11 +142,13 @@ class DrillController extends Notifier<DrillState> {
       if (correct) {
         state = state.copyWith(
           busy: false,
+          answered: true,
           npc: NpcMessage('✨', '太棒了，答对啦！'),
         );
       } else if (r['reveal_answer'] == true) {
         state = state.copyWith(
           busy: false,
+          answered: true,
           npc: NpcMessage('💡', '没关系，答案是「${r['expected'] ?? ''}」，记牢它！'),
         );
       } else {
@@ -171,6 +177,7 @@ class DrillController extends Notifier<DrillState> {
       final pass = r['pass'] == true;
       state = state.copyWith(
         busy: false,
+        answered: true,
         npc: pass
             ? const NpcMessage('✨', '搭配正确，用得好！')
             : NpcMessage('💡', '${r['feedback'] ?? '再试试把短语用进完整句子里'}'),
