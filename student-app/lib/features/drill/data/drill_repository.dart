@@ -169,6 +169,45 @@ DrillSession? parseDrillContent(String content) {
   }
 }
 
+/// 执行计划的一步：step 名 + 绑定的条目（null = 组级规律卡）。
+class PlanStep {
+  const PlanStep(this.step, this.itemId);
+  final String step;
+  final int? itemId;
+}
+
+/// 按条目类型生成执行序列：先识记段（认→每条目用+测），后探究段（观察→每条目归类/归纳/陷阱）。
+List<PlanStep> buildPlan(DrillSession session) {
+  final plan = <PlanStep>[];
+  final memorize = session.items.where((it) => it.type != 'explore').toList();
+  final explore = session.items.where((it) => it.type == 'explore').toList();
+
+  if (memorize.isNotEmpty) {
+    plan.add(const PlanStep('recognize', null));
+    for (final item in memorize) {
+      plan.add(PlanStep('produce', item.id));
+      plan.add(PlanStep('quiz', item.id));
+    }
+  }
+
+  if (explore.isNotEmpty) {
+    plan.add(const PlanStep('observe', null));
+    for (final item in explore) {
+      plan.add(PlanStep('classify', item.id));
+      plan.add(PlanStep('formula', item.id));
+      plan.add(PlanStep('trap', item.id));
+    }
+  }
+
+  // 兜底：没有任何条目时，退回旧组级 steps
+  if (plan.isEmpty && session.items.isEmpty && session.steps.isNotEmpty) {
+    for (final s in session.steps) {
+      plan.add(PlanStep(s, null));
+    }
+  }
+  return plan;
+}
+
 class DrillRepository {
   DrillRepository(this._api);
   final ApiClient _api;

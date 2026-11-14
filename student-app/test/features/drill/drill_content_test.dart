@@ -55,4 +55,51 @@ void main() {
       expect(s!.steps, ['observe', 'classify', 'formula', 'trap']);
     });
   });
+
+  group('buildPlan', () {
+    DrillSession makeSession(List<Map<String, dynamic>> items) {
+      return DrillSession(
+        groupId: 1,
+        kind: 'explore',
+        steps: const ['observe', 'classify', 'formula', 'trap'],
+        intro: const DrillIntro(),
+        groupRule: const DrillRule(),
+        items: items.map((e) => DrillItem.fromJson(e)).toList(),
+        reviewItems: const [],
+        quiz: const [],
+      );
+    }
+
+    test('识记条目走 认→用→测，探究条目走 观察→归类→归纳→陷阱', () {
+      final s = makeSession([
+        {'id': 1, 'primary': '古诗', 'type': 'memorize'},
+        {'id': 2, 'primary': '比喻', 'type': 'explore'},
+      ]);
+      final plan = buildPlan(s);
+      final steps = plan.map((p) => p.step).toList();
+      expect(steps, ['recognize', 'produce', 'quiz', 'observe', 'classify', 'formula', 'trap']);
+      expect(plan[0].itemId, isNull); // recognize 组级
+      expect(plan[1].itemId, 1);       // produce 绑定条目1
+      expect(plan[4].itemId, 2);       // classify 绑定条目2
+    });
+
+    test('纯识记组：无探究段', () {
+      final s = makeSession([
+        {'id': 1, 'primary': 'a', 'type': 'memorize'},
+        {'id': 2, 'primary': 'b', 'type': 'memorize'},
+      ]);
+      final plan = buildPlan(s);
+      expect(plan.map((p) => p.step).toList(),
+          ['recognize', 'produce', 'quiz', 'produce', 'quiz']);
+    });
+
+    test('纯探究组：无识记段', () {
+      final s = makeSession([
+        {'id': 1, 'primary': '周长', 'type': 'explore'},
+      ]);
+      final plan = buildPlan(s);
+      expect(plan.map((p) => p.step).toList(),
+          ['observe', 'classify', 'formula', 'trap']);
+    });
+  });
 }

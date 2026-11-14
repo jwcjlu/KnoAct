@@ -23,6 +23,8 @@ class DrillState {
     this.phase = DrillPhase.intro,
     this.stepIndex = 0,
     this.itemIndex = 0,
+    this.plan = const [],
+    this.planIndex = 0,
     this.npc,
     this.busy = false,
     this.stars = 0,
@@ -36,8 +38,10 @@ class DrillState {
   final String title;
   final DrillSession? session;
   final DrillPhase phase;
-  final int stepIndex; // 当前步在 steps 里的下标
-  final int itemIndex; // 当前条目下标
+  final int stepIndex; // 兼容旧字段（deprecated，用 planIndex）
+  final int itemIndex; // 兼容旧字段（deprecated）
+  final List<PlanStep> plan; // 执行序列
+  final int planIndex; // 当前执行到 plan 的下标
   final NpcMessage? npc; // 当前气泡（null 不显示）
   final bool busy;
   final int stars;
@@ -53,6 +57,8 @@ class DrillState {
     DrillPhase? phase,
     int? stepIndex,
     int? itemIndex,
+    List<PlanStep>? plan,
+    int? planIndex,
     NpcMessage? npc,
     bool? busy,
     int? stars,
@@ -68,6 +74,8 @@ class DrillState {
         phase: phase ?? this.phase,
         stepIndex: stepIndex ?? this.stepIndex,
         itemIndex: itemIndex ?? this.itemIndex,
+        plan: plan ?? this.plan,
+        planIndex: planIndex ?? this.planIndex,
         npc: npc ?? this.npc,
         busy: busy ?? this.busy,
         stars: stars ?? this.stars,
@@ -94,13 +102,14 @@ class DrillController extends Notifier<DrillState> {
       title: title,
       session: session,
       phase: DrillPhase.intro,
+      plan: session == null ? const [] : buildPlan(session),
       npc: const NpcMessage('🔮', '准备好了吗？我们开始闯关吧！'),
     );
   }
 
   /// 进入四步。
   void startSteps() {
-    state = state.copyWith(phase: DrillPhase.steps, stepIndex: 0, itemIndex: 0);
+    state = state.copyWith(phase: DrillPhase.steps, planIndex: 0);
   }
 
   /// 揭示规律（观察→揭晓）。
@@ -108,31 +117,31 @@ class DrillController extends Notifier<DrillState> {
     state = state.copyWith(revealRule: true);
   }
 
-  /// 下一步：按当前步的条目池推进（快测用 quiz，规律卡无循环，其余用 items）。
-  Future<void> nextItem() async {
+  /// 当前执行计划步（plan[planIndex]）。
+  PlanStep? get _currentPlanStep {
+    if (state.plan.isEmpty) return null;
+    final i = state.planIndex.clamp(0, state.plan.length - 1);
+    return state.plan[i];
+  }
+
+  /// 当前条目（根据 plan 步绑定的 itemId 找）。
+  DrillItem? get currentItem {
     final s = state.session;
-    if (s == null) return;
-    final step = _currentStepName;
-    // 规律卡/结构卡/观察：无条目循环，直接进下一步
-    if (step == 'recognize' || step == 'structure' || step == 'observe') {
-      if (state.stepIndex + 1 < s.steps.length) {
-        state = state.copyWith(stepIndex: state.stepIndex + 1, itemIndex: 0, answered: false, npc: null);
-      } else {
-        await complete(results: state.results);
-      }
-      return;
+    final ps = _currentPlanStep;
+    if (s == null || ps == null || ps.itemId == null) return null;
+    for (final it in [...s.items, ...s.reviewItems]) {
+      if (it.id == ps.itemId) return it;
     }
-    // 快测步：按 quiz 数量推进
-    final isQuiz = step == 'quiz';
-    final count = isQuiz ? s.quiz.length : s.items.length;
-    if (count == 0) {
-      await complete(results: state.results);
-      return;
-    }
-    if (state.itemIndex + 1 < count) {
-      state = state.copyWith(itemIndex: state.itemIndex + 1, answered: false, npc: null);
-    } else if (state.stepIndex + 1 < s.steps.length) {
-      state = state.copyWith(stepIndex: state.stepIndex + 1, itemIndex: 0, answered: false, npc: null);
+    return null;
+  }
+
+  String get _currentStepName => _currentPlanStep?.step ?? 'recognize';
+
+  /// 下一步：plan 下标 +1，到头调 complete。
+  Future<void> nextItem() async {
+    if (state.plan.isEmpty) return;
+    if (state.planIndex + 1 < state.plan.length) {
+      state = state.copyWith(planIndex: state.planIndex + 1, answered: false, npc: null, revealRule: false);
     } else {
       await complete(results: state.results);
     }
@@ -236,13 +245,6 @@ class DrillController extends Notifier<DrillState> {
     } catch (_) {
       state = state.copyWith(busy: false, npc: const NpcMessage('💡', '提交失败，再试一次吧'));
     }
-  }
-
-  String get _currentStepName {
-    final s = state.session;
-    if (s == null || s.steps.isEmpty) return 'recall';
-    final i = state.stepIndex.clamp(0, s.steps.length - 1);
-    return s.steps[i];
   }
 }
 

@@ -144,7 +144,7 @@ class _StepsView extends StatelessWidget {
     }
     return Column(
       children: [
-        _ProgressBar(steps: session.steps, current: s.stepIndex),
+        _ProgressBar(plan: s.plan, current: s.planIndex),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.all(20),
@@ -163,8 +163,8 @@ class _StepsView extends StatelessWidget {
 }
 
 class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.steps, required this.current});
-  final List<String> steps;
+  const _ProgressBar({required this.plan, required this.current});
+  final List<PlanStep> plan;
   final int current;
 
   static const _labels = {
@@ -175,39 +175,34 @@ class _ProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final total = plan.length;
+    final cur = current.clamp(0, total > 0 ? total - 1 : 0);
+    final label = total > 0 ? (_labels[plan[cur].step] ?? plan[cur].step) : '';
+    final progress = total > 0 ? (cur + 1) / total : 0.0;
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var i = 0; i < steps.length; i++) ...[
-            if (i > 0) const Expanded(child: SizedBox()),
-            Column(
-              children: [
-                CircleAvatar(
-                  radius: 13,
-                  backgroundColor: i < current
-                      ? AppColors.green
-                      : i == current
-                          ? AppColors.blue
-                          : const Color(0xFFECEFEA),
-                  child: Text('${i + 1}',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: i <= current ? Colors.white : AppColors.gray)),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  _labels[steps[i]] ?? steps[i],
-                  style: TextStyle(
-                      fontSize: 10.5,
-                      color: i == current ? AppColors.blue : AppColors.gray,
-                      fontWeight: i == current ? FontWeight.w700 : FontWeight.w400),
-                ),
-              ],
+          Row(
+            children: [
+              Text('第 ${cur + 1} / $total 步 · $label',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.blue)),
+              const Spacer(),
+              Text('${(progress * 100).round()}%',
+                  style: const TextStyle(fontSize: 12, color: AppColors.gray)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              backgroundColor: const Color(0xFFECEFEA),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -237,8 +232,9 @@ class _StepBodyState extends State<_StepBody> {
     final s = widget.s;
     final ctl = widget.ctl;
     final session = s.session!;
-    final step = session.steps[s.stepIndex];
-    final item = session.items.isNotEmpty ? session.items[s.itemIndex.clamp(0, session.items.length - 1)] : null;
+    final ps = s.plan.isEmpty ? null : s.plan[s.planIndex.clamp(0, s.plan.length - 1)];
+    final step = ps?.step ?? 'recognize';
+    final item = ctl.currentItem;
 
     switch (step) {
       case 'recognize':
@@ -255,7 +251,7 @@ class _StepBodyState extends State<_StepBody> {
         return _itemCard(
           context,
           item,
-          title: '第 ${s.itemIndex + 1} 题',
+          title: '第 ${s.planIndex + 1} 步',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -278,7 +274,7 @@ class _StepBodyState extends State<_StepBody> {
         return _itemCard(
           context,
           item,
-          title: '造句 · 第 ${s.itemIndex + 1} 题',
+          title: '造句 · 第 ${s.planIndex + 1} 步',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -298,15 +294,35 @@ class _StepBodyState extends State<_StepBody> {
           ),
         );
       case 'quiz':
-        final quiz = session.quiz;
+        final quiz = session.quiz.where((q) => q.itemId == item?.id).toList();
         if (quiz.isEmpty) {
-          return const Center(child: Text('本步无题目', style: TextStyle(color: AppColors.gray)));
+          return _itemCard(
+            context,
+            item,
+            title: '快测 · 第 ${s.planIndex + 1} 步',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (item != null)
+                  Text('补全：${item.primary}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _answer,
+                  decoration: const InputDecoration(
+                    hintText: '写下答案…',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          );
         }
-        final q = quiz[s.itemIndex.clamp(0, quiz.length - 1)];
+        final q = quiz.first;
         return _itemCard(
           context,
-          null,
-          title: '快测 · 第 ${s.itemIndex + 1}/${quiz.length} 题',
+          item,
+          title: '快测 · 第 ${s.planIndex + 1} 步',
           badge: q.qtype == 'spot_error' ? '🔍 找茬' : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,17 +383,12 @@ class _StepBodyState extends State<_StepBody> {
   }
 
   Future<void> _onSubmit(DrillItem? item) {
-    final session = widget.s.session!;
-    final step = session.steps[widget.s.stepIndex];
+    final s = widget.s;
+    final ps = s.plan.isEmpty ? null : s.plan[s.planIndex.clamp(0, s.plan.length - 1)];
+    final step = ps?.step ?? 'recognize';
     final answer = _answer.text.trim();
     if (answer.isEmpty) return Future.value();
-    // 快测步的 item_id 在 quiz 里，其余步在 item 里
-    final int itemId;
-    if (step == 'quiz') {
-      itemId = session.quiz.isEmpty ? 0 : session.quiz[widget.s.itemIndex.clamp(0, session.quiz.length - 1)].itemId;
-    } else {
-      itemId = item?.id ?? 0;
-    }
+    final itemId = item?.id ?? 0;
     if (step == 'produce' || step == 'apply') {
       return widget.ctl.submitSentence(itemId: itemId, sentence: answer);
     }
