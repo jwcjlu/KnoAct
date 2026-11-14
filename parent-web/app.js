@@ -2819,10 +2819,11 @@ function renderDrillTab(){
            ${g.ai_review.map(r=>`<div>⚠️ 「${escapeHtml(r.primary||'')}」：${escapeHtml(r.issue||'')} → 建议：${escapeHtml(r.suggestion||'')}</div>`).join('')}
          </div>`
       : '';
-    const actions = g.audit_status==='approved'
+    const actions = `<button class="btn-ghost" style="padding:6px 14px;font-size:12px" onclick="viewDrillGroup(${g.id})">查看详情</button>` +
+      (g.audit_status==='approved'
       ? `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="assignDrillTask(${g.id})">布置给孩子</button>`
       : `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="auditDrillGroup(${g.id},'通过')">通过</button>
-         <button class="btn-ghost" style="padding:6px 14px;font-size:12px" onclick="auditDrillGroup(${g.id},'拒绝')">拒绝</button>`;
+         <button class="btn-ghost" style="padding:6px 14px;font-size:12px" onclick="auditDrillGroup(${g.id},'拒绝')">拒绝</button>`);
     return `<div class="goal-item" style="margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div style="flex:1">
@@ -2944,6 +2945,39 @@ async function assignDrillTask(groupId){
   if(r && r.task_id){ toast('已布置给孩子'); }
   else if(r && r.error){ toast(apiErrorMsg(r, '布置失败')); }
   else{ toast('布置失败'); }
+}
+
+async function viewDrillGroup(groupId){
+  const g = await api(`/api/drill/groups/${groupId}`);
+  if(!g || g.error){ toast('加载详情失败'); return; }
+  const el = document.getElementById('xkbModal');
+  if(!el) return;
+  const rows = (g.items||[]).map((it,i)=>`
+    <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #eef0ed">
+      <span style="flex-shrink:0;width:24px;text-align:center;color:#8e9691;font-size:12px">${i+1}</span>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:600">${escapeHtml(it.primary||'')}</div>
+        ${it.secondary?`<div style="font-size:12px;color:#5c6761;margin-top:2px">${escapeHtml(it.secondary)}</div>`:''}
+      </div>
+      ${it.source_page?`<span style="flex-shrink:0;font-size:11px;color:#8e9691">第 ${it.source_page} 页</span>`:''}
+    </div>`).join('');
+  el.style.display = 'flex';
+  el.innerHTML = `<div class="xkb-panel" role="dialog" style="max-width:520px">
+    <div class="hd">
+      <h4>${escapeHtml(g.title||'专项详情')}</h4>
+      <p>${g.subject||''} · ${g.items?g.items.length:0} 条 · 审核前请核对条目是否准确</p>
+    </div>
+    <div class="bd" style="max-height:60vh;overflow-y:auto">
+      ${rows || '<div style="padding:16px;color:#8e9691;font-size:13px">暂无条目</div>'}
+    </div>
+    <div class="ft" style="padding:12px 16px;text-align:right">
+      <button class="btn-ghost" onclick="closeDrillDetail()">关闭</button>
+    </div>
+  </div>`;
+}
+function closeDrillDetail(){
+  const el = document.getElementById('xkbModal');
+  if(el){ el.style.display = 'none'; el.innerHTML = ''; }
 }
 
 init();

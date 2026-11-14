@@ -370,10 +370,17 @@ class _StepBodyState extends State<_StepBody> {
     final step = session.steps[widget.s.stepIndex];
     final answer = _answer.text.trim();
     if (answer.isEmpty) return Future.value();
-    if (step == 'produce' || step == 'apply') {
-      return widget.ctl.submitSentence(itemId: item?.id ?? 0, sentence: answer);
+    // 快测步的 item_id 在 quiz 里，其余步在 item 里
+    final int itemId;
+    if (step == 'quiz') {
+      itemId = session.quiz.isEmpty ? 0 : session.quiz[widget.s.itemIndex.clamp(0, session.quiz.length - 1)].itemId;
+    } else {
+      itemId = item?.id ?? 0;
     }
-    return widget.ctl.submitStep(itemId: item?.id ?? 0, answer: answer, requestHint: false);
+    if (step == 'produce' || step == 'apply') {
+      return widget.ctl.submitSentence(itemId: itemId, sentence: answer);
+    }
+    return widget.ctl.submitStep(itemId: itemId, answer: answer, requestHint: false);
   }
 }
 

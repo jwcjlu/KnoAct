@@ -108,23 +108,34 @@ class DrillController extends Notifier<DrillState> {
     state = state.copyWith(revealRule: true);
   }
 
-  /// 下一步：条目内推进或步间推进；最后一步调 complete 拿真实星级。
+  /// 下一步：按当前步的条目池推进（快测用 quiz，规律卡无循环，其余用 items）。
   Future<void> nextItem() async {
     final s = state.session;
     if (s == null) return;
-    final items = _currentItems(s);
-    if (state.itemIndex + 1 < items.length) {
+    final step = _currentStepName;
+    // 规律卡/结构卡/观察：无条目循环，直接进下一步
+    if (step == 'recognize' || step == 'structure' || step == 'observe') {
+      if (state.stepIndex + 1 < s.steps.length) {
+        state = state.copyWith(stepIndex: state.stepIndex + 1, itemIndex: 0, answered: false, npc: null);
+      } else {
+        await complete(results: state.results);
+      }
+      return;
+    }
+    // 快测步：按 quiz 数量推进
+    final isQuiz = step == 'quiz';
+    final count = isQuiz ? s.quiz.length : s.items.length;
+    if (count == 0) {
+      await complete(results: state.results);
+      return;
+    }
+    if (state.itemIndex + 1 < count) {
       state = state.copyWith(itemIndex: state.itemIndex + 1, answered: false, npc: null);
     } else if (state.stepIndex + 1 < s.steps.length) {
       state = state.copyWith(stepIndex: state.stepIndex + 1, itemIndex: 0, answered: false, npc: null);
     } else {
       await complete(results: state.results);
     }
-  }
-
-  List<DrillItem> _currentItems(DrillSession s) {
-    // 各步使用的条目池：认/记/用走 items；快测走 quiz（fallback items）
-    return s.items.isNotEmpty ? s.items : s.reviewItems;
   }
 
   /// 提交「记/测」作答。
@@ -142,7 +153,7 @@ class DrillController extends Notifier<DrillState> {
             requestHint: requestHint,
           );
       final correct = r['correct'] == true;
-      final hint = '${r['hint'] ?? ''}';
+      final expected = '${r['expected'] ?? ''}';
       final results = {...state.results, '$itemId': correct};
       if (correct) {
         state = state.copyWith(
@@ -156,12 +167,15 @@ class DrillController extends Notifier<DrillState> {
           busy: false,
           answered: true,
           results: results,
-          npc: NpcMessage('💡', '没关系，答案是「${r['expected'] ?? ''}」，记牢它！'),
+          npc: NpcMessage('💡', '没关系，正确答案是「$expected」，记牢它！'),
         );
       } else {
+        // 答错：给正确答案 + 置 answered 让「下一步」出现，避免卡死
         state = state.copyWith(
           busy: false,
-          npc: NpcMessage('💡', '哎呀，掉进陷阱啦！再想想${hint.isNotEmpty ? '：$hint' : ''}'),
+          answered: true,
+          results: results,
+          npc: NpcMessage('💡', '正确答案是「$expected」，记牢它再试试下一步吧！'),
         );
       }
     } catch (_) {

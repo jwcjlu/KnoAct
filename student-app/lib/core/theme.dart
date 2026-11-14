@@ -21,6 +21,9 @@ ThemeData buildTheme() {
     colorScheme: scheme,
     scaffoldBackgroundColor: AppColors.bg,
     useMaterial3: true,
+    // 中文字体回退：web 端默认 Roboto 不含中文字形，导致中文显示成方块；
+    // 用系统字体回退保证中文正常显示（macOS 苹方 / Windows 微软雅黑 / 通用 Noto）
+    fontFamilyFallback: const ['Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
     cardTheme: const CardThemeData(
       color: Colors.white,
       elevation: 0,
