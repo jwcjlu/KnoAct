@@ -44,7 +44,7 @@ function icon(name, size=18){
 // ===== 通用状态 =====
 const PARENT_TABS = [
   ['教材','book'],['知识点','brain'],['题库管理','grid'],['题目审核台','list'],['目标','star'],['报告','chart'],
-  ['任务','pen'],['规则','gift'],['学习配置','grid'],['屏幕时间','clock'],['设置','menu'],
+  ['任务','pen'],['专项训练','sparkles'],['规则','gift'],['学习配置','grid'],['屏幕时间','clock'],['设置','menu'],
   ['孩子管理','star']
 ];
 const CHILD_TABS = ['目标','报告','任务','屏幕时间'];   // 依赖当前孩子（uid）的 Tab
@@ -98,6 +98,10 @@ const MS_TTS_VOICES = {
 // 家长端任务审核
 let parentTaskDate = '';   // 家长端任务查看的日期（默认今天）
 let parentTasks = [];      // 当天全部任务（含待审核）
+
+// 专项训练
+let drillGroups = [];      // [{id, subject, title, source, kind, audit_status, item_count, ai_review}]
+let drillTab = null;       // null | 'create'
 
 // 屏幕时间
 let screenGroups = [];     // [{id,name,kind,daily_limit_seconds}]
@@ -400,6 +404,7 @@ function setParentTab(t){
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
+  if(t==='专项训练'){ loadDrillGroups().then(()=>render()); return; }
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
   if(t==='学习配置'){ loadConfig().then(()=>loadLearningPreferences()).then(()=>render()); return; }
   if(t==='设置'){ loadConfig().then(()=>render()); return; }
@@ -1310,7 +1315,7 @@ async function loadParentTasks(){
 const TASK_TYPE_LABEL = {
   dictation:'听写', knowledge:'基础练习', review:'复习',
   reading:'阅读理解', listening:'听力理解', custom:'自由任务', math:'数学练习',
-  practice:'题库练习',
+  practice:'题库练习', drill:'专项训练',
 };
 function parseMathTaskContent(raw){
   const s = (raw || '').trim();
@@ -1600,6 +1605,7 @@ function renderParent(){
   else if(parentTab==='目标') body = renderGoalsTab();
   else if(parentTab==='报告') body = renderReportTab();
   else if(parentTab==='任务') body = renderTaskTab();
+  else if(parentTab==='专项训练') body = renderDrillTab();
   else if(parentTab==='规则') body = renderRulesTab();
   else if(parentTab==='学习配置') body = renderLearningConfigTab();
   else if(parentTab==='屏幕时间') body = renderScreenTab();
@@ -2791,6 +2797,153 @@ async function init(){
   if(!Array.isArray(pdfDocs)) pdfDocs = [];
   try{ await reloadChildData(); }catch(e){}
   render();
+}
+
+// ===== 专项训练 =====
+const DRILL_KIND_LABEL = {phrase:'短语', outline:'归纳', explore:'探究'};
+const DRILL_AUDIT_LABEL = {pending:'待审核', approved:'已通过', rejected:'已拒绝'};
+
+async function loadDrillGroups(){
+  drillGroups = await api('/api/drill/groups');
+  if(!Array.isArray(drillGroups)) drillGroups = [];
+}
+
+function renderDrillTab(){
+  if(drillTab==='create') return renderDrillCreate();
+  const rows = drillGroups.map(g=>{
+    const kind = DRILL_KIND_LABEL[g.kind] || g.kind || '-';
+    const audit = DRILL_AUDIT_LABEL[g.audit_status] || g.audit_status;
+    const auditColor = g.audit_status==='approved' ? '#2e8b5a' : g.audit_status==='rejected' ? '#d64545' : '#dc872d';
+    const reviewHtml = (g.ai_review && g.ai_review.length)
+      ? `<div style="margin-top:8px;font-size:12px;color:#b0791f;background:#fff7e6;border-radius:8px;padding:8px 10px">
+           ${g.ai_review.map(r=>`<div>⚠️ 「${escapeHtml(r.primary||'')}」：${escapeHtml(r.issue||'')} → 建议：${escapeHtml(r.suggestion||'')}</div>`).join('')}
+         </div>`
+      : '';
+    const actions = g.audit_status==='approved'
+      ? `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="assignDrillTask(${g.id})">布置给孩子</button>`
+      : `<button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="auditDrillGroup(${g.id},'通过')">通过</button>
+         <button class="btn-ghost" style="padding:6px 14px;font-size:12px" onclick="auditDrillGroup(${g.id},'拒绝')">拒绝</button>`;
+    return `<div class="goal-item" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">${escapeHtml(g.title||'未命名专项')}</div>
+          <div style="font-size:12px;color:#778079;margin-top:4px">${g.subject||''} · ${kind} · ${g.item_count} 条 · <span style="color:${auditColor};font-weight:600">${audit}</span> · 间隔 ${g.mastery_interval_days} 天</div>
+          ${reviewHtml}
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;margin-left:12px">${actions}</div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="parent-grid">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>专项训练</h3><div class="sub">识记型内容（短语/古诗/概念）闯关 + 间隔复习，练到真掌握</div></div>
+        <button class="btn-primary" style="margin-left:auto;padding:8px 16px" onclick="drillTab='create';render()">新建专项</button>
+      </div>
+      <div class="bd">
+        ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无专项，点击「新建专项」录入识记内容</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDrillCreate(){
+  return `<div class="parent-grid">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>新建专项训练</h3><div class="sub">上传讲义 PDF 自动识别，或手动录入识记条目</div></div></div>
+      <div class="bd">
+        <div style="background:#f2f4f1;border-radius:12px;padding:14px 16px;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:600;color:#5c6761;margin-bottom:8px">📄 上传讲义 PDF（自动 OCR 识别知识点）</div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <span style="font-size:13px;color:#778079">学科：</span>
+            <select id="drillPdfSubject" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px"><option>语文</option><option>英语</option><option>数学</option></select>
+            <span style="font-size:13px;color:#778079">讲义类型：</span>
+            <select id="drillPdfKind" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px"><option value="outline">归纳（古诗/生字/知识点）</option><option value="phrase">短语（英语固定搭配）</option><option value="explore">探究（数学概念）</option></select>
+            <input type="file" id="drillPdfFile" accept="application/pdf" style="display:none" onchange="uploadDrillPdf(this)">
+            <button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="document.getElementById('drillPdfFile').click()">选择 PDF 上传</button>
+          </div>
+        </div>
+        <div style="font-size:13px;color:#778079;margin-bottom:6px;margin-top:16px">或手动录入条目（每行一条，格式：<b>原文|释义</b>，释义可空由 AI 补）：</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+          <div><span style="font-size:13px;color:#778079">学科：</span>
+            <select id="drillSubject" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px"><option>语文</option><option>英语</option><option>数学</option></select></div>
+          <div><span style="font-size:13px;color:#778079">标题：</span>
+            <input id="drillTitle" placeholder="如 必背古诗 20 首" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px;width:240px"></div>
+          <div><span style="font-size:13px;color:#778079">间隔天数：</span>
+            <input id="drillInterval" type="number" value="15" min="1" style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px;width:80px"></div>
+        </div>
+        <textarea id="drillItems" rows="6" style="width:100%;border:1px solid var(--line3);border-radius:10px;padding:10px 12px;font-size:13px;font-family:inherit" placeholder="床前明月光|李白《静夜思》&#10;look after|照顾"></textarea>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn-primary" onclick="createDrillGroup()">创建（待审核）</button>
+          <button class="btn-ghost" onclick="drillTab=null;render()">返回列表</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function uploadDrillPdf(input){
+  const file = input.files[0];
+  if(!file){ return; }
+  const subject = document.getElementById('drillPdfSubject').value;
+  const kind = document.getElementById('drillPdfKind').value;
+  const fd = new FormData();
+  fd.append('subject', subject);
+  fd.append('handout_kind', kind);
+  fd.append('file', file);
+  toast('正在识别讲义…（OCR 逐页提取，需一点时间）');
+  const r = await apiForm('/api/drill/pdf-groups', fd);
+  if(r && r.group_id){
+    toast(`识别完成，提取 ${r.items_count} 条，待审核`);
+    drillTab = null;
+    await loadDrillGroups();
+    render();
+  }else{
+    toast(apiErrorMsg(r, '识别失败，请换清晰 PDF 或手动录入'));
+  }
+}
+
+async function createDrillGroup(){
+  const subject = document.getElementById('drillSubject').value;
+  const title = document.getElementById('drillTitle').value.trim();
+  const interval = Number(document.getElementById('drillInterval').value) || 15;
+  const lines = document.getElementById('drillItems').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!title){ toast('请填写标题'); return; }
+  if(!lines.length){ toast('请至少录入一条条目'); return; }
+  const items = lines.map(line=>{
+    const [primary, secondary=''] = line.split('|').map(s=>s.trim());
+    return {kind:'drill_item', primary: primary||'', secondary: secondary||''};
+  }).filter(it=>it.primary);
+  if(!items.length){ toast('条目格式有误：每行「原文|释义」'); return; }
+  const r = await api('/api/drill/groups', {method:'POST', body:{
+    source:'custom', subject, title, kind:'',  // kind 空 = 按学科推断
+    mastery_interval_days: interval, items,
+  }});
+  if(r && r.group_id){
+    toast('专项已创建，待审核');
+    drillTab = null;
+    await loadDrillGroups();
+    render();
+  }else{
+    toast(apiErrorMsg(r, '创建失败'));
+  }
+}
+
+async function auditDrillGroup(groupId, action){
+  const fd = new FormData();
+  fd.append('action', action);
+  await apiForm(`/api/drill/groups/${groupId}/audit`, fd);
+  toast(action==='通过'?'已审核通过':'已驳回');
+  await loadDrillGroups();
+  render();
+}
+
+async function assignDrillTask(groupId){
+  if(!uid){ toast('请先选择孩子'); return; }
+  const today = new Date().toISOString().slice(0,10);
+  const r = await api('/api/drill/tasks', {method:'POST', body:{group_id: groupId, user_id: uid, date: today}});
+  if(r && r.task_id){ toast('已布置给孩子'); }
+  else if(r && r.error){ toast(apiErrorMsg(r, '布置失败')); }
+  else{ toast('布置失败'); }
 }
 
 init();

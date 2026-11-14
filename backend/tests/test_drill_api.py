@@ -106,3 +106,15 @@ def test_drill_complete_hint_blocks_interval_upgrade(client, db):
     assert m is not None
     assert m.interval == 1
     assert m.last_hinted is True
+
+
+def test_list_groups(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    _make_group(client, parent_h)
+    r = client.get("/api/drill/groups", headers=parent_h)
+    assert r.status_code == 200
+    groups = r.json()
+    assert isinstance(groups, list)
+    assert len(groups) >= 1
+    assert "item_count" in groups[0]
+    assert "audit_status" in groups[0]

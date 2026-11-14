@@ -67,6 +67,56 @@ def infer_kind(subject: str, explicit_kind: str) -> str:
     }.get((subject or "").strip(), "outline")
 
 
+def extract_items_from_pages(db: Session | None, kind: str, pages: list[dict]) -> list[dict]:
+    """从「讲义 PDF 逐页 OCR 文字」提取识记条目（带页码对照）。返回 [{primary, secondary, source_page}]。
+
+    kind 提示 LLM 按类型提取：phrase（短语）/ outline（归纳点）/ explore（概念）。
+    fake/无 db/空 pages/异常 → 空列表。
+    """
+    if db is None or not pages:
+        return []
+    from .ai import get_provider
+    provider = get_provider(db)
+    if provider.name == "fake":
+        return []
+
+    kind_desc = {
+        "phrase": "英语短语/固定搭配，每条一个短语，primary 为英文原文，secondary 为中文释义",
+        "outline": "知识点/古诗/生字，每条一个识记单元，primary 为原文，secondary 为释义或作者",
+        "explore": "数学概念/公式，每条一个概念，primary 为概念名，secondary 为解释",
+    }.get(kind, "识记知识点")
+
+    page_texts = "\n".join(
+        f"【第{p.get('page_number', 0)}页】{p.get('text', '')}" for p in pages
+    )
+    prompt = (
+        f"下面是一份{kind}讲义 PDF 的逐页 OCR 文字。请提取其中的识记条目。\n"
+        f"条目类型：{kind_desc}。\n"
+        '只返回 JSON：{"items":[{"primary":"原文","secondary":"释义/作者/解释","source_page":页码}]}。'
+        "source_page 用该条目所在页码（数字）。每页可有多个条目；无关的页眉页脚/标题不要提取。\n"
+        f"OCR 文字：\n{page_texts[:4000]}"
+    )
+    try:
+        raw = provider.generate(prompt=prompt, system="你是小学老师，善于从讲义提炼识记条目。", json_mode=True)
+        data = json.loads(raw)
+        items = data.get("items") or []
+        out = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            primary = (it.get("primary") or "").strip()
+            if not primary:
+                continue
+            try:
+                sp = int(it.get("source_page") or 0)
+            except (TypeError, ValueError):
+                sp = 0
+            out.append({"primary": primary, "secondary": (it.get("secondary") or "").strip(), "source_page": sp})
+        return out
+    except Exception:
+        return []
+
+
 def extract_drill_items(db: Session | None, ocr_text: str) -> dict:
     """从「错题文字」提取识记型训练条目。返回 {kind, title, items}。
 

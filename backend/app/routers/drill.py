@@ -113,6 +113,35 @@ def reactivate_group(group_id: int, _auth: User = Depends(require_role("parent",
     return {"ok": True}
 
 
+@router.get("/groups")
+def list_groups(user: User = Depends(require_role("parent", "admin")),
+                db: Session = Depends(get_db)):
+    """列出当前家长建的专项组（含条目数、ai_review 解析）。admin 看全部，家长看自己的。"""
+    from sqlalchemy import func
+    q = db.query(TrainingGroup)
+    if user.role != "admin":
+        q = q.filter(TrainingGroup.owner_id == user.id)
+    groups = q.order_by(TrainingGroup.id.desc()).all()
+    counts = dict(db.query(TrainingItem.group_id, func.count(TrainingItem.id))
+                  .group_by(TrainingItem.group_id).all())
+    out = []
+    for g in groups:
+        ai_review = []
+        try:
+            ai_review = json.loads(g.ai_review or "[]")
+        except (ValueError, TypeError):
+            ai_review = []
+        out.append({
+            "id": g.id, "subject": g.subject, "title": g.title,
+            "source": g.source, "kind": g.kind,
+            "audit_status": g.audit_status,
+            "mastery_interval_days": g.mastery_interval_days,
+            "item_count": int(counts.get(g.id, 0)),
+            "ai_review": ai_review if isinstance(ai_review, list) else [],
+        })
+    return out
+
+
 class TaskCreateReq(BaseModel):
     group_id: int
     user_id: int
@@ -203,3 +232,66 @@ async def photo_groups(subject: str = Form(...), file: UploadFile = File(...),
     g.ai_review = json.dumps(review_group_items(db, subject, kind, items_payload), ensure_ascii=False)
     db.commit()
     return {"group_id": g.id, "items_count": len(items), "kind": kind}
+
+
+@router.post("/pdf-groups")
+async def pdf_groups(subject: str = Form(...), handout_kind: str = Form("outline"),
+                     file: UploadFile = File(...),
+                     user: User = Depends(require_role("parent", "admin")),
+                     db: Session = Depends(get_db)):
+    """上传讲义 PDF → OCR 逐页识别 → 提取识记条目 → 建组（source=handout, pending 待审）。"""
+    import os
+    from fastapi import HTTPException
+    from ..models import PdfDocument, PdfPage
+    from ..services.pdf_split import render_pages, _ocr_page
+    from ..services.drill_rule import extract_items_from_pages
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="请上传 PDF")
+    os.makedirs("uploads", exist_ok=True)
+    doc = PdfDocument(filename=file.filename, subject=subject, storage_path="",
+                      content_kind="handout", handout_kind=handout_kind)
+    db.add(doc); db.commit(); db.refresh(doc)
+
+    safe_name = os.path.basename(file.filename or "upload.pdf")
+    path = f"uploads/{doc.id}_{safe_name}"
+    with open(path, "wb") as f:
+        f.write(data)
+    doc.storage_path = path
+    db.commit()
+
+    pages = render_pages(doc.id, path, f"uploads/{doc.id}_pages")
+    for p in pages:
+        db.add(PdfPage(document_id=doc.id, page_number=p["page_number"], image_path=p["image_path"]))
+    db.commit()
+
+    # 逐页 OCR（带页码）
+    ocr_pages = []
+    for p in pages:
+        text = _ocr_page(path, p["page_number"] - 1, db, "识别这张讲义页面中的全部文字，原样输出。")
+        ocr_pages.append({"page_number": p["page_number"], "text": text})
+
+    items = extract_items_from_pages(db, handout_kind, ocr_pages)
+    if not items:
+        raise HTTPException(status_code=400, detail="未能从讲义识别出知识点，请换清晰 PDF 或手动录入")
+
+    g = TrainingGroup(owner_id=user.id, subject=subject, title=doc.filename or "讲义专项",
+                      source="handout", kind=handout_kind, document_id=doc.id)
+    db.add(g); db.flush()
+    for it in items:
+        db.add(TrainingItem(group_id=g.id, kind="drill_item",
+                            primary=it.get("primary") or "",
+                            secondary=it.get("secondary") or "",
+                            source_page=it.get("source_page") or None))
+    db.flush()
+
+    from ..services.drill_rule import generate_group_content
+    items_payload = [{"primary": it.get("primary", ""), "secondary": it.get("secondary", "")} for it in items]
+    content = generate_group_content(db, subject, handout_kind, items_payload)
+    g.intro = json.dumps(content["intro"], ensure_ascii=False)
+    g.group_rule = json.dumps(content["group_rule"], ensure_ascii=False)
+    from ..services.drill_review import review_group_items
+    g.ai_review = json.dumps(review_group_items(db, subject, handout_kind, items_payload), ensure_ascii=False)
+    db.commit()
+    return {"group_id": g.id, "items_count": len(items), "kind": handout_kind, "document_id": doc.id}
