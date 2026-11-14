@@ -33,14 +33,23 @@ def build_quiz(items: list) -> list[dict]:
     return quiz[:3]
 
 
+def _type_for(kind: str) -> str:
+    """条目 kind → 学习类型：memorize（识记）| explore（探究）。"""
+    if kind == "explore":
+        return "explore"
+    return "memorize"
+
+
 def build_task_content(group, items: list, review_items: list, quiz: list) -> str:
     snapshot = [{"id": it.id, "primary": it.primary, "secondary": it.secondary,
-                 "example": it.example, "source_page": it.source_page, "source": "new"} for it in items]
+                 "example": it.example, "source_page": it.source_page, "source": "new",
+                 "type": _type_for(it.kind), "explore": json.loads(it.explore or "{}")} for it in items]
     snapshot += [{"id": it.id, "primary": it.primary, "secondary": it.secondary,
-                  "example": it.example, "source_page": it.source_page, "source": "review"} for it in review_items]
+                  "example": it.example, "source_page": it.source_page, "source": "review",
+                  "type": _type_for(it.kind), "explore": json.loads(it.explore or "{}")} for it in review_items]
     steps = _steps_for(group.kind)
     return json.dumps({
-        "schema_version": 2,
+        "schema_version": 3,
         "group_id": group.id, "source": group.source, "kind": group.kind,
         "document_id": group.document_id,
         "intro": json.loads(group.intro or "{}"),

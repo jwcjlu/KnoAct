@@ -93,10 +93,10 @@ def generate_explore_items(db: Session | None, items: list[dict]) -> dict:
         "为下面的数学/抽象概念生成「探究式学习」内容，引导孩子自己发现规律（不要直接给答案）。\n"
         "每个概念返回四段：\n"
         '1. compare：2~3 组「正例/反例」对比，让孩子发现共同点/不同点，格式 [{"a":"...","b":"...","diff":"不同点提示"}]；\n'
-        '2. classify：2~4 个「抽象概念→具象场景」的归类项，格式 [{"label":"概念","box":"具象场景"}]（拖拽归类用）；\n'
+        '2. classify：一道「拖拽归类」题，把若干具象场景拖到正确的概念箱子，格式 {"items":["具象场景1","具象场景2",...],"boxes":["概念1","概念2"],"answers":{"具象场景":"对应概念"}}，items 4~6 个，boxes 2~3 个（都是易混概念）；\n'
         '3. formula：一个「可推导的公式/规律」挖空，格式 {"template":"周长 = (长+宽) × ___","answer":"2","hint":"引导推导的提示"}；\n'
         '4. trap：一道「反直觉陷阱题」打破错误直觉，格式 {"question":"周长相等面积相等吗？","answer":"不一定","explain":"为什么"}。\n'
-        '只返回 JSON：{"items":[{"primary":"概念名","compare":[...],"classify":[...],"formula":{...},"trap":{...}}]}。\n'
+        '只返回 JSON：{"items":[{"primary":"概念名","compare":[...],"classify":{...},"formula":{...},"trap":{...}}]}。\n'
         f"概念列表：{json.dumps(payload, ensure_ascii=False)}"
     )
     try:
@@ -111,11 +111,15 @@ def generate_explore_items(db: Session | None, items: list[dict]) -> dict:
                 continue
             formula = it.get("formula") or {}
             trap = it.get("trap") or {}
+            classify = it.get("classify") or {}
             out[primary] = {
                 "compare": [{"a": c.get("a", ""), "b": c.get("b", ""), "diff": c.get("diff", "")}
                             for c in (it.get("compare") or []) if isinstance(c, dict)],
-                "classify": [{"label": c.get("label", ""), "box": c.get("box", "")}
-                             for c in (it.get("classify") or []) if isinstance(c, dict)],
+                "classify": {
+                    "items": [s for s in (classify.get("items") or []) if isinstance(s, str)],
+                    "boxes": [s for s in (classify.get("boxes") or []) if isinstance(s, str)],
+                    "answers": classify.get("answers") if isinstance(classify.get("answers"), dict) else {},
+                },
                 "formula": {"template": (formula.get("template") or "").strip(),
                             "answer": (formula.get("answer") or "").strip(),
                             "hint": (formula.get("hint") or "").strip()},

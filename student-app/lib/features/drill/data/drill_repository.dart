@@ -104,6 +104,8 @@ class DrillItem {
     this.example = '',
     this.source = 'new',
     this.sourcePage,
+    this.type = 'memorize',
+    this.explore = const {},
   });
   final int id;
   final String primary;
@@ -111,6 +113,8 @@ class DrillItem {
   final String example;
   final String source; // new | review
   final int? sourcePage;
+  final String type; // memorize | explore
+  final Map<String, dynamic> explore; // 探究内容（compare/classify/formula/trap）
 
   factory DrillItem.fromJson(Map<String, dynamic> j) => DrillItem(
         id: (j['id'] as num?)?.toInt() ?? 0,
@@ -119,6 +123,8 @@ class DrillItem {
         example: '${j['example'] ?? ''}',
         source: '${j['source'] ?? 'new'}',
         sourcePage: (j['source_page'] as num?)?.toInt(),
+        type: '${j['type'] ?? 'memorize'}',
+        explore: j['explore'] is Map ? Map<String, dynamic>.from(j['explore'] as Map) : const {},
       );
 }
 

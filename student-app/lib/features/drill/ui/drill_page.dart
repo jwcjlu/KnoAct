@@ -245,11 +245,12 @@ class _StepBodyState extends State<_StepBody> {
       case 'structure':
       case 'observe':
         return _RuleCard(session: session, reveal: s.revealRule, ctl: ctl);
+      case 'classify':
+        return _ClassifyView(item: item, answered: s.answered, ctl: ctl);
       case 'recall':
       case 'drill':
       case 'formula':
       case 'closure':
-      case 'classify':
       case 'trap':
         return _itemCard(
           context,
@@ -381,6 +382,186 @@ class _StepBodyState extends State<_StepBody> {
       return widget.ctl.submitSentence(itemId: itemId, sentence: answer);
     }
     return widget.ctl.submitStep(itemId: itemId, answer: answer, requestHint: false);
+  }
+}
+
+class _ClassifyView extends StatefulWidget {
+  const _ClassifyView({required this.item, required this.answered, required this.ctl});
+  final DrillItem? item;
+  final bool answered;
+  final DrillController ctl;
+
+  @override
+  State<_ClassifyView> createState() => _ClassifyViewState();
+}
+
+class _ClassifyViewState extends State<_ClassifyView> {
+  // 每个场景当前归到的箱子（null = 未归类）
+  final Map<String, String?> _placed = {};
+
+  List<String> get _items {
+    final c = widget.item?.explore['classify'];
+    if (c is! Map) return const [];
+    final items = c['items'];
+    return items is List ? items.map((e) => '$e').toList() : const [];
+  }
+
+  List<String> get _boxes {
+    final c = widget.item?.explore['classify'];
+    if (c is! Map) return const [];
+    final boxes = c['boxes'];
+    return boxes is List ? boxes.map((e) => '$e').toList() : const [];
+  }
+
+  Map<String, String> get _answers {
+    final c = widget.item?.explore['classify'];
+    if (c is! Map) return const {};
+    final a = c['answers'];
+    if (a is! Map) return const {};
+    return a.map((k, v) => MapEntry('$k', '$v'));
+  }
+
+  bool get _allPlaced => _items.isNotEmpty && _items.every((it) => _placed[it] != null);
+
+  String? _correctBox(String item) {
+    for (final e in _answers.entries) {
+      if (item.contains(e.key) || e.key.contains(item)) return e.value;
+    }
+    return null;
+  }
+
+  void _drop(String item, String box) {
+    final correct = _correctBox(item);
+    setState(() {
+      if (correct == box) {
+        _placed[item] = box; // 拖对，固定
+      }
+      // 拖错不固定，弹回（保持 null）
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _items;
+    final boxes = _boxes;
+    if (items.isEmpty || boxes.isEmpty) {
+      return const Center(child: Text('暂无归类内容', style: TextStyle(color: AppColors.gray)));
+    }
+    final remaining = items.where((it) => _placed[it] == null).toList();
+    return _card(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('🧲 把下面的场景拖到正确的概念箱子里',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.blue)),
+          const SizedBox(height: 14),
+          // 概念箱子
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final box in boxes)
+                DragTarget<String>(
+                  onAcceptWithDetails: (d) => _drop(d.data, box),
+                  builder: (context, cand, _) {
+                    final placedItems = items.where((it) => _placed[it] == box).toList();
+                    return Container(
+                      constraints: const BoxConstraints(minWidth: 120),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: cand.isNotEmpty ? AppColors.blueSoft : AppColors.bg,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: cand.isNotEmpty ? AppColors.blue : AppColors.line,
+                          width: cand.isNotEmpty ? 2 : 1,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(box, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                          if (placedItems.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Wrap(
+                                spacing: 4,
+                                runSpacing: 4,
+                                children: [
+                                  for (final p in placedItems)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.greenSoft,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(p, style: const TextStyle(fontSize: 11, color: AppColors.green)),
+                                    ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // 待归类场景卡片
+          if (remaining.isNotEmpty)
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (final item in remaining)
+                  Draggable<String>(
+                    data: item,
+                    feedback: Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.blue,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(item, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                      ),
+                    ),
+                    childWhenDragging: Opacity(
+                      opacity: 0.4,
+                      child: _sceneChip(item),
+                    ),
+                    child: _sceneChip(item),
+                  ),
+              ],
+            ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: _allPlaced
+                ? FilledButton(
+                    onPressed: () => widget.ctl.nextItem(),
+                    child: const Text('下一步 →'),
+                  )
+                : FilledButton(
+                    onPressed: widget.answered ? () => widget.ctl.nextItem() : null,
+                    child: Text(_allPlaced ? '下一步 →' : '把场景都拖进箱子'),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sceneChip(String item) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Text(item, style: const TextStyle(fontSize: 13)),
+    );
   }
 }
 
