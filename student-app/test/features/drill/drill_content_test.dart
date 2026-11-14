@@ -102,4 +102,26 @@ void main() {
           ['observe', 'classify', 'formula', 'trap']);
     });
   });
+
+  group('GuideStep 解析', () {
+    test('guide 前选择后填空', () {
+      final item = DrillItem.fromJson({
+        'id': 1, 'primary': '比喻', 'type': 'explore',
+        'explore': {
+          'guide': [
+            {'prompt': '共同点？', 'samples': ['月亮像小船'],
+             'options': ['都有像', '都写月亮'], 'answer_index': 0, 'reveal': '对'},
+            {'prompt': '总结：___', 'answer': '喻体', 'reveal': '太棒了'},
+          ],
+        },
+      });
+      final guide = item.guideSteps;
+      expect(guide, hasLength(2));
+      expect(guide[0].isChoice, isTrue);
+      expect(guide[0].answerIndex, 0);
+      expect(guide[0].options, ['都有像', '都写月亮']);
+      expect(guide[1].isChoice, isFalse);
+      expect(guide[1].answer, '喻体');
+    });
+  });
 }

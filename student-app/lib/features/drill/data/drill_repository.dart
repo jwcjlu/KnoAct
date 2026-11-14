@@ -126,6 +126,43 @@ class DrillItem {
         type: '${j['type'] ?? 'memorize'}',
         explore: j['explore'] is Map ? Map<String, dynamic>.from(j['explore'] as Map) : const {},
       );
+
+  /// explore 的 guide 链（递进引导步骤）。
+  List<GuideStep> get guideSteps {
+    final g = explore['guide'];
+    if (g is! List) return const [];
+    return [for (final e in g.whereType<Map>()) GuideStep.fromJson(Map<String, dynamic>.from(e))];
+  }
+}
+
+/// guide 链的一轮：选择题（前 N-1 轮）或填空题（最后一轮归纳）。
+class GuideStep {
+  const GuideStep({
+    this.prompt = '',
+    this.samples = const [],
+    this.options = const [],
+    this.answerIndex = -1,
+    this.answer = '',
+    this.reveal = '',
+  });
+
+  final String prompt;
+  final List<String> samples;
+  final List<String> options;
+  final int answerIndex; // -1 = 填空轮
+  final String answer;   // 填空轮答案
+  final String reveal;
+
+  bool get isChoice => options.isNotEmpty && answerIndex >= 0;
+
+  factory GuideStep.fromJson(Map<String, dynamic> j) => GuideStep(
+        prompt: '${j['prompt'] ?? ''}',
+        samples: j['samples'] is List ? (j['samples'] as List).map((e) => '$e').toList() : const [],
+        options: j['options'] is List ? (j['options'] as List).map((e) => '$e').toList() : const [],
+        answerIndex: (j['answer_index'] as num?)?.toInt() ?? -1,
+        answer: '${j['answer'] ?? ''}',
+        reveal: '${j['reveal'] ?? ''}',
+      );
 }
 
 class DrillQuiz {
