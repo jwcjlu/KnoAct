@@ -56,6 +56,17 @@ def generate_group_content(db: Session | None, subject: str, kind: str, items: l
         return _empty_copy()
 
 
+def infer_kind(subject: str, explicit_kind: str) -> str:
+    """学科 → kind 默认映射；家长显式传了 kind 则尊重（可覆盖）。"""
+    if (explicit_kind or "").strip():
+        return explicit_kind.strip()
+    return {
+        "英语": "phrase",
+        "语文": "outline",
+        "数学": "explore",
+    }.get((subject or "").strip(), "outline")
+
+
 def extract_drill_items(db: Session | None, ocr_text: str) -> dict:
     """从「错题文字」提取识记型训练条目。返回 {kind, title, items}。
 

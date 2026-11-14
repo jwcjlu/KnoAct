@@ -30,7 +30,7 @@ class GroupCreateReq(BaseModel):
     source: str = "custom"
     subject: str = ""
     title: str = ""
-    kind: str = "outline"
+    kind: str = ""  # 空 = 按学科推断；显式传则覆盖
     document_id: int | None = None
     start_page: int | None = None
     end_page: int | None = None
@@ -43,8 +43,20 @@ class GroupCreateReq(BaseModel):
 @router.post("/groups")
 def create_group(req: GroupCreateReq, user: User = Depends(require_role("parent", "admin")),
                  db: Session = Depends(get_db)):
-    g = TrainingGroup(owner_id=user.id, subject=req.subject, title=req.title,
-                      source=req.source, kind=req.kind, document_id=req.document_id,
+    from ..models import PdfDocument
+    from ..services.drill_rule import infer_kind
+    subject = (req.subject or "").strip()
+    document_id = req.document_id
+    # 讲义：subject 强制继承 PDF 的学科，不允许错配
+    if req.source == "handout" and document_id is not None:
+        from fastapi import HTTPException
+        doc = db.get(PdfDocument, document_id)
+        if not doc or doc.content_kind != "handout":
+            raise HTTPException(status_code=400, detail="讲义不存在")
+        subject = doc.subject
+    kind = infer_kind(subject, req.kind)
+    g = TrainingGroup(owner_id=user.id, subject=subject, title=req.title,
+                      source=req.source, kind=kind, document_id=document_id,
                       start_page=req.start_page, end_page=req.end_page,
                       mastery_interval_days=req.mastery_interval_days,
                       interval_max_days=req.interval_max_days, sort_order=req.sort_order)
@@ -58,7 +70,7 @@ def create_group(req: GroupCreateReq, user: User = Depends(require_role("parent"
 
     from ..services.drill_rule import generate_group_content
     items_payload = [{"primary": it.primary, "secondary": it.secondary} for it in req.items]
-    content = generate_group_content(db, req.subject, req.kind, items_payload)
+    content = generate_group_content(db, subject, kind, items_payload)
     g.intro = json.dumps(content["intro"], ensure_ascii=False)
     g.group_rule = json.dumps(content["group_rule"], ensure_ascii=False)
     # common_mistakes 按 primary 匹配回填到条目
@@ -70,7 +82,7 @@ def create_group(req: GroupCreateReq, user: User = Depends(require_role("parent"
                 item_row.common_mistake = json.dumps(mistakes[payload["primary"]], ensure_ascii=False)
     # 发布前 AI 预检（提示式，不阻断）
     from ..services.drill_review import review_group_items
-    g.ai_review = json.dumps(review_group_items(db, req.subject, req.kind, items_payload), ensure_ascii=False)
+    g.ai_review = json.dumps(review_group_items(db, subject, kind, items_payload), ensure_ascii=False)
     db.commit()
     return {"group_id": g.id}
 
