@@ -2952,19 +2952,24 @@ async function viewDrillGroup(groupId){
   if(!g || g.error){ toast('加载详情失败'); return; }
   const el = document.getElementById('xkbModal');
   if(!el) return;
-  const typeTag = t => t==='explore'
-    ? `<span style="font-size:11px;font-weight:600;color:#3158e8;background:#edf1ff;border-radius:4px;padding:1px 6px">探究</span>`
-    : t==='memorize'
-      ? `<span style="font-size:11px;font-weight:600;color:#2e8b5a;background:#e8f7ef;border-radius:4px;padding:1px 6px">识记</span>`
-      : '';
+  const typeSwitch = (it) => {
+    const cur = it.kind === 'explore' ? 'explore' : 'memorize';
+    const other = cur === 'explore' ? 'memorize' : 'explore';
+    const label = cur === 'explore' ? '探究' : '识记';
+    const color = cur === 'explore' ? '#3158e8' : '#2e8b5a';
+    const bg = cur === 'explore' ? '#edf1ff' : '#e8f7ef';
+    return `<button type="button" onclick="setDrillItemType(${g.id},${it.id},'${other}')"
+      style="font-size:11px;font-weight:600;color:${color};background:${bg};border:1px solid ${color}33;border-radius:6px;padding:2px 8px;cursor:pointer" title="点击切换类型">${label} ⇄</button>`;
+  };
   const rows = (g.items||[]).map((it,i)=>`
-    <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #eef0ed">
+    <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #eef0ed;align-items:flex-start">
       <span style="flex-shrink:0;width:24px;text-align:center;color:#8e9691;font-size:12px">${i+1}</span>
       <div style="flex:1">
-        <div style="font-size:14px;font-weight:600">${escapeHtml(it.primary||'')} ${typeTag(it.kind)}</div>
+        <div style="font-size:14px;font-weight:600">${escapeHtml(it.primary||'')}</div>
         ${it.secondary?`<div style="font-size:12px;color:#5c6761;margin-top:2px">${escapeHtml(it.secondary)}</div>`:''}
       </div>
-      ${it.source_page?`<span style="flex-shrink:0;font-size:11px;color:#8e9691">第 ${it.source_page} 页</span>`:''}
+      <span style="flex-shrink:0;margin-top:2px">${typeSwitch(it)}</span>
+      ${it.source_page?`<span style="flex-shrink:0;font-size:11px;color:#8e9691;margin-top:4px">第 ${it.source_page} 页</span>`:''}
     </div>`).join('');
   el.style.display = 'flex';
   el.innerHTML = `<div class="xkb-panel" role="dialog" style="max-width:520px">
@@ -2979,6 +2984,11 @@ async function viewDrillGroup(groupId){
       <button class="btn-ghost" onclick="closeDrillDetail()">关闭</button>
     </div>
   </div>`;
+}
+async function setDrillItemType(groupId, itemId, type){
+  const r = await api(`/api/drill/groups/${groupId}/items/${itemId}/type`, {method:'POST', body:{type}});
+  if(r && r.ok){ toast(type==='explore'?'已改为探究':'已改为识记'); await viewDrillGroup(groupId); }
+  else{ toast(apiErrorMsg(r, '修改失败')); }
 }
 function closeDrillDetail(){
   const el = document.getElementById('xkbModal');

@@ -118,3 +118,32 @@ def test_list_groups(client, db):
     assert len(groups) >= 1
     assert "item_count" in groups[0]
     assert "audit_status" in groups[0]
+
+
+def test_set_item_type(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    gid = _make_group(client, parent_h)["group_id"]
+    # 查详情拿 item_id
+    r = client.get(f"/api/drill/groups/{gid}", headers=parent_h)
+    items = r.json()["items"]
+    assert len(items) >= 1
+    item_id = items[0]["id"]
+    # 改成 explore
+    r2 = client.post(f"/api/drill/groups/{gid}/items/{item_id}/type",
+                     json={"type": "explore"}, headers=parent_h)
+    assert r2.status_code == 200
+    assert r2.json()["type"] == "explore"
+    # 改回 memorize
+    r3 = client.post(f"/api/drill/groups/{gid}/items/{item_id}/type",
+                     json={"type": "memorize"}, headers=parent_h)
+    assert r3.json()["type"] == "memorize"
+
+
+def test_set_item_type_invalid(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    gid = _make_group(client, parent_h)["group_id"]
+    r = client.get(f"/api/drill/groups/{gid}", headers=parent_h)
+    item_id = r.json()["items"][0]["id"]
+    r2 = client.post(f"/api/drill/groups/{gid}/items/{item_id}/type",
+                     json={"type": "xxx"}, headers=parent_h)
+    assert r2.json().get("error") is not None

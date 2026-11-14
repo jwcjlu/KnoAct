@@ -183,6 +183,30 @@ def get_group(group_id: int, user: User = Depends(require_role("parent", "admin"
     }
 
 
+class ItemTypeReq(BaseModel):
+    type: str  # memorize | explore
+
+
+@router.post("/groups/{group_id}/items/{item_id}/type")
+def set_item_type(group_id: int, item_id: int, req: ItemTypeReq,
+                  user: User = Depends(require_role("parent", "admin")),
+                  db: Session = Depends(get_db)):
+    """家长手动改条目的类型（识记 memorize / 探究 explore），覆盖 AI 归类。"""
+    g = db.get(TrainingGroup, group_id)
+    if not g:
+        return {"error": "not found"}
+    if user.role != "admin" and g.owner_id != user.id:
+        return {"error": "无权操作"}
+    if req.type not in ("memorize", "explore"):
+        return {"error": "类型必须是 memorize 或 explore"}
+    item = db.get(TrainingItem, item_id)
+    if not item or item.group_id != group_id:
+        return {"error": "条目不存在"}
+    item.kind = req.type
+    db.commit()
+    return {"ok": True, "item_id": item.id, "type": item.kind}
+
+
 class TaskCreateReq(BaseModel):
     group_id: int
     user_id: int
