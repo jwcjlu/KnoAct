@@ -80,6 +80,15 @@ def create_group(req: GroupCreateReq, user: User = Depends(require_role("parent"
             item_row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
             if item_row:
                 item_row.common_mistake = json.dumps(mistakes[payload["primary"]], ensure_ascii=False)
+    # explore 类型：按 4 认知原则生成探究内容，回填到条目 explore 字段
+    if kind == "explore":
+        from ..services.drill_rule import generate_explore_items
+        explore_map = generate_explore_items(db, items_payload)
+        for payload in items_payload:
+            if payload["primary"] in explore_map:
+                item_row = db.query(TrainingItem).filter_by(group_id=g.id, primary=payload["primary"]).first()
+                if item_row:
+                    item_row.explore = json.dumps(explore_map[payload["primary"]], ensure_ascii=False)
     # 发布前 AI 预检（提示式，不阻断）
     from ..services.drill_review import review_group_items
     g.ai_review = json.dumps(review_group_items(db, subject, kind, items_payload), ensure_ascii=False)
@@ -142,6 +151,29 @@ def list_groups(user: User = Depends(require_role("parent", "admin")),
     return out
 
 
+@router.get("/groups/{group_id}")
+def get_group(group_id: int, user: User = Depends(require_role("parent", "admin")),
+              db: Session = Depends(get_db)):
+    """组详情（含全部条目），家长审组时核对 AI 提取的条目。"""
+    g = db.get(TrainingGroup, group_id)
+    if not g:
+        return {"error": "not found"}
+    if user.role != "admin" and g.owner_id != user.id:
+        return {"error": "无权查看"}
+    items = db.query(TrainingItem).filter_by(group_id=group_id).order_by(TrainingItem.id).all()
+    return {
+        "id": g.id, "subject": g.subject, "title": g.title,
+        "source": g.source, "kind": g.kind, "audit_status": g.audit_status,
+        "document_id": g.document_id,
+        "items": [
+            {"id": it.id, "kind": it.kind, "primary": it.primary,
+             "secondary": it.secondary, "example": it.example,
+             "source_page": it.source_page}
+            for it in items
+        ],
+    }
+
+
 class TaskCreateReq(BaseModel):
     group_id: int
     user_id: int
@@ -178,8 +210,11 @@ def create_task(req: TaskCreateReq, user: User = Depends(require_role("parent", 
         return {"task_id": existing.id}
     quiz = build_quiz(items)
     content = build_task_content(g, items, review_items, quiz)
+    from ..services.bucket_service import get_active_bucket
+    active = get_active_bucket(db, req.user_id)
     t = Task(user_id=req.user_id, subject=g.subject, date=req.date, task_type="drill",
-             title=g.title, content=content, points=20, content_status="published")
+             title=g.title, content=content, points=20, content_status="published",
+             bucket_id=active.id if active else None)
     db.add(t); db.commit(); db.refresh(t)
     return {"task_id": t.id}
 

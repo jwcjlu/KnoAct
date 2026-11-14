@@ -7,7 +7,8 @@ MAX_ITEMS = 8
 
 def _steps_for(kind: str) -> list[str]:
     if kind == "phrase":
-        return ["recognize", "recall", "produce", "quiz"]
+        # 短语类去掉「记」步：认 → 用 → 快测（「用」即造句，本身就在记忆）
+        return ["recognize", "produce", "quiz"]
     if kind == "explore":
         return ["observe", "classify", "formula", "trap"]
     return ["structure", "drill", "apply", "closure"]

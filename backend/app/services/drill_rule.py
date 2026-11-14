@@ -67,10 +67,101 @@ def infer_kind(subject: str, explicit_kind: str) -> str:
     }.get((subject or "").strip(), "outline")
 
 
-def extract_items_from_pages(db: Session | None, kind: str, pages: list[dict]) -> list[dict]:
-    """从「讲义 PDF 逐页 OCR 文字」提取识记条目（带页码对照）。返回 [{primary, secondary, source_page}]。
+_EXPLORE_EMPTY = {"compare": [], "classify": [], "formula": {"template": "", "answer": "", "hint": ""},
+                  "trap": {"question": "", "answer": "", "explain": ""}}
 
-    kind 提示 LLM 按类型提取：phrase（短语）/ outline（归纳点）/ explore（概念）。
+
+def generate_explore_items(db: Session | None, items: list[dict]) -> dict:
+    """为 explore（探究型）条目按 4 认知原则生成探究内容，返回 {primary: {compare,classify,formula,trap}}。
+
+    4 原则：观察（正反例对比）→ 归类（抽象→具象）→ 归纳（推导挖空）→ 陷阱（认知冲突）。
+    fake/无 db/无 items/异常 → 空 dict。
+    """
+    if db is None or not items:
+        return {}
+    from .ai import get_provider
+    provider = get_provider(db)
+    if provider.name == "fake":
+        return {}
+
+    payload = [{"primary": it.get("primary", ""), "secondary": it.get("secondary", "")}
+               for it in items if (it.get("primary") or "").strip()][:4]
+    if not payload:
+        return {}
+
+    prompt = (
+        "为下面的数学/抽象概念生成「探究式学习」内容，引导孩子自己发现规律（不要直接给答案）。\n"
+        "每个概念返回四段：\n"
+        '1. compare：2~3 组「正例/反例」对比，让孩子发现共同点/不同点，格式 [{"a":"...","b":"...","diff":"不同点提示"}]；\n'
+        '2. classify：2~4 个「抽象概念→具象场景」的归类项，格式 [{"label":"概念","box":"具象场景"}]（拖拽归类用）；\n'
+        '3. formula：一个「可推导的公式/规律」挖空，格式 {"template":"周长 = (长+宽) × ___","answer":"2","hint":"引导推导的提示"}；\n'
+        '4. trap：一道「反直觉陷阱题」打破错误直觉，格式 {"question":"周长相等面积相等吗？","answer":"不一定","explain":"为什么"}。\n'
+        '只返回 JSON：{"items":[{"primary":"概念名","compare":[...],"classify":[...],"formula":{...},"trap":{...}}]}。\n'
+        f"概念列表：{json.dumps(payload, ensure_ascii=False)}"
+    )
+    try:
+        raw = provider.generate(prompt=prompt, system="你是小学数学老师，善于苏格拉底式启发教学。", json_mode=True)
+        data = json.loads(raw)
+        out = {}
+        for it in data.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            primary = (it.get("primary") or "").strip()
+            if not primary:
+                continue
+            formula = it.get("formula") or {}
+            trap = it.get("trap") or {}
+            out[primary] = {
+                "compare": [{"a": c.get("a", ""), "b": c.get("b", ""), "diff": c.get("diff", "")}
+                            for c in (it.get("compare") or []) if isinstance(c, dict)],
+                "classify": [{"label": c.get("label", ""), "box": c.get("box", "")}
+                             for c in (it.get("classify") or []) if isinstance(c, dict)],
+                "formula": {"template": (formula.get("template") or "").strip(),
+                            "answer": (formula.get("answer") or "").strip(),
+                            "hint": (formula.get("hint") or "").strip()},
+                "trap": {"question": (trap.get("question") or "").strip(),
+                         "answer": (trap.get("answer") or "").strip(),
+                         "explain": (trap.get("explain") or "").strip()},
+            }
+        return out
+    except Exception:
+        return {}
+
+
+def _extract_one_batch(db, provider, kind_desc: str, batch: list[dict]) -> list[dict]:
+    """对一批页（≤3 页）的 OCR 文字提取条目。"""
+    page_texts = "\n".join(
+        f"【第{p.get('page_number', 0)}页】{p.get('text', '')}" for p in batch
+    )
+    prompt = (
+        f"下面是一份讲义 PDF 的逐页 OCR 文字。请提取其中的识记条目。\n"
+        f"条目类型：{kind_desc}。\n"
+        '只返回 JSON：{"items":[{"primary":"原文","secondary":"释义/作者/解释","source_page":页码}]}。'
+        "source_page 用该条目所在页码（数字）。每页可有多个条目；无关的页眉页脚/标题不要提取。\n"
+        f"OCR 文字：\n{page_texts}"
+    )
+    raw = provider.generate(prompt=prompt, system="你是小学老师，善于从讲义提炼识记条目。", json_mode=True)
+    data = json.loads(raw)
+    items = data.get("items") or []
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        primary = (it.get("primary") or "").strip()
+        if not primary:
+            continue
+        try:
+            sp = int(it.get("source_page") or 0)
+        except (TypeError, ValueError):
+            sp = 0
+        out.append({"primary": primary, "secondary": (it.get("secondary") or "").strip(), "source_page": sp})
+    return out
+
+
+def extract_items_from_pages(db: Session | None, kind: str, pages: list[dict]) -> list[dict]:
+    """从「讲义 PDF 逐页 OCR 文字」提取识记条目（带页码对照）。
+
+    分批（每批 3 页）提取，避免单次 prompt 超长导致漏提取（如 100 例只提取出 45 例）。
     fake/无 db/空 pages/异常 → 空列表。
     """
     if db is None or not pages:
@@ -86,35 +177,22 @@ def extract_items_from_pages(db: Session | None, kind: str, pages: list[dict]) -
         "explore": "数学概念/公式，每条一个概念，primary 为概念名，secondary 为解释",
     }.get(kind, "识记知识点")
 
-    page_texts = "\n".join(
-        f"【第{p.get('page_number', 0)}页】{p.get('text', '')}" for p in pages
-    )
-    prompt = (
-        f"下面是一份{kind}讲义 PDF 的逐页 OCR 文字。请提取其中的识记条目。\n"
-        f"条目类型：{kind_desc}。\n"
-        '只返回 JSON：{"items":[{"primary":"原文","secondary":"释义/作者/解释","source_page":页码}]}。'
-        "source_page 用该条目所在页码（数字）。每页可有多个条目；无关的页眉页脚/标题不要提取。\n"
-        f"OCR 文字：\n{page_texts[:4000]}"
-    )
-    try:
-        raw = provider.generate(prompt=prompt, system="你是小学老师，善于从讲义提炼识记条目。", json_mode=True)
-        data = json.loads(raw)
-        items = data.get("items") or []
-        out = []
+    BATCH = 3
+    merged: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    for i in range(0, len(pages), BATCH):
+        batch = pages[i:i + BATCH]
+        try:
+            items = _extract_one_batch(db, provider, kind_desc, batch)
+        except Exception:
+            items = []
         for it in items:
-            if not isinstance(it, dict):
+            key = (it["primary"], it["source_page"])
+            if key in seen:
                 continue
-            primary = (it.get("primary") or "").strip()
-            if not primary:
-                continue
-            try:
-                sp = int(it.get("source_page") or 0)
-            except (TypeError, ValueError):
-                sp = 0
-            out.append({"primary": primary, "secondary": (it.get("secondary") or "").strip(), "source_page": sp})
-        return out
-    except Exception:
-        return []
+            seen.add(key)
+            merged.append(it)
+    return merged
 
 
 def extract_drill_items(db: Session | None, ocr_text: str) -> dict:

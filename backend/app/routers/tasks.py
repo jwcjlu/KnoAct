@@ -380,6 +380,23 @@ class DrillCompleteReq(BaseModel):
     results: dict[str, bool] = {}
 
 
+def _llm_judge_phrase(db, phrase: str, user_answer: str) -> bool:
+    """LLM 兜底：判断孩子的回答是否「用对了这个短语」（不要求原样填回）。"""
+    from ..services.ai import get_provider
+    provider = get_provider(db)
+    if provider.name == "fake":
+        return False
+    try:
+        raw = provider.generate(
+            prompt=(f"短语是「{phrase}」。孩子针对这道题的回答是「{user_answer}」。"
+                    f"请判断孩子的回答是否正确使用了这个短语（允许 sb./sth. 被替换成具体的人/事，"
+                    f"允许动词词形变化）。只返回 true 或 false。"),
+            system="你是小学老师，判分。", json_mode=False)
+        return raw.strip().lower().startswith("true")
+    except Exception:
+        return False
+
+
 @router.post("/{task_id}/drill-step")
 def drill_step(task_id: int, req: DrillStepReq, user: User = Depends(require_learning_user),
                db: Session = Depends(get_db)):
@@ -393,6 +410,9 @@ def drill_step(task_id: int, req: DrillStepReq, user: User = Depends(require_lea
     item = db.get(TrainingItem, req.item_id)
     expected = item.primary if item else ""
     correct = bool(expected) and normalize_answer(req.answer) == normalize_answer(expected)
+    # 规则判错 → LLM 兜底：孩子是否「用对了短语」（如造了正确的句子）
+    if not correct and expected and req.answer.strip():
+        correct = _llm_judge_phrase(db, expected, req.answer)
     used = prog.get("hints_used", {}).get(str(req.item_id), 0)
     if correct:
         prog.setdefault("recall_results", {})[str(req.item_id)] = True
@@ -407,7 +427,8 @@ def drill_step(task_id: int, req: DrillStepReq, user: User = Depends(require_lea
     t.content = json.dumps(content, ensure_ascii=False)
     db.commit()
     return {"correct": correct, "hints_remaining": max(0, 2 - used),
-            "hint": hint, "reveal_answer": used >= 3, "expected": None}
+            "hint": hint, "reveal_answer": used >= 3,
+            "expected": expected if not correct else None}
 
 
 @router.post("/{task_id}/drill-sentence")
