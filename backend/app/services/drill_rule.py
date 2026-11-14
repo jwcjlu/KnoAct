@@ -67,14 +67,10 @@ def infer_kind(subject: str, explicit_kind: str) -> str:
     }.get((subject or "").strip(), "outline")
 
 
-_EXPLORE_EMPTY = {"compare": [], "classify": [], "formula": {"template": "", "answer": "", "hint": ""},
-                  "trap": {"question": "", "answer": "", "explain": ""}}
-
-
 def generate_explore_items(db: Session | None, items: list[dict]) -> dict:
-    """为 explore（探究型）条目按 4 认知原则生成探究内容，返回 {primary: {compare,classify,formula,trap}}。
+    """为 explore（探究型）条目生成「递进引导链（guide）+ 练习（classify/trap）」，返回 {primary: {guide, classify, trap}}。
 
-    4 原则：观察（正反例对比）→ 归类（抽象→具象）→ 归纳（推导挖空）→ 陷阱（认知冲突）。
+    递进引导：像教师一样一步步揭露规律，前 N-1 轮选择题（点选项），最后一轮填空题（自己归纳）。
     fake/无 db/无 items/异常 → 空 dict。
     """
     if db is None or not items:
@@ -90,17 +86,19 @@ def generate_explore_items(db: Session | None, items: list[dict]) -> dict:
         return {}
 
     prompt = (
-        "为下面的数学/抽象概念生成「探究式学习」内容，引导孩子自己发现规律（不要直接给答案）。\n"
-        "每个概念返回四段：\n"
-        '1. compare：2~3 组「正例/反例」对比，让孩子发现共同点/不同点，格式 [{"a":"...","b":"...","diff":"不同点提示"}]；\n'
-        '2. classify：一道「拖拽归类」题，把若干具象场景拖到正确的概念箱子，格式 {"items":["具象场景1","具象场景2",...],"boxes":["概念1","概念2"],"answers":{"具象场景":"对应概念"}}，items 4~6 个，boxes 2~3 个（都是易混概念）；\n'
-        '3. formula：一个「可推导的公式/规律」挖空，格式 {"template":"周长 = (长+宽) × ___","answer":"2","hint":"引导推导的提示"}；\n'
-        '4. trap：一道「反直觉陷阱题」打破错误直觉，格式 {"question":"周长相等面积相等吗？","answer":"不一定","explain":"为什么"}。\n'
-        '只返回 JSON：{"items":[{"primary":"概念名","compare":[...],"classify":{...},"formula":{...},"trap":{...}}]}。\n'
-        f"概念列表：{json.dumps(payload, ensure_ascii=False)}"
+        "为下面的知识点生成「递进式规律引导」学习内容，像教师一样一步步把规律揭露出来，让孩子自己总结规律（不要一次给结论）。\n"
+        "每个知识点返回三段：\n"
+        '1. guide：3~4 轮的递进引导链。前 N-1 轮是选择题，格式 '
+        '{"prompt":"教师提问","samples":["正例材料1","正例材料2"],"options":["选项1","选项2","选项3"],"answer_index":正确选项下标,"reveal":"教师揭示语"}；'
+        "最后一轮是填空题（孩子自己归纳规律），格式 {\"prompt\":\"总结：xxx = ___\",\"answer\":\"答案\",\"reveal\":\"鼓励语\"}（无 options）。\n"
+        "递进顺序：第1轮给正例问共同点 → 第2轮深挖关键区别 → 第3轮给反例制造冲突 → 最后一轮让孩子自己归纳完整规律。\n"
+        '2. classify：一道「拖拽归类」题，格式 {"items":["场景1","场景2"],"boxes":["概念1","概念2"],"answers":{"场景":"概念"}}，items 4~6 个、boxes 2~3 个（易混概念）。\n'
+        '3. trap：一道「反直觉陷阱题」，格式 {"question":"反直觉问题","answer":"答案","explain":"解释"}。\n'
+        '只返回 JSON：{"items":[{"primary":"知识点","guide":[...],"classify":{...},"trap":{...}}]}。\n'
+        f"知识点列表：{json.dumps(payload, ensure_ascii=False)}"
     )
     try:
-        raw = provider.generate(prompt=prompt, system="你是小学数学老师，善于苏格拉底式启发教学。", json_mode=True)
+        raw = provider.generate(prompt=prompt, system="你是小学老师，善于苏格拉底式启发教学，一步步引导不直接给答案。", json_mode=True)
         data = json.loads(raw)
         out = {}
         for it in data.get("items") or []:
@@ -109,20 +107,36 @@ def generate_explore_items(db: Session | None, items: list[dict]) -> dict:
             primary = (it.get("primary") or "").strip()
             if not primary:
                 continue
-            formula = it.get("formula") or {}
-            trap = it.get("trap") or {}
             classify = it.get("classify") or {}
+            trap = it.get("trap") or {}
+            guide = []
+            for g in (it.get("guide") or []):
+                if not isinstance(g, dict):
+                    continue
+                p = (g.get("prompt") or "").strip()
+                if not p:
+                    continue
+                if "answer_index" in g:  # 选择题
+                    guide.append({
+                        "prompt": p,
+                        "samples": [s for s in (g.get("samples") or []) if isinstance(s, str)],
+                        "options": [s for s in (g.get("options") or []) if isinstance(s, str)],
+                        "answer_index": g.get("answer_index", 0),
+                        "reveal": (g.get("reveal") or "").strip(),
+                    })
+                else:  # 填空题（最后一轮归纳）
+                    guide.append({
+                        "prompt": p,
+                        "answer": (g.get("answer") or "").strip(),
+                        "reveal": (g.get("reveal") or "").strip(),
+                    })
             out[primary] = {
-                "compare": [{"a": c.get("a", ""), "b": c.get("b", ""), "diff": c.get("diff", "")}
-                            for c in (it.get("compare") or []) if isinstance(c, dict)],
+                "guide": guide,
                 "classify": {
                     "items": [s for s in (classify.get("items") or []) if isinstance(s, str)],
                     "boxes": [s for s in (classify.get("boxes") or []) if isinstance(s, str)],
                     "answers": classify.get("answers") if isinstance(classify.get("answers"), dict) else {},
                 },
-                "formula": {"template": (formula.get("template") or "").strip(),
-                            "answer": (formula.get("answer") or "").strip(),
-                            "hint": (formula.get("hint") or "").strip()},
                 "trap": {"question": (trap.get("question") or "").strip(),
                          "answer": (trap.get("answer") or "").strip(),
                          "explain": (trap.get("explain") or "").strip()},
