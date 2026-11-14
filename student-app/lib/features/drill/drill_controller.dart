@@ -29,6 +29,7 @@ class DrillState {
     this.completed = false,
     this.revealRule = false,
     this.answered = false,
+    this.results = const {},
   });
 
   final int? taskId;
@@ -43,6 +44,7 @@ class DrillState {
   final bool completed;
   final bool revealRule; // 规律引导是否已揭晓
   final bool answered; // 当前题是否已答（答了显示「下一步」）
+  final Map<String, bool> results; // 收集各 item_id 的判分结果（供 complete 用）
 
   DrillState copyWith({
     int? taskId,
@@ -57,6 +59,7 @@ class DrillState {
     bool? completed,
     bool? revealRule,
     bool? answered,
+    Map<String, bool>? results,
   }) =>
       DrillState(
         taskId: taskId ?? this.taskId,
@@ -71,6 +74,7 @@ class DrillState {
         completed: completed ?? this.completed,
         revealRule: revealRule ?? this.revealRule,
         answered: answered ?? this.answered,
+        results: results ?? this.results,
       );
 }
 
@@ -104,8 +108,8 @@ class DrillController extends Notifier<DrillState> {
     state = state.copyWith(revealRule: true);
   }
 
-  /// 下一步：条目内推进或步间推进。
-  void nextItem() {
+  /// 下一步：条目内推进或步间推进；最后一步调 complete 拿真实星级。
+  Future<void> nextItem() async {
     final s = state.session;
     if (s == null) return;
     final items = _currentItems(s);
@@ -114,7 +118,7 @@ class DrillController extends Notifier<DrillState> {
     } else if (state.stepIndex + 1 < s.steps.length) {
       state = state.copyWith(stepIndex: state.stepIndex + 1, itemIndex: 0, answered: false, npc: null);
     } else {
-      state = state.copyWith(phase: DrillPhase.review);
+      await complete(results: state.results);
     }
   }
 
@@ -139,16 +143,19 @@ class DrillController extends Notifier<DrillState> {
           );
       final correct = r['correct'] == true;
       final hint = '${r['hint'] ?? ''}';
+      final results = {...state.results, '$itemId': correct};
       if (correct) {
         state = state.copyWith(
           busy: false,
           answered: true,
+          results: results,
           npc: NpcMessage('✨', '太棒了，答对啦！'),
         );
       } else if (r['reveal_answer'] == true) {
         state = state.copyWith(
           busy: false,
           answered: true,
+          results: results,
           npc: NpcMessage('💡', '没关系，答案是「${r['expected'] ?? ''}」，记牢它！'),
         );
       } else {
@@ -178,6 +185,7 @@ class DrillController extends Notifier<DrillState> {
       state = state.copyWith(
         busy: false,
         answered: true,
+        results: {...state.results, '$itemId': pass},
         npc: pass
             ? const NpcMessage('✨', '搭配正确，用得好！')
             : NpcMessage('💡', '${r['feedback'] ?? '再试试把短语用进完整句子里'}'),
@@ -200,6 +208,7 @@ class DrillController extends Notifier<DrillState> {
           );
       state = state.copyWith(
         busy: false,
+        phase: DrillPhase.review,
         stars: (r['stars'] as num?)?.toInt() ?? 1,
         completed: true,
         npc: const NpcMessage('🎉', '闯关完成！看看你的星星吧'),
