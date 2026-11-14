@@ -6,12 +6,11 @@ MAX_ITEMS = 8
 
 
 def _steps_for(kind: str) -> list[str]:
-    if kind == "phrase":
-        # 短语类去掉「记」步：认 → 用 → 快测（「用」即造句，本身就在记忆）
-        return ["recognize", "produce", "quiz"]
     if kind == "explore":
-        return ["observe", "classify", "formula", "trap"]
-    return ["structure", "drill", "apply", "closure"]
+        # 观察引导（guide 递进链）→ 归类 → 陷阱（formula 已并入 guide 的填空归纳轮）
+        return ["observe", "classify", "trap"]
+    # 识记型：认 → 背 → 测
+    return ["recognize", "recall", "quiz"]
 
 
 def build_quiz(items: list) -> list[dict]:

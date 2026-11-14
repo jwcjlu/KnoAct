@@ -59,3 +59,14 @@ def test_generate_explore_guide_structure(db, monkeypatch):
     assert r["比喻"]["guide"][1]["answer"] == "喻体"
     assert "compare" not in r["比喻"]
     assert "formula" not in r["比喻"]
+
+
+def test_steps_for_memorize_is_recognize_recall_quiz():
+    from app.services.drill_content import _steps_for
+    assert _steps_for("phrase") == ["recognize", "recall", "quiz"]
+    assert _steps_for("outline") == ["recognize", "recall", "quiz"]
+
+
+def test_steps_for_explore_has_no_formula():
+    from app.services.drill_content import _steps_for
+    assert _steps_for("explore") == ["observe", "classify", "trap"]
