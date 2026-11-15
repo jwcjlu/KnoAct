@@ -1,4 +1,5 @@
 import json
+import shutil
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
@@ -105,29 +106,38 @@ async def from_pdf(subject: str = Form(...), handout_kind: str = Form("outline")
     db.add(doc); db.commit(); db.refresh(doc)
     safe_name = os.path.basename(file.filename or "upload.pdf")
     path = f"uploads/{doc.id}_{safe_name}"
+    out_dir = f"uploads/{doc.id}_pages"
     with open(path, "wb") as f:
         f.write(data)
     doc.storage_path = path
     db.commit()
 
-    pages = render_pages(doc.id, path, f"uploads/{doc.id}_pages")
-    ocr_pages = []
-    for p in pages:
-        text = _ocr_page(path, p["page_number"] - 1, db, "识别这张讲义页面中的全部文字，原样输出。")
-        ocr_pages.append({"page_number": p["page_number"], "text": text})
+    try:
+        pages = render_pages(doc.id, path, out_dir)
+        ocr_pages = []
+        for p in pages:
+            text = _ocr_page(path, p["page_number"] - 1, db, "识别这张讲义页面中的全部文字，原样输出。")
+            ocr_pages.append({"page_number": p["page_number"], "text": text})
 
-    items = extract_items_from_pages(db, handout_kind, ocr_pages)
-    created = 0
-    for it in items:
-        extra = {"释义": it.get("secondary") or ""}
-        db.add(KnowledgePointPool(
-            owner_id=user.id, subject=subject, category=handout_kind,
-            content=it.get("primary") or "", source="pdf",
-            document_id=doc.id,
-            extra=json.dumps(extra, ensure_ascii=False)))
-        created += 1
-    db.commit()
-    return {"document_id": doc.id, "count": created}
+        items = extract_items_from_pages(db, handout_kind, ocr_pages)
+        created = 0
+        for it in items:
+            extra = {"释义": it.get("secondary") or ""}
+            db.add(KnowledgePointPool(
+                owner_id=user.id, subject=subject, category=handout_kind,
+                content=it.get("primary") or "", source="pdf",
+                document_id=doc.id,
+                extra=json.dumps(extra, ensure_ascii=False)))
+            created += 1
+        db.commit()
+        return {"document_id": doc.id, "count": created}
+    finally:
+        # 纯中间产物：无 reader 页面引用，清理渲染页目录与源 PDF，避免磁盘无限增长
+        shutil.rmtree(out_dir, ignore_errors=True)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 class PlanIn(BaseModel):
@@ -182,11 +192,12 @@ def update_plan(plan_id: int, req: PlanIn,
         return {"error": "无权操作"}
     p.subject = req.subject or p.subject
     p.title = req.title or p.title
-    p.point_ids = json.dumps(req.point_ids)
+    if req.point_ids:
+        p.point_ids = json.dumps(req.point_ids)
     from datetime import datetime
     p.updated_at = datetime.utcnow()
     db.commit()
-    return {"id": p.id, "point_ids": req.point_ids}
+    return {"id": p.id, "point_ids": json.loads(p.point_ids or "[]")}
 
 
 @router.delete("/plans/{plan_id}")
