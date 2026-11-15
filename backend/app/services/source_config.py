@@ -32,11 +32,11 @@ def xuekubao_adapter(db: Session) -> XuekubaoAdapter:
     cfg = _cfg(db)
     base = _pick(cfg, "xuekubao_api_base", "XUEKUBAO_API_BASE", "https://api.xuekubao.com")
     key = _pick(cfg, "xuekubao_access_key", "XUEKUBAO_ACCESS_KEY")
-    timeout = _pick(cfg, "xuekubao_timeout", "XUEKUBAO_TIMEOUT", "30")
+    timeout = _pick(cfg, "xuekubao_timeout", "XUEKUBAO_TIMEOUT", "60")
     try:
-        t = float(timeout or "30")
+        t = float(timeout or "60")
     except ValueError:
-        t = 30.0
+        t = 60.0
     adapter = XuekubaoAdapter(base_url=base, access_key=key)
     adapter.timeout = t
     return adapter

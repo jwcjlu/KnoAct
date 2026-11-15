@@ -525,6 +525,36 @@ function removeReadingSub(i){ if(readingSubs.length>1){ captureReadingForm(); re
 function escapeHtml(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+/** 学库宝/tiku 题干：白名单渲染 br/img，剥壳其它标签，去掉 $...$ */
+function renderQuestionHtml(raw){
+  const src = String(raw||'');
+  const tpl = document.createElement('template');
+  tpl.innerHTML = src;
+  const walk = (node)=>{
+    let out = '';
+    node.childNodes.forEach(n=>{
+      if(n.nodeType === 3){
+        out += escapeHtml(String(n.textContent||'').replace(/\$([^$]+)\$/g, '$1'));
+        return;
+      }
+      if(n.nodeType !== 1) return;
+      const tag = n.tagName.toLowerCase();
+      if(tag === 'br'){ out += '<br/>'; return; }
+      if(tag === 'img'){
+        const u = (n.getAttribute('src')||'').trim();
+        if(/^https?:\/\//i.test(u)){
+          out += `<img src="${escapeAttr(u)}" alt="" style="max-width:100%;height:auto;vertical-align:middle;margin:6px 0">`;
+        }
+        return;
+      }
+      if(tag === 'script' || tag === 'style') return;
+      out += walk(n);
+      if(tag === 'p' || tag === 'div' || tag === 'li') out += '<br/>';
+    });
+    return out;
+  };
+  return walk(tpl.content);
+}
 function renderPassageInline(escaped){
   return escaped
     .replace(/____/g, '<span class="passage-blank"></span>')
@@ -1034,9 +1064,18 @@ async function openXuekubaoPicker(){
 }
 async function loadXkbChapters(silent){
   if(!xkbPicker.sel[0]) return;
+  const [pharse_id, grade_id, subject_id, edition_id] = xkbPicker.sel;
+  // 只选学段会拉取全量目录、后端必超时：需先选到年级和学科
+  if(!grade_id || !subject_id){
+    if(!silent){
+      xkbPicker.error = '请先选好「年级」和「学科」（仅选学段会拉取全量目录导致超时）';
+      xkbPicker.loading = false;
+      paintXkbModal();
+    }
+    return;
+  }
   if(!silent){ xkbPicker.loading = true; paintXkbModal(); }
   try{
-    const [pharse_id, grade_id, subject_id, edition_id] = xkbPicker.sel;
     const r = await api('/api/xuekubao/chapters', {method:'POST', body:{
       pharse_id, subject_id, grade_id, edition_id,
     }});
@@ -1163,7 +1202,7 @@ function formatQuestionRichDetail(q){
   const parts = [];
   const opts = Array.isArray(q.options) ? q.options : [];
   if(cat==='choice' && opts.length){
-    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:6px"><b>选项：</b>${opts.map(o=>escapeAttr(o.label||'')).join(' · ')}</div>`);
+    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:6px"><b>选项：</b>${opts.map(o=>`<div style="margin-top:4px">${renderQuestionHtml(o.label||'')}</div>`).join('')}</div>`);
   }
   const aj = (q.answer_json && typeof q.answer_json==='object') ? q.answer_json : {};
   if(cat==='blank' && aj.blanks){
@@ -1177,7 +1216,7 @@ function formatQuestionRichDetail(q){
     parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:4px"><b>参考：</b>${escapeAttr(aj.sample || q.answer)}</div>`);
     if(aj.rubric) parts.push(`<div style="font-size:12px;color:#78817b;margin-top:2px"><b>要点：</b>${escapeAttr(aj.rubric)}</div>`);
   }
-  if(q.analysis) parts.push(`<div style="font-size:12px;color:#78817b;margin-top:4px"><b>解析：</b>${escapeAttr(q.analysis)}</div>`);
+  if(q.analysis) parts.push(`<div style="font-size:12px;color:#78817b;margin-top:4px"><b>解析：</b>${renderQuestionHtml(q.analysis)}</div>`);
   return parts.join('');
 }
 
@@ -1250,7 +1289,7 @@ function renderQuestionTab(){
         const extraText = formatQuestionExtra(q.extra);
         return `<div class="q-item" style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:#fafbf9;border:1px solid var(--line3);border-radius:10px;margin-bottom:8px">
           <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:#333;line-height:1.5"><span class="q-type" style="font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px;background:#edf1ff;color:#4566e8">${label}</span>${escapeAttr(q.question||'')}</div>
+            <div style="font-size:13px;font-weight:600;color:#333;line-height:1.5"><span class="q-type" style="font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px;background:#edf1ff;color:#4566e8">${label}</span>${renderQuestionHtml(q.question||'')}</div>
             ${ansText?`<div style="font-size:12px;color:#8e9691;margin-top:3px">${ansText}</div>`:''}
             ${richText}
             ${extraText}

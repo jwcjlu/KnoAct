@@ -47,7 +47,17 @@ def chapter_tree(
     user: User = Depends(require_role("parent", "admin")),
     adapter: XuekubaoAdapter = Depends(_adapter),
 ):
-    """教材章节树；三级节点 oldId 可作为 knowledgeId。"""
+    """教材章节树；三级节点 oldId 可作为 knowledgeId。
+
+    学库宝 chapterApi 只传学段会返回整个学段的完整章节树，数据量巨大、
+    服务端常超 30s。因此要求至少带 grade_id 或 subject_id 收窄范围，
+    否则直接返回友好报错而非发起必超时的请求。
+    """
+    if not (req.grade_id or req.subject_id):
+        raise HTTPException(
+            status_code=400,
+            detail="请先选择年级或学科再加载章节，仅选学段会拉取全量目录导致超时",
+        )
     raw = adapter.chapter_tree(
         pharse_id=req.pharse_id,
         subject_id=req.subject_id,

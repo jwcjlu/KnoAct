@@ -107,6 +107,9 @@ def xuekubao_item_to_draft(item: dict) -> QuestionDraft | None:
         if first.get("knowledgeName"):
             tags["knowledge_points"] = [str(first["knowledgeName"])]
     d.tags = tags
+    subj_name = (item.get("subjectName") or "").strip()
+    if subj_name:
+        tags["subject_name"] = subj_name
     d.difficulty = _map_diff(item.get("diff")) if item.get("diff") is not None else d.difficulty
     return d
 
@@ -133,7 +136,7 @@ class XuekubaoAdapter(ThirdPartyAdapter):
     def __init__(self, base_url: str | None = None, access_key: str | None = None):
         self.base_url = (base_url if base_url is not None else _env("XUEKUBAO_API_BASE", "https://api.xuekubao.com")).rstrip("/")
         self.access_key = access_key if access_key is not None else _env("XUEKUBAO_ACCESS_KEY")
-        self.timeout = float(_env("XUEKUBAO_TIMEOUT", "30") or "30")
+        self.timeout = float(_env("XUEKUBAO_TIMEOUT", "60") or "60")
 
     def configured(self) -> bool:
         return bool(self.base_url and self.access_key)

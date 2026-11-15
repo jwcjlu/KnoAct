@@ -426,6 +426,17 @@ def sync_xuekubao_bank(
             "message": "未解析到题目，请核对 knowledge_id 或改用 import-third-party",
             "data_count": raw.get("dataCount"),
         }
+    # 学科一致性校验：题目自带真实学科（subjectName）须与卷子学科一致，否则拒绝导入，
+    # 避免「数学题导入语文卷」之类的静默错标。
+    bank_subj = (bank.subject or "").strip()
+    if bank_subj:
+        for d in drafts:
+            q_subj = (d.tags.get("subject_name") or "").strip()
+            if q_subj and q_subj != bank_subj:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"所选知识点属于「{q_subj}」，与当前卷子「{bank_subj}」不符，请先切换到对应学科的卷子再导入",
+                )
     ids = _persist_drafts(db, bank, drafts, "xuekubao")
     db.commit()
     return {"count": len(ids), "ids": ids, "data_count": raw.get("dataCount")}

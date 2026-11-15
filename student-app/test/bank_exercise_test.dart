@@ -32,6 +32,30 @@ class FakePassageBankRepository implements BankRepository {
   }
 }
 
+class FakeHtmlBankRepository implements BankRepository {
+  @override
+  Future<List<PracticeBank>> listPracticeBanks() async => const [];
+
+  @override
+  Future<List<BankQuestion>> fetchQuestions(int bankId, {List<int>? questionIds}) async {
+    return const [
+      BankQuestion(
+        id: 15,
+        qtype: 'short_answer',
+        qtypeCategory: 'subjective',
+        question:
+            '在下面数线上标出\$908000\$和\$982000\$的大概位置.<br/><img src="https://img.cuotixue.com/a.jpg" style="vertical-align:middle">',
+        options: [],
+      ),
+    ];
+  }
+
+  @override
+  Future<BankSubmitResult> submit({required int bankId, required List<Map<String, dynamic>> answers}) async {
+    return const BankSubmitResult(score: 0, total: 1, answers: []);
+  }
+}
+
 class FakeBankRepository implements BankRepository {
   @override
   Future<List<PracticeBank>> listPracticeBanks() async => const [];
@@ -59,6 +83,23 @@ class FakeBankRepository implements BankRepository {
 }
 
 void main() {
+  testWidgets('导入题 HTML 题干渲染为文本与图片而非源码', (tester) async {
+    final router = GoRouter(
+      routes: [GoRoute(path: '/', builder: (_, __) => const BankExercisePage(bankId: 9))],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [bankRepositoryProvider.overrideWithValue(FakeHtmlBankRepository())],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pump(); // 勿用 pumpAndSettle：网络图 placeholder 动画不会停
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.textContaining('在下面数线上标出908000'), findsOneWidget);
+    expect(find.textContaining('<img'), findsNothing);
+    expect(find.textContaining('<br'), findsNothing);
+  });
+
   testWidgets('题库练习页渲染题干与选项', (tester) async {
     final router = GoRouter(
       routes: [GoRoute(path: '/', builder: (_, __) => const BankExercisePage(bankId: 9))],
