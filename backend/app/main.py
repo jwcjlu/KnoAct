@@ -65,9 +65,14 @@ def _ensure_db_tables() -> None:
                         _conn.execute(_text("ALTER TABLE knowledge_point_pool ADD COLUMN folder_id INTEGER"))
                     if "tags" not in _cols:
                         _conn.execute(_text("ALTER TABLE knowledge_point_pool ADD COLUMN tags TEXT DEFAULT '[]'"))
+            if "training_items" in set(_insp.get_table_names()):
+                _tcols = {c["name"] for c in _insp.get_columns("training_items")}
+                if "point_pool_id" not in _tcols:
+                    with db.get_bind().begin() as _conn:
+                        _conn.execute(_text("ALTER TABLE training_items ADD COLUMN point_pool_id INTEGER"))
         except Exception as exc:
             db.rollback()
-            _log.warning("knowledge_point_pool 列迁移失败: %s", exc)
+            _log.warning("knowledge_point_pool/training_items 列迁移失败: %s", exc)
     finally:
         db.close()
 
