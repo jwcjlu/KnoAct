@@ -460,6 +460,30 @@ def sync_tiku_bank(
     return {"count": len(ids), "ids": ids}
 
 
+@router.post("/{bank_id}/preview-xuekubao")
+def preview_xuekubao_bank(
+    bank_id: int,
+    req: XuekubaoSyncReq,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """拉题预览：normalize + 学科校验，不写库。"""
+    bank = _require_bank(bank_id, user, db)
+    drafts, raw = _fetch_xuekubao_drafts(db, bank, req)
+    if not drafts:
+        return {
+            "drafts": [],
+            "page": req.page,
+            "data_count": raw.get("dataCount"),
+            "message": "未解析到题目，请核对 knowledge_id 或改用 import-third-party",
+        }
+    return {
+        "drafts": [_draft_to_dict(d) for d in drafts],
+        "page": req.page,
+        "data_count": raw.get("dataCount"),
+    }
+
+
 @router.post("/{bank_id}/sync-xuekubao")
 def sync_xuekubao_bank(
     bank_id: int,
