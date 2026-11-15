@@ -108,6 +108,9 @@ let poolPoints = [];       // [{id, subject, category, content, extra, source}]
 let plans = [];            // [{id, subject, title, point_ids, group_id, status}]
 let poolTab = null;        // null | 'pool' | 'plans'
 let poolSelected = new Set();  // 勾选的知识点 id（组合方案用）
+let poolForm = null;       // null | {mode:'add'} | {mode:'edit', id, subject, category, content, meaning}
+let poolPdfForm = null;    // null | {subject, kind}  上传 PDF 的学科/类型选择
+let planForm = null;       // null | {subject}  新建方案的学科选择
 
 // 屏幕时间
 let screenGroups = [];     // [{id,name,kind,daily_limit_seconds}]
@@ -2984,39 +2987,116 @@ async function loadPlans(){ plans = await api('/api/plans'); if(!Array.isArray(p
 function renderPoolTab(){
   const rows = poolPoints.map(p=>{
     let extra = {}; try{ extra = JSON.parse(p.extra||'{}'); }catch(e){}
+    const isEditing = poolForm && poolForm.mode==='edit' && poolForm.id===p.id;
     return `<div class="row" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line3)">
       <input type="checkbox" ${poolSelected.has(p.id)?'checked':''} onchange="togglePoolSel(${p.id})">
       <div style="flex:1">
         <div style="font-weight:600">${escapeHtml(p.content||'')}</div>
         <div style="font-size:12px;color:#778079">${escapeHtml(p.subject)} · ${escapeHtml(p.category)} · ${escapeHtml(extra['释义']||extra['例句']||extra['作者']||'')}</div>
+        ${isEditing ? renderPoolEditForm(p, extra) : ''}
       </div>
       <button class="btn-ghost" onclick="editPoolPoint(${p.id})">编辑</button>
       <button class="btn-ghost" onclick="delPoolPoint(${p.id})">删除</button>
     </div>`;
   }).join('');
+
+  // 新增表单
+  const addForm = poolForm && poolForm.mode==='add' ? renderPoolAddForm() : '';
+
   return `<div class="parent-grid">
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>知识点库</h3><div class="sub">上传讲义 PDF 解析成可复用知识点，勾选组合成训练方案</div></div></div>
       <div class="bd">
         <div style="display:flex;gap:8px;margin:12px 0">
-          <button class="btn-primary" onclick="uploadPoolPdf()">上传讲义 PDF</button>
-          <button class="btn-ghost" onclick="addPoolPoint()">手动新增</button>
+          <button class="btn-primary" onclick="togglePdfForm()">上传讲义 PDF</button>
+          <button class="btn-ghost" onclick="openPoolAddForm()">手动新增</button>
           <button class="btn-primary" onclick="createPlanFromSel()">组合成方案(${poolSelected.size})</button>
           <button class="btn-ghost" onclick="poolTab=null;render()">返回</button>
         </div>
+        ${poolPdfForm ? renderPdfForm() : ''}
+        ${addForm}
+        ${planForm ? renderPlanCreateForm() : ''}
         ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无知识点，点击「上传讲义 PDF」开始</div>'}
       </div>
     </div>
   </div>`;
 }
 
+const SUBJECTS = ['语文','英语','数学'];
+
+function renderPdfForm(){
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:12px;margin:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <span style="font-size:13px;color:#5c6761">学科</span>
+    <select id="poolPdfSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option ${poolPdfForm.subject===s?'selected':''}>${s}</option>`).join('')}</select>
+    <span style="font-size:13px;color:#5c6761">讲义类型</span>
+    <select id="poolPdfKind" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">
+      <option value="phrase" ${poolPdfForm.kind==='phrase'?'selected':''}>短语（英语固定搭配）</option>
+      <option value="outline" ${poolPdfForm.kind==='outline'?'selected':''}>归纳（古诗/生字/知识点）</option>
+    </select>
+    <button class="btn-primary" style="padding:6px 14px" onclick="pickPoolPdfFile()">选择 PDF 文件</button>
+    <button class="btn-ghost" style="padding:6px 14px" onclick="poolPdfForm=null;render()">取消</button>
+  </div>`;
+}
+
+function renderPoolAddForm(){
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:12px;margin:8px 0">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <span style="font-size:13px;color:#5c6761;min-width:36px">内容</span>
+      <input id="poolAddContent" placeholder="如 look after / 比喻的定义" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+      <span style="font-size:13px;color:#5c6761">学科</span>
+      <select id="poolAddSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option>${s}</option>`).join('')}</select>
+      <span style="font-size:13px;color:#5c6761">分类</span>
+      <input id="poolAddCategory" placeholder="短语/句型/语法/生字…" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:140px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+      <span style="font-size:13px;color:#5c6761;min-width:36px">释义</span>
+      <input id="poolAddMeaning" placeholder="中文释义（可留空）" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-primary" style="padding:6px 16px" onclick="submitPoolAdd()">保存</button>
+      <button class="btn-ghost" style="padding:6px 16px" onclick="poolForm=null;render()">取消</button>
+    </div>
+  </div>`;
+}
+
+function renderPoolEditForm(p, extra){
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:10px;margin-top:8px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+      <span style="font-size:13px;color:#5c6761">内容</span>
+      <input id="poolEditContent" value="${escapeHtml(p.content||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+      <span style="font-size:13px;color:#5c6761">学科</span>
+      <select id="poolEditSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option ${p.subject===s?'selected':''}>${s}</option>`).join('')}</select>
+      <span style="font-size:13px;color:#5c6761">分类</span>
+      <input id="poolEditCategory" value="${escapeHtml(p.category||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:140px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+      <span style="font-size:13px;color:#5c6761">释义</span>
+      <input id="poolEditMeaning" value="${escapeHtml(extra['释义']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-primary" style="padding:6px 16px" onclick="submitPoolEdit(${p.id})">保存</button>
+      <button class="btn-ghost" style="padding:6px 16px" onclick="poolForm=null;render()">取消</button>
+    </div>
+  </div>`;
+}
+
 function togglePoolSel(id){ if(poolSelected.has(id)) poolSelected.delete(id); else poolSelected.add(id); render(); }
 
-function uploadPoolPdf(){
-  const subject = prompt('学科（语文/英语/数学）','英语');
-  if(!subject) return;
-  const kind = prompt('讲义类型（phrase 短语 / outline 归纳）','phrase');
-  if(!kind) return;
+function togglePdfForm(){
+  poolPdfForm = poolPdfForm ? null : {subject:'英语', kind:'phrase'};
+  render();
+}
+
+function openPoolAddForm(){ poolForm = {mode:'add'}; render(); }
+function editPoolPoint(id){
+  const p = poolPoints.find(x=>x.id===id); if(!p) return;
+  poolForm = {mode:'edit', id};
+  render();
+}
+
+function pickPoolPdfFile(){
+  const subject = document.getElementById('poolPdfSubject').value;
+  const kind = document.getElementById('poolPdfKind').value;
   const inp = document.createElement('input'); inp.type='file'; inp.accept='application/pdf';
   inp.onchange = async ()=>{
     const file = inp.files[0]; if(!file) return;
@@ -3026,34 +3106,39 @@ function uploadPoolPdf(){
     if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
     if(!r || !r.count){ toast(apiErrorMsg(r, '识别失败，请换清晰 PDF 或手动录入')); return; }
     toast(`已提取 ${r.count} 条知识点`);
-    await loadPool(); render();
+    poolPdfForm = null; await loadPool(); render();
   };
   inp.click();
 }
 
-async function addPoolPoint(){
-  const content = prompt('知识点内容（如 look after）'); if(!content) return;
-  const subject = prompt('学科','英语'); if(!subject) return;
-  const category = prompt('分类','短语') || '';
-  const extra = prompt('释义（可留空）','') || '';
-  const extraJson = extra ? JSON.stringify({释义:extra}) : '{}';
-  await api('/api/knowledge-pool', {method:'POST', body:{subject, category, content, extra: extraJson}});
-  await loadPool(); render();
+async function submitPoolAdd(){
+  const content = document.getElementById('poolAddContent').value.trim();
+  if(!content){ toast('请填写知识点内容'); return; }
+  const subject = document.getElementById('poolAddSubject').value;
+  const category = document.getElementById('poolAddCategory').value.trim();
+  const meaning = document.getElementById('poolAddMeaning').value.trim();
+  const extraJson = meaning ? JSON.stringify({释义:meaning}) : '{}';
+  const r = await api('/api/knowledge-pool', {method:'POST', body:{subject, category, content, extra: extraJson}});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  poolForm = null; await loadPool(); render();
 }
 
-async function editPoolPoint(id){
-  const p = poolPoints.find(x=>x.id===id); if(!p) return;
-  const content = prompt('内容', p.content); if(!content) return;
-  let extra = {}; try{ extra = JSON.parse(p.extra||'{}'); }catch(e){ extra = {}; }
-  const meaning = prompt('释义（留空不变）', extra['释义']||'');
-  if(meaning !== null){ extra['释义'] = meaning; }
-  await api(`/api/knowledge-pool/${id}`, {method:'PUT', body:{content, extra: JSON.stringify(extra), subject:p.subject, category:p.category}});
-  await loadPool(); render();
+async function submitPoolEdit(id){
+  const content = document.getElementById('poolEditContent').value.trim();
+  if(!content){ toast('请填写知识点内容'); return; }
+  const subject = document.getElementById('poolEditSubject').value;
+  const category = document.getElementById('poolEditCategory').value.trim();
+  const meaning = document.getElementById('poolEditMeaning').value.trim();
+  const extraJson = meaning ? JSON.stringify({释义:meaning}) : '{}';
+  const r = await api(`/api/knowledge-pool/${id}`, {method:'PUT', body:{subject, category, content, extra: extraJson}});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  poolForm = null; await loadPool(); render();
 }
 
 async function delPoolPoint(id){
   if(!confirm('删除该知识点？')) return;
-  await api(`/api/knowledge-pool/${id}`, {method:'DELETE'});
+  const r = await api(`/api/knowledge-pool/${id}`, {method:'DELETE'});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
   poolSelected.delete(id); await loadPool(); render();
 }
 
@@ -3081,13 +3166,31 @@ function renderPlansTab(){
   </div>`;
 }
 
-async function createPlanFromSel(){
+function createPlanFromSel(){
   if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
-  const title = prompt('方案名称'); if(!title) return;
-  const subject = prompt('学科','英语'); if(!subject) return;
+  if(planForm){ planForm = null; render(); return; }  // 再次点击收起
+  planForm = {subject:'英语'};
+  render();
+}
+
+function renderPlanCreateForm(){
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:12px;margin:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <span style="font-size:13px;color:#5c6761">方案名称</span>
+    <input id="planTitle" placeholder="如 look 短语专项" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:200px">
+    <span style="font-size:13px;color:#5c6761">学科</span>
+    <select id="planSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option>${s}</option>`).join('')}</select>
+    <button class="btn-primary" style="padding:6px 16px" onclick="submitPlanCreate()">保存方案</button>
+    <button class="btn-ghost" style="padding:6px 16px" onclick="planForm=null;render()">取消</button>
+  </div>`;
+}
+
+async function submitPlanCreate(){
+  const title = document.getElementById('planTitle').value.trim();
+  if(!title){ toast('请填写方案名称'); return; }
+  const subject = document.getElementById('planSubject').value;
   const r = await api('/api/plans', {method:'POST', body:{subject, title, point_ids:[...poolSelected]}});
   if(r && (r.error || r.detail)){ toast(apiErrorMsg(r, '创建方案失败')); return; }
-  poolSelected.clear(); poolTab='plans'; await loadPlans(); render();
+  planForm = null; poolSelected.clear(); poolTab='plans'; await loadPlans(); render();
 }
 
 async function publishPlan(id){
