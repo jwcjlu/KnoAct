@@ -79,3 +79,32 @@ def test_delete_plan_cascades_group(client, db):
     client.delete(f"/api/plans/{plan_id}", headers=parent_h)
     assert db.get(TrainingGroup, gid) is None
     assert db.query(TrainingItem).filter_by(group_id=gid).count() == 0
+
+
+def test_folder_tree_and_move(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p = _mk_point(db, parent, content="look after")
+    r = client.post("/api/knowledge-folders", json={"name": "look 短语", "subject": "英语", "parent_id": None}, headers=parent_h)
+    fid = r.json()["id"]
+    r2 = client.put(f"/api/knowledge-pool/{p.id}/move", json={"folder_id": fid}, headers=parent_h)
+    assert r2.json()["folder_id"] == fid
+    tree = client.get("/api/knowledge-folders", headers=parent_h).json()
+    root = [f for f in tree if f["id"] == fid][0]
+    assert root["point_count"] == 1
+
+
+def test_point_tags(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p = _mk_point(db, parent, content="give up")
+    r = client.put(f"/api/knowledge-pool/{p.id}/tags", json={"tags": ["易错", "重点"]}, headers=parent_h)
+    import json as _json
+    assert _json.loads(r.json()["tags"]) == ["易错", "重点"]
+
+
+def test_delete_folder_nonempty_refused(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p = _mk_point(db, parent, content="look after")
+    fid = client.post("/api/knowledge-folders", json={"name": "f", "subject": "英语", "parent_id": None}, headers=parent_h).json()["id"]
+    client.put(f"/api/knowledge-pool/{p.id}/move", json={"folder_id": fid}, headers=parent_h)
+    r = client.delete(f"/api/knowledge-folders/{fid}", headers=parent_h)
+    assert r.json().get("error")

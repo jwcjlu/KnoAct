@@ -3,11 +3,12 @@ import shutil
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.deps import require_role
 from ..database import get_db
-from ..models import KnowledgePointPool, TrainingPlan, User
+from ..models import KnowledgePointPool, TrainingPlan, KnowledgeFolder, User
 
 router = APIRouter(prefix="/api", tags=["knowledge-pool"])
 
@@ -89,6 +90,118 @@ def delete_point(point_id: int, user: User = Depends(require_role("parent", "adm
     return {"ok": True}
 
 
+class FolderIn(BaseModel):
+    name: str = ""
+    subject: str = ""
+    parent_id: int | None = None
+
+
+class MoveIn(BaseModel):
+    folder_id: int | None = None
+
+
+class TagsIn(BaseModel):
+    tags: list[str] = []
+
+
+def _folder_tree(db: Session, owner_id: int, subject: str = "") -> list[dict]:
+    q = db.query(KnowledgeFolder).filter(KnowledgeFolder.owner_id == owner_id)
+    if subject:
+        q = q.filter(KnowledgeFolder.subject == subject)
+    folders = q.order_by(KnowledgeFolder.id).all()
+    count_map = dict(db.query(KnowledgePointPool.folder_id, func.count(KnowledgePointPool.id))
+                     .filter(KnowledgePointPool.folder_id.isnot(None))
+                     .group_by(KnowledgePointPool.folder_id).all())
+    nodes = {f.id: {"id": f.id, "name": f.name, "subject": f.subject,
+                    "parent_id": f.parent_id, "point_count": int(count_map.get(f.id, 0)),
+                    "children": []} for f in folders}
+    roots = []
+    for f in folders:
+        if f.parent_id and f.parent_id in nodes:
+            nodes[f.parent_id]["children"].append(nodes[f.id])
+        else:
+            roots.append(nodes[f.id])
+    return roots
+
+
+@router.get("/knowledge-folders")
+def list_folders(subject: str = "", user: User = Depends(require_role("parent", "admin")),
+                 db: Session = Depends(get_db)):
+    if user.role == "admin":
+        return []
+    return _folder_tree(db, user.id, subject)
+
+
+@router.post("/knowledge-folders")
+def create_folder(req: FolderIn, user: User = Depends(require_role("parent", "admin")),
+                  db: Session = Depends(get_db)):
+    if not (req.name or "").strip():
+        return {"error": "目录名不能为空"}
+    f = KnowledgeFolder(owner_id=user.id, name=req.name.strip(), subject=req.subject,
+                        parent_id=req.parent_id)
+    db.add(f); db.commit(); db.refresh(f)
+    return {"id": f.id}
+
+
+@router.put("/knowledge-folders/{folder_id}")
+def update_folder(folder_id: int, req: FolderIn,
+                  user: User = Depends(require_role("parent", "admin")),
+                  db: Session = Depends(get_db)):
+    f = _own(db, user, KnowledgeFolder, folder_id)
+    if f is None:
+        return {"error": "not found"}
+    if f is False:
+        return {"error": "无权操作"}
+    if req.name.strip():
+        f.name = req.name.strip()
+    if req.parent_id is not None:
+        f.parent_id = req.parent_id
+    db.commit()
+    return {"id": f.id}
+
+
+@router.delete("/knowledge-folders/{folder_id}")
+def delete_folder(folder_id: int, user: User = Depends(require_role("parent", "admin")),
+                  db: Session = Depends(get_db)):
+    f = _own(db, user, KnowledgeFolder, folder_id)
+    if f is None:
+        return {"error": "not found"}
+    if f is False:
+        return {"error": "无权操作"}
+    has_child = db.query(KnowledgeFolder.id).filter_by(parent_id=folder_id).first()
+    has_point = db.query(KnowledgePointPool.id).filter_by(folder_id=folder_id).first()
+    if has_child or has_point:
+        return {"error": "目录非空，请先移走子目录和知识点"}
+    db.delete(f); db.commit()
+    return {"ok": True}
+
+
+@router.put("/knowledge-pool/{point_id}/move")
+def move_point(point_id: int, req: MoveIn, user: User = Depends(require_role("parent", "admin")),
+               db: Session = Depends(get_db)):
+    p = _own(db, user, KnowledgePointPool, point_id)
+    if p is None:
+        return {"error": "not found"}
+    if p is False:
+        return {"error": "无权操作"}
+    p.folder_id = req.folder_id
+    db.commit()
+    return {"id": p.id, "folder_id": p.folder_id}
+
+
+@router.put("/knowledge-pool/{point_id}/tags")
+def set_point_tags(point_id: int, req: TagsIn, user: User = Depends(require_role("parent", "admin")),
+                   db: Session = Depends(get_db)):
+    p = _own(db, user, KnowledgePointPool, point_id)
+    if p is None:
+        return {"error": "not found"}
+    if p is False:
+        return {"error": "无权操作"}
+    p.tags = json.dumps(req.tags, ensure_ascii=False)
+    db.commit()
+    return {"id": p.id, "tags": p.tags}
+
+
 @router.post("/knowledge-pool/from-pdf")
 async def from_pdf(subject: str = Form(...), handout_kind: str = Form("outline"),
                    file: UploadFile = File(...),
@@ -123,17 +236,22 @@ async def from_pdf(subject: str = Form(...), handout_kind: str = Form("outline")
             ocr_pages.append({"page_number": p["page_number"], "text": text})
 
         items = extract_items_from_pages(db, handout_kind, ocr_pages)
+        folder = None
+        if items:
+            folder_name = os.path.splitext(safe_name)[0] or "未命名讲义"
+            folder = KnowledgeFolder(owner_id=user.id, name=folder_name, subject=subject, parent_id=None)
+            db.add(folder); db.flush()
         created = 0
         for it in items:
-            extra = {"释义": it.get("secondary") or ""}
+            extra = {"释义": it.get("secondary") or "", "原句": it.get("example") or ""}
             db.add(KnowledgePointPool(
                 owner_id=user.id, subject=subject, category=handout_kind,
                 content=it.get("primary") or "", source="pdf",
-                document_id=doc.id,
+                document_id=doc.id, folder_id=folder.id if folder else None,
                 extra=json.dumps(extra, ensure_ascii=False)))
             created += 1
         db.commit()
-        return {"document_id": doc.id, "count": created}
+        return {"document_id": doc.id, "count": created, "folder_id": folder.id if folder else None}
     finally:
         # 渲染页为纯中间产物（无 reader 页面引用），清理；源 PDF 保留，供 document_id 溯源
         shutil.rmtree(out_dir, ignore_errors=True)
