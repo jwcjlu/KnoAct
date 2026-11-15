@@ -118,3 +118,32 @@ def test_move_point_cross_owner_refused(client, db):
     other_fid = client.post("/api/knowledge-folders", json={"name": "other", "subject": "英语", "parent_id": None}, headers=p2_h).json()["id"]
     r = client.put(f"/api/knowledge-pool/{p.id}/move", json={"folder_id": other_fid}, headers=parent_h)
     assert r.json().get("error")
+
+
+def test_batch_ops(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p1 = _mk_point(db, parent, content="a")
+    p2 = _mk_point(db, parent, content="b")
+    p3 = _mk_point(db, parent, content="c")
+    # 批量打标签
+    r = client.post("/api/knowledge-pool/batch-tags", json={"point_ids": [p1.id, p2.id], "tags": ["易错"]}, headers=parent_h)
+    assert r.json()["updated"] == 2
+    # 批量移动
+    fid = client.post("/api/knowledge-folders", json={"name": "f", "subject": "英语", "parent_id": None}, headers=parent_h).json()["id"]
+    r2 = client.post("/api/knowledge-pool/batch-move", json={"point_ids": [p1.id, p2.id], "folder_id": fid}, headers=parent_h)
+    assert r2.json()["updated"] == 2
+    # 批量删除（p3 未发布，应删 1 跳过 0）
+    r3 = client.post("/api/knowledge-pool/batch-delete", json={"point_ids": [p3.id]}, headers=parent_h)
+    assert r3.json()["deleted"] == 1
+
+
+def test_batch_delete_skips_published(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p = _mk_point(db, parent, content="look after")
+    # 发布成方案 → 产生引用该点的 TrainingItem
+    plan_id = client.post("/api/plans", json={"subject": "英语", "title": "t", "point_ids": [p.id]}, headers=parent_h).json()["id"]
+    client.post(f"/api/plans/{plan_id}/publish", headers=parent_h)
+    p2 = _mk_point(db, parent, content="give up")
+    r = client.post("/api/knowledge-pool/batch-delete", json={"point_ids": [p.id, p2.id]}, headers=parent_h)
+    assert r.json()["deleted"] == 1  # 只删了未发布的 p2
+    assert r.json()["skipped"] == 1  # 跳过了已发布的 p

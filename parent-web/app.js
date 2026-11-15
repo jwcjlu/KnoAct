@@ -3003,6 +3003,12 @@ function flattenFolders(folders, depth=0){
 
 function parseTags(t){ try{ const v = JSON.parse(t||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
 
+function filteredPoolPoints(){
+  return poolPoints.filter(p =>
+    (!poolActiveFolder || p.folder_id === poolActiveFolder) &&
+    (!poolActiveTag || (parseTags(p.tags)||[]).includes(poolActiveTag)));
+}
+
 function renderFolderNode(f, depth){
   const pad = depth * 16;
   const active = poolActiveFolder === f.id;
@@ -3055,9 +3061,7 @@ async function delFolder(id){
 
 function renderPoolTab(){
   // 目录 + 标签筛选
-  const filtered = poolPoints.filter(p =>
-    (!poolActiveFolder || p.folder_id === poolActiveFolder) &&
-    (!poolActiveTag || (parseTags(p.tags)||[]).includes(poolActiveTag)));
+  const filtered = filteredPoolPoints();
 
   const allTags = [...new Set(poolPoints.flatMap(p=>parseTags(p.tags)))];
   const tagBar = allTags.length
@@ -3106,8 +3110,11 @@ function renderPoolTab(){
           <button class="btn-primary" onclick="togglePdfForm()">上传讲义 PDF</button>
           <button class="btn-ghost" onclick="openPoolAddForm()">手动新增</button>
           <button class="btn-primary" onclick="createPlanFromSel()">组合成方案(${poolSelected.size})</button>
+          <button class="btn-ghost" onclick="selectAllPool()">全选</button>
+          <button class="btn-ghost" onclick="clearPoolSel()">清空</button>
           <button class="btn-ghost" onclick="poolTab=null;render()">返回</button>
         </div>
+        ${poolSelected.size ? renderBatchBar() : ''}
         ${poolPdfForm ? renderPdfForm() : ''}
         ${addForm}
         ${planForm ? renderPlanCreateForm() : ''}
@@ -3202,6 +3209,58 @@ function renderPoolEditForm(p, extra){
 }
 
 function togglePoolSel(id){ if(poolSelected.has(id)) poolSelected.delete(id); else poolSelected.add(id); render(); }
+
+function selectAllPool(){
+  filteredPoolPoints().forEach(p=>poolSelected.add(p.id));
+  render();
+}
+
+function clearPoolSel(){ poolSelected.clear(); render(); }
+
+function renderBatchBar(){
+  const folderOpts = `<option value="">未分类</option>` +
+    flattenFolders(poolFolders).map(f=>`<option value="${f.id}">${'　'.repeat(f.depth)}${escapeHtml(f.name)}</option>`).join('');
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#eef4ff;border:1px solid #d6e4ff;border-radius:10px;padding:8px 10px;margin:8px 0">
+    <span style="font-size:13px;color:#2e6bd8">已选 ${poolSelected.size} 项</span>
+    <button class="btn-ghost" style="color:#c05b4a" onclick="batchDeletePool()">批量删除(${poolSelected.size})</button>
+    <button class="btn-ghost" onclick="batchTagPool()">批量打标签</button>
+    <span style="font-size:13px;color:#5c6761">移动到</span>
+    <select id="batchMoveFolder" style="border:1px solid var(--line3);border-radius:8px;padding:5px 8px">${folderOpts}</select>
+    <button class="btn-ghost" onclick="batchMovePool()">移动</button>
+  </div>`;
+}
+
+async function batchDeletePool(){
+  if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
+  if(!confirm(`删除选中的 ${poolSelected.size} 条知识点？`)) return;
+  const r = await api('/api/knowledge-pool/batch-delete', {method:'POST', body:{point_ids:[...poolSelected]}});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  const skipped = r.skipped || 0;
+  toast(skipped ? `已删 ${r.deleted} 条，跳过 ${skipped} 条已发布` : `已删 ${r.deleted} 条`);
+  poolSelected.clear(); await Promise.all([loadPool(), loadFolders()]); render();
+}
+
+async function batchTagPool(){
+  if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
+  const raw = prompt('输入标签（逗号分隔，如 易错,重点）：');
+  if(raw===null) return;
+  const tags = raw.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!tags.length){ toast('未输入有效标签'); return; }
+  const r = await api('/api/knowledge-pool/batch-tags', {method:'POST', body:{point_ids:[...poolSelected], tags}});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  toast(`已为 ${r.updated} 条知识点打标签`);
+  poolSelected.clear(); await loadPool(); render();
+}
+
+async function batchMovePool(){
+  if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
+  const v = document.getElementById('batchMoveFolder').value;
+  const folderId = v ? parseInt(v,10) : null;
+  const r = await api('/api/knowledge-pool/batch-move', {method:'POST', body:{point_ids:[...poolSelected], folder_id: folderId}});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  toast(`已移动 ${r.updated} 条知识点`);
+  poolSelected.clear(); await Promise.all([loadPool(), loadFolders()]); render();
+}
 
 function togglePdfForm(){
   poolPdfForm = poolPdfForm ? null : {subject:'英语', kind:'phrase'};

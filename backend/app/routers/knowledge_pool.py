@@ -99,6 +99,73 @@ def delete_point(point_id: int, user: User = Depends(require_role("parent", "adm
     return {"ok": True}
 
 
+class BatchReq(BaseModel):
+    point_ids: list[int] = []
+    folder_id: int | None = None
+    tags: list[str] = []
+
+
+@router.post("/knowledge-pool/batch-delete")
+def batch_delete(req: BatchReq, user: User = Depends(require_role("parent", "admin")),
+                 db: Session = Depends(get_db)):
+    """批量删除；跳过已被方案发布（TrainingItem.point_pool_id 引用）的知识点。"""
+    from ..models import TrainingItem
+    if not req.point_ids:
+        return {"deleted": 0, "skipped": 0}
+    points = (db.query(KnowledgePointPool)
+              .filter(KnowledgePointPool.id.in_(req.point_ids),
+                      KnowledgePointPool.owner_id == user.id).all())
+    published_ids = {r[0] for r in db.query(TrainingItem.point_pool_id)
+                     .filter(TrainingItem.point_pool_id.in_([p.id for p in points])).all()}
+    deleted = 0
+    skipped = 0
+    for p in points:
+        if p.id in published_ids:
+            skipped += 1
+            continue
+        db.delete(p)
+        deleted += 1
+    db.commit()
+    return {"deleted": deleted, "skipped": skipped}
+
+
+@router.post("/knowledge-pool/batch-tags")
+def batch_tags(req: BatchReq, user: User = Depends(require_role("parent", "admin")),
+               db: Session = Depends(get_db)):
+    """批量打标签（覆盖式：把选中的知识点标签统一设为 req.tags）。"""
+    if not req.point_ids:
+        return {"updated": 0}
+    points = (db.query(KnowledgePointPool)
+              .filter(KnowledgePointPool.id.in_(req.point_ids),
+                      KnowledgePointPool.owner_id == user.id).all())
+    tag_json = json.dumps(req.tags, ensure_ascii=False)
+    for p in points:
+        p.tags = tag_json
+    db.commit()
+    return {"updated": len(points)}
+
+
+@router.post("/knowledge-pool/batch-move")
+def batch_move(req: BatchReq, user: User = Depends(require_role("parent", "admin")),
+               db: Session = Depends(get_db)):
+    """批量移动目录（folder_id 可为 null=未分类）。"""
+    if req.folder_id is not None:
+        tf = db.get(KnowledgeFolder, req.folder_id)
+        if tf is None:
+            return {"error": "目录不存在"}
+        if user.role != "admin" and tf.owner_id != user.id:
+            return {"error": "无权操作"}
+    if not req.point_ids:
+        return {"updated": 0}
+    points = (db.query(KnowledgePointPool)
+              .filter(KnowledgePointPool.id.in_(req.point_ids),
+                      KnowledgePointPool.owner_id == user.id).all())
+    for p in points:
+        p.folder_id = req.folder_id
+    db.commit()
+    return {"updated": len(points)}
+
+
 class FolderIn(BaseModel):
     name: str = ""
     subject: str = ""
