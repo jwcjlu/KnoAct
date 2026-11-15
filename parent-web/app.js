@@ -177,10 +177,43 @@ function apiErrorMsg(data, fallback='请求失败'){
   if(data.error) return String(data.error);
   return fallback;
 }
+let _refreshPromise = null;
+async function _refreshAuth(){
+  const rt = getRefreshToken();
+  if(!rt) return false;
+  if(!_refreshPromise){
+    _refreshPromise = (async()=>{
+      try{
+        const r = await fetch(API + '/api/auth/refresh', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({refresh_token: rt}),
+        });
+        if(r.ok){
+          const d = await r.json();
+          if(d && d.access_token){
+            setTokens(d.access_token, d.refresh_token);
+            return true;
+          }
+        }
+      }catch(e){}
+      clearAuthTokens();
+      return false;
+    })().finally(()=>{ _refreshPromise = null; });
+  }
+  return _refreshPromise;
+}
 async function api(path, opts={}){
   const init = {headers: authHeaders(), ...opts};
   if(opts.body) init.body = JSON.stringify(opts.body);
-  const r = await fetch(API + path, init);
+  let r = await fetch(API + path, init);
+  if(r.status === 401 && path !== '/api/auth/refresh' && path !== '/api/auth/login'){
+    const ok = await _refreshAuth();
+    if(ok){
+      init.headers = authHeaders();
+      if(opts.body) init.body = JSON.stringify(opts.body);
+      r = await fetch(API + path, init);
+    }
+  }
   const ct = r.headers.get('content-type')||'';
   return ct.includes('json') ? r.json() : r.text();
 }
