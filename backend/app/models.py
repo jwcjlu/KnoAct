@@ -411,6 +411,7 @@ class TrainingItem(Base):
     common_mistake: Mapped[str] = mapped_column(LongText, default="")  # JSON {wrong,correct,explain}
     explore: Mapped[str] = mapped_column(LongText, default="{}")       # JSON {compare,classify,formula,trap}
     source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    point_pool_id: Mapped[int | None] = mapped_column(ForeignKey("knowledge_point_pool.id"), nullable=True)
 
 
 class TrainingItemMastery(Base):
@@ -531,3 +532,31 @@ class ReadingPassage(Base):
     grade: Mapped[int] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | published
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class KnowledgePointPool(Base):
+    """知识点库：讲义 PDF 解析出的可复用知识点，按家长隔离。"""
+    __tablename__ = "knowledge_point_pool"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    subject: Mapped[str] = mapped_column(String(16))            # 语文/英语/数学
+    category: Mapped[str] = mapped_column(String(32), default="")  # 短语/句型/语法/生字/古诗…
+    content: Mapped[str] = mapped_column(LongText)              # 知识点主体（如 look after）
+    extra: Mapped[str] = mapped_column(LongText, default="{}")  # JSON：释义/例句/音标/作者
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # pdf | manual
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("pdf_documents.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TrainingPlan(Base):
+    """训练方案：家长勾选知识点组合，可保存/编辑/发布成专项训练。"""
+    __tablename__ = "training_plans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    subject: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(255))
+    point_ids: Mapped[str] = mapped_column(LongText, default="[]")   # JSON 数组，如 [3,7,12]
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("training_groups.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="draft")  # draft | published
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
