@@ -2,7 +2,9 @@
 import json
 import os
 import re
+from dataclasses import asdict
 from datetime import date as date_type
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -86,6 +88,11 @@ class ThirdPartyImportReq(BaseModel):
     items: list[dict] = []
 
 
+class ImportDraftsReq(BaseModel):
+    source: str = "xuekubao"
+    items: list[dict] = []
+
+
 def _require_bank(bank_id: int, user: User, db: Session) -> QuestionBank:
     bank = db.get(QuestionBank, bank_id)
     if not bank or (user.role != "admin" and bank.user_id != user.id):
@@ -145,6 +152,76 @@ def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft]
     if ids and bank.source == "manual":
         bank.source = "third_party"
     return ids
+
+
+def _extract_items_safe(raw) -> list:
+    from ..core.tiku_cn_adapter import _extract_items
+    return _extract_items(raw)
+
+
+def _draft_to_dict(d: QuestionDraft) -> dict:
+    return asdict(d)
+
+
+def _dict_to_draft(item: dict) -> QuestionDraft | None:
+    if not isinstance(item, dict):
+        return None
+    q = (item.get("question") or "").strip()
+    if not q:
+        return None
+    return QuestionDraft(
+        qtype=(item.get("qtype") or "short_answer").strip(),
+        question=q,
+        options=item.get("options") or [],
+        answer_json=item.get("answer_json") or {},
+        answer=(item.get("answer") or "").strip(),
+        analysis=(item.get("analysis") or "").strip(),
+        difficulty=(item.get("difficulty") or "medium"),
+        tags=item.get("tags") if isinstance(item.get("tags"), dict) else {},
+        passage_title=(item.get("passage_title") or "").strip(),
+        passage_content=(item.get("passage_content") or "").strip(),
+    )
+
+
+def _assert_draft_subject(bank: QuestionBank, drafts: list[QuestionDraft]) -> None:
+    bank_subj = (bank.subject or "").strip()
+    if not bank_subj:
+        return
+    for d in drafts:
+        q_subj = (d.tags.get("subject_name") or "").strip()
+        if q_subj and q_subj != bank_subj:
+            raise HTTPException(
+                status_code=400,
+                detail=f"所选知识点属于「{q_subj}」，与当前卷子「{bank_subj}」不符，请先切换到对应学科的卷子再导入",
+            )
+
+
+def _fetch_xuekubao_drafts(db, bank: QuestionBank, req: XuekubaoSyncReq) -> tuple[list[QuestionDraft], Any]:
+    """拉取并 normalize；不做 persist。返回 (drafts, raw)。未配置/拉失败抛 HTTPException。"""
+    adapter = xuekubao_adapter(db)
+    if not adapter.configured():
+        raise HTTPException(
+            status_code=503,
+            detail="学库宝 API 未配置：请在「设置 → 题库来源」填写 Access Key，或设置环境变量 XUEKUBAO_ACCESS_KEY",
+        )
+    raw = adapter.fetch_by_knowledge(
+        knowledge_id=req.knowledge_id.strip(),
+        page=req.page,
+        qtype_id=req.qtype_id,
+        diff=req.diff,
+        year=req.year,
+        fetch_answers=req.fetch_answers,
+    )
+    items = raw.get("data") if isinstance(raw.get("data"), list) else _extract_items_safe(raw)
+    err = str(raw.get("errorCode") or "")
+    if not items and err not in ("0", "200", ""):
+        raise HTTPException(
+            status_code=502,
+            detail=raw.get("message") or raw.get("errorCode") or "拉取失败",
+        )
+    drafts = adapter.normalize(raw)[: max(1, min(req.max_import, 50))]
+    _assert_draft_subject(bank, drafts)
+    return drafts, raw
 
 
 @router.post("")
@@ -388,6 +465,55 @@ def sync_tiku_bank(
     return {"count": len(ids), "ids": ids}
 
 
+@router.post("/{bank_id}/preview-xuekubao")
+def preview_xuekubao_bank(
+    bank_id: int,
+    req: XuekubaoSyncReq,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """拉题预览：normalize + 学科校验，不写库。"""
+    bank = _require_bank(bank_id, user, db)
+    drafts, raw = _fetch_xuekubao_drafts(db, bank, req)
+    if not drafts:
+        return {
+            "drafts": [],
+            "page": req.page,
+            "data_count": raw.get("dataCount"),
+            "message": "未解析到题目，请核对 knowledge_id 或改用 import-third-party",
+        }
+    return {
+        "drafts": [_draft_to_dict(d) for d in drafts],
+        "page": req.page,
+        "data_count": raw.get("dataCount"),
+    }
+
+
+@router.post("/{bank_id}/import-drafts")
+def import_drafts(
+    bank_id: int,
+    req: ImportDraftsReq,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """写入已标准化草稿（预览勾选后确认）。"""
+    bank = _require_bank(bank_id, user, db)
+    if len(req.items) > 50:
+        raise HTTPException(status_code=400, detail="单次最多导入 50 道题")
+    drafts = []
+    for it in req.items:
+        d = _dict_to_draft(it)
+        if d:
+            drafts.append(d)
+    if not drafts:
+        raise HTTPException(status_code=400, detail="没有可导入的题目")
+    _assert_draft_subject(bank, drafts)
+    tag = (req.source or "xuekubao").strip() or "xuekubao"
+    ids = _persist_drafts(db, bank, drafts, tag)
+    db.commit()
+    return {"count": len(ids), "ids": ids}
+
+
 @router.post("/{bank_id}/sync-xuekubao")
 def sync_xuekubao_bank(
     bank_id: int,
@@ -397,28 +523,7 @@ def sync_xuekubao_bank(
 ):
     """按学库宝知识点 knowledgeId（章节树三级 oldId）拉题并写入待审核队列。"""
     bank = _require_bank(bank_id, user, db)
-    adapter = xuekubao_adapter(db)
-    if not adapter.configured():
-        raise HTTPException(
-            status_code=503,
-            detail="学库宝 API 未配置：请在「设置 → 题库来源」填写 Access Key，或设置环境变量 XUEKUBAO_ACCESS_KEY",
-        )
-    raw = adapter.fetch_by_knowledge(
-        knowledge_id=req.knowledge_id.strip(),
-        page=req.page,
-        qtype_id=req.qtype_id,
-        diff=req.diff,
-        year=req.year,
-        fetch_answers=req.fetch_answers,
-    )
-    items = raw.get("data") if isinstance(raw.get("data"), list) else _extract_items_safe(raw)
-    err = str(raw.get("errorCode") or "")
-    if not items and err not in ("0", "200", ""):
-        raise HTTPException(
-            status_code=502,
-            detail=raw.get("message") or raw.get("errorCode") or "拉取失败",
-        )
-    drafts = adapter.normalize(raw)[: max(1, min(req.max_import, 50))]
+    drafts, raw = _fetch_xuekubao_drafts(db, bank, req)
     if not drafts:
         return {
             "count": 0,
@@ -429,11 +534,6 @@ def sync_xuekubao_bank(
     ids = _persist_drafts(db, bank, drafts, "xuekubao")
     db.commit()
     return {"count": len(ids), "ids": ids, "data_count": raw.get("dataCount")}
-
-
-def _extract_items_safe(raw) -> list:
-    from ..core.tiku_cn_adapter import _extract_items
-    return _extract_items(raw)
 
 
 @router.post("/{bank_id}/import-third-party")

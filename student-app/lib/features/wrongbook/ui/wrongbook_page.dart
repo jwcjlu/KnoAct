@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
+import '../../bank_exercise/question_html.dart';
 import '../wrongbook_controller.dart';
 import '../data/wrongbook_models.dart';
 
@@ -112,7 +113,10 @@ class _MistakeCard extends ConsumerWidget {
           Text('已复习 ${item.consecutiveCorrect} 次', style: const TextStyle(color: AppColors.gray, fontSize: 12)),
         ]),
         const SizedBox(height: 10),
-        Text(item.question, style: const TextStyle(fontWeight: FontWeight.w600)),
+        QuestionHtmlView(
+          html: item.question,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, height: 1.5),
+        ),
         const SizedBox(height: 10),
         _AnswerRow(label: '你的答案', value: item.yourAnswer, isWrong: true),
         const SizedBox(height: 6),

@@ -7,6 +7,7 @@ import '../../shell/task_page_app_bar.dart';
 import '../bank_exercise_controller.dart';
 import '../data/bank_models.dart';
 import '../passage_markup.dart';
+import '../question_html.dart';
 
 class BankExercisePage extends ConsumerStatefulWidget {
   const BankExercisePage({
@@ -198,7 +199,7 @@ class _QuestionCard extends StatelessWidget {
             for (final o in question.options)
               CheckboxListTile(
                 dense: true,
-                title: Text(o.label),
+                title: QuestionHtmlView(html: o.label),
                 value: selectedMulti.contains(o.value),
                 onChanged: onMulti == null ? null : (v) => onMulti!(o.value, v == true),
               ),
@@ -210,7 +211,7 @@ class _QuestionCard extends StatelessWidget {
             for (final o in question.options)
               RadioListTile<int>(
                 dense: true,
-                title: Text(o.label),
+                title: QuestionHtmlView(html: o.label),
                 value: o.value,
                 groupValue: selectedSingle ?? 0,
                 onChanged: onSingle == null ? null : (v) {
@@ -247,7 +248,11 @@ class _QuestionCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${index + 1}. ${question.question}', style: const TextStyle(fontWeight: FontWeight.w600)),
+            QuestionHtmlView(
+              html: question.question,
+              prefix: '${index + 1}. ',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, height: 1.5),
+            ),
             const SizedBox(height: 8),
             input,
             if (submitted && result != null) ...[

@@ -126,6 +126,43 @@ class DrillItem {
         type: '${j['type'] ?? 'memorize'}',
         explore: j['explore'] is Map ? Map<String, dynamic>.from(j['explore'] as Map) : const {},
       );
+
+  /// explore 的 guide 链（递进引导步骤）。
+  List<GuideStep> get guideSteps {
+    final g = explore['guide'];
+    if (g is! List) return const [];
+    return [for (final e in g.whereType<Map>()) GuideStep.fromJson(Map<String, dynamic>.from(e))];
+  }
+}
+
+/// guide 链的一轮：选择题（前 N-1 轮）或填空题（最后一轮归纳）。
+class GuideStep {
+  const GuideStep({
+    this.prompt = '',
+    this.samples = const [],
+    this.options = const [],
+    this.answerIndex = -1,
+    this.answer = '',
+    this.reveal = '',
+  });
+
+  final String prompt;
+  final List<String> samples;
+  final List<String> options;
+  final int answerIndex; // -1 = 填空轮
+  final String answer;   // 填空轮答案
+  final String reveal;
+
+  bool get isChoice => options.isNotEmpty && answerIndex >= 0;
+
+  factory GuideStep.fromJson(Map<String, dynamic> j) => GuideStep(
+        prompt: '${j['prompt'] ?? ''}',
+        samples: j['samples'] is List ? (j['samples'] as List).map((e) => '$e').toList() : const [],
+        options: j['options'] is List ? (j['options'] as List).map((e) => '$e').toList() : const [],
+        answerIndex: (j['answer_index'] as num?)?.toInt() ?? -1,
+        answer: '${j['answer'] ?? ''}',
+        reveal: '${j['reveal'] ?? ''}',
+      );
 }
 
 class DrillQuiz {
@@ -167,6 +204,44 @@ DrillSession? parseDrillContent(String content) {
   } catch (_) {
     return null;
   }
+}
+
+/// 执行计划的一步：step 名 + 绑定的条目（null = 组级规律卡）。
+class PlanStep {
+  const PlanStep(this.step, this.itemId);
+  final String step;
+  final int? itemId;
+}
+
+/// 按条目类型生成执行序列：先识记段（认→每条目背+测），后探究段（观察→每条目归类/陷阱）。
+List<PlanStep> buildPlan(DrillSession session) {
+  final plan = <PlanStep>[];
+  final memorize = session.items.where((it) => it.type != 'explore').toList();
+  final explore = session.items.where((it) => it.type == 'explore').toList();
+
+  if (memorize.isNotEmpty) {
+    plan.add(const PlanStep('recognize', null));
+    for (final item in memorize) {
+      plan.add(PlanStep('recall', item.id));
+      plan.add(PlanStep('quiz', item.id));
+    }
+  }
+
+  if (explore.isNotEmpty) {
+    plan.add(const PlanStep('observe', null));
+    for (final item in explore) {
+      plan.add(PlanStep('classify', item.id));
+      plan.add(PlanStep('trap', item.id));
+    }
+  }
+
+  // 兜底：没有任何条目时，退回旧组级 steps
+  if (plan.isEmpty && session.items.isEmpty && session.steps.isNotEmpty) {
+    for (final s in session.steps) {
+      plan.add(PlanStep(s, null));
+    }
+  }
+  return plan;
 }
 
 class DrillRepository {

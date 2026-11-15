@@ -38,7 +38,10 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/login',
     refreshListenable: refresh,
     redirect: (context, state) {
-      final child = ref.read(sessionProvider).value;
+      final session = ref.read(sessionProvider);
+      // 会话异步恢复中勿改路径，否则深链（如 /bank-exercise?bank_id=）会被冲到 /login→/home
+      if (session.isLoading) return null;
+      final child = session.value;
       final path = state.uri.path;
       if (child == null) return _publicPaths.contains(path) ? null : '/login';
       // 未绑定家长：只能停留在绑定页（parent_bound 来自登录响应 / 缓存 / 最近一次 /me）

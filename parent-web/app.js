@@ -531,6 +531,36 @@ function removeReadingSub(i){ if(readingSubs.length>1){ captureReadingForm(); re
 function escapeHtml(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+/** 学库宝/tiku 题干：白名单渲染 br/img，剥壳其它标签，去掉 $...$ */
+function renderQuestionHtml(raw){
+  const src = String(raw||'');
+  const tpl = document.createElement('template');
+  tpl.innerHTML = src;
+  const walk = (node)=>{
+    let out = '';
+    node.childNodes.forEach(n=>{
+      if(n.nodeType === 3){
+        out += escapeHtml(String(n.textContent||'').replace(/\$([^$]+)\$/g, '$1'));
+        return;
+      }
+      if(n.nodeType !== 1) return;
+      const tag = n.tagName.toLowerCase();
+      if(tag === 'br'){ out += '<br/>'; return; }
+      if(tag === 'img'){
+        const u = (n.getAttribute('src')||'').trim();
+        if(/^https?:\/\//i.test(u)){
+          out += `<img src="${escapeAttr(u)}" alt="" style="max-width:100%;height:auto;vertical-align:middle;margin:6px 0">`;
+        }
+        return;
+      }
+      if(tag === 'script' || tag === 'style') return;
+      out += walk(n);
+      if(tag === 'p' || tag === 'div' || tag === 'li') out += '<br/>';
+    });
+    return out;
+  };
+  return walk(tpl.content);
+}
 function renderPassageInline(escaped){
   return escaped
     .replace(/____/g, '<span class="passage-blank"></span>')
@@ -949,6 +979,7 @@ const XKB_LEVEL_LABELS = ['学段','年级','学科','教材版本'];
 let xkbPicker = {
   open: false, loading: false, error: '', tree: [], sel: ['','','',''],
   chapters: null, knowledge: [], filter: '', picked: null, page: 1,
+  step: 'pick', drafts: [], selected: {}, previewLoading: false, dataCount: null,
 };
 
 function xkbLevelOptions(depth){
@@ -1024,7 +1055,8 @@ function xkbPickKnowledge(id){
 }
 async function openXuekubaoPicker(){
   if(!bankSelectedId){ toast('请先选择卷子'); return; }
-  xkbPicker = {open:true, loading:true, error:'', tree:[], sel:['','','',''], chapters:null, knowledge:[], filter:'', picked:null, page:1};
+  xkbPicker = {open:true, loading:true, error:'', tree:[], sel:['','','',''], chapters:null, knowledge:[], filter:'', picked:null, page:1,
+    step:'pick', drafts:[], selected:{}, previewLoading:false, dataCount:null};
   paintXkbModal();
   try{
     const r = await api('/api/xuekubao/subject-edition', {method:'POST', body:{}});
@@ -1040,9 +1072,18 @@ async function openXuekubaoPicker(){
 }
 async function loadXkbChapters(silent){
   if(!xkbPicker.sel[0]) return;
+  const [pharse_id, grade_id, subject_id, edition_id] = xkbPicker.sel;
+  // 只选学段会拉取全量目录、后端必超时：需先选到年级和学科
+  if(!grade_id || !subject_id){
+    if(!silent){
+      xkbPicker.error = '请先选好「年级」和「学科」（仅选学段会拉取全量目录导致超时）';
+      xkbPicker.loading = false;
+      paintXkbModal();
+    }
+    return;
+  }
   if(!silent){ xkbPicker.loading = true; paintXkbModal(); }
   try{
-    const [pharse_id, grade_id, subject_id, edition_id] = xkbPicker.sel;
     const r = await api('/api/xuekubao/chapters', {method:'POST', body:{
       pharse_id, subject_id, grade_id, edition_id,
     }});
@@ -1062,11 +1103,74 @@ async function loadXkbChapters(silent){
   xkbPicker.loading = false;
   paintXkbModal();
 }
+function xkbSelectedCount(){
+  return (xkbPicker.drafts || []).reduce((n, _, i) => n + (xkbPicker.selected[i] ? 1 : 0), 0);
+}
+function xkbToggleAll(on){
+  (xkbPicker.drafts || []).forEach((_, i) => { xkbPicker.selected[i] = !!on; });
+  paintXkbModal();
+}
+function xkbToggleOne(i, on){
+  xkbPicker.selected[i] = !!on;
+  paintXkbModal();
+}
+function xkbBackToPick(){
+  xkbPicker.step = 'pick';
+  xkbPicker.drafts = [];
+  xkbPicker.selected = {};
+  xkbPicker.dataCount = null;
+  paintXkbModal();
+}
 function paintXkbModal(){
   const el = document.getElementById('xkbModal');
   if(!el) return;
   if(!xkbPicker.open){ el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = 'flex';
+  if(xkbPicker.step === 'preview'){
+    const n = xkbSelectedCount();
+    const m = (xkbPicker.drafts || []).length;
+    const items = (xkbPicker.drafts || []).map((d, i) => {
+      const checked = xkbPicker.selected[i] ? 'checked' : '';
+      const label = QTYPE_LABEL[d.qtype] || d.qtype || '题目';
+      const opts = Array.isArray(d.options) ? d.options : [];
+      const optHtml = opts.length
+        ? `<div style="margin-top:6px;font-size:12px;color:#5c6761">${opts.map(o => `<div>${renderQuestionHtml(o.label || '')}</div>`).join('')}</div>`
+        : '';
+      return `<label class="xkb-preview-item">
+      <input type="checkbox" ${checked} onchange="xkbToggleOne(${i}, this.checked)">
+      <div class="xkb-preview-body">
+        <span class="xkb-qtype">${escapeAttr(label)}</span>
+        ${renderQuestionHtml(d.question || '')}
+        ${optHtml}
+      </div>
+    </label>`;
+    }).join('');
+    el.innerHTML = `<div class="xkb-panel wide" role="dialog">
+    <div class="hd">
+      <h4>预览并勾选题目</h4>
+      <p>本页 ${m} 道${xkbPicker.dataCount != null ? `（来源约 ${escapeAttr(String(xkbPicker.dataCount))} 道）` : ''} · 不跨页保留勾选</p>
+    </div>
+    <div class="bd">
+      ${xkbPicker.error ? `<div style="color:#c05b4a;font-size:13px;margin-bottom:10px">${escapeAttr(xkbPicker.error)}</div>` : ''}
+      ${xkbPicker.previewLoading ? '<div style="color:#8e9691;font-size:13px;margin-bottom:10px">拉取中…</div>' : ''}
+      <div class="xkb-preview-toolbar">
+        <button type="button" class="btn-ghost" onclick="xkbToggleAll(true)">全选</button>
+        <button type="button" class="btn-ghost" onclick="xkbToggleAll(false)">全不选</button>
+        <span>已选 ${n} / ${m}</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px">页码
+          <input type="number" min="1" max="50" value="${xkbPicker.page || 1}" style="width:64px;padding:4px 8px;border-radius:8px;border:1px solid var(--line3)"
+            onchange="xkbPicker.page=Math.max(1,parseInt(this.value,10)||1);loadXuekubaoPreview()">
+        </label>
+      </div>
+      <div class="xkb-preview-list">${items}</div>
+    </div>
+    <div class="xkb-foot">
+      <button type="button" class="btn-ghost" onclick="xkbBackToPick()">返回</button>
+      <button type="button" class="btn-primary" ${n < 1 || xkbPicker.previewLoading ? 'disabled' : ''} onclick="confirmXuekubaoImportSelected()">导入已选 (${n})</button>
+    </div>
+  </div>`;
+    return;
+  }
   const cascade = XKB_LEVEL_LABELS.map((label, depth) => {
     const opts = xkbLevelOptions(depth);
     const disabled = depth > 0 && !xkbPicker.sel[depth - 1];
@@ -1104,20 +1208,78 @@ function paintXkbModal(){
     </div>
     <div class="xkb-foot">
       <button type="button" class="btn-ghost" onclick="closeXuekubaoPicker()">取消</button>
-      <button type="button" class="btn-primary" ${!xkbPicker.picked || xkbPicker.loading ? 'disabled' : ''} onclick="confirmXuekubaoSync()">导入题目</button>
+      <button type="button" class="btn-primary" ${!xkbPicker.picked || xkbPicker.loading || xkbPicker.previewLoading ? 'disabled' : ''} onclick="loadXuekubaoPreview()">拉取预览</button>
     </div>
   </div>`;
 }
-async function confirmXuekubaoSync(){
+async function loadXuekubaoPreview(){
   if(!bankSelectedId || !xkbPicker.picked) return;
-  closeXuekubaoPicker();
-  toast('正在从学库宝拉题…');
-  const r = await api(`/api/banks/${bankSelectedId}/sync-xuekubao`, {
-    method:'POST',
-    body:{knowledge_id: xkbPicker.picked, page: Math.max(1, xkbPicker.page || 1), max_import: 20, fetch_answers: true},
-  });
-  if(r && r.count > 0){ toast(`已导入 ${r.count} 道题，请到审核台确认`); await loadBankList(); render(); }
-  else toast((r && r.message) || apiErrorMsg(r, '同步失败或未配置学库宝密钥'));
+  xkbPicker.previewLoading = true;
+  xkbPicker.error = '';
+  paintXkbModal();
+  try{
+    const r = await api(`/api/banks/${bankSelectedId}/preview-xuekubao`, {
+      method:'POST',
+      body:{
+        knowledge_id: xkbPicker.picked,
+        page: Math.max(1, xkbPicker.page || 1),
+        max_import: 20,
+        fetch_answers: true,
+      },
+    });
+    if(r && r.detail){
+      const d = r.detail;
+      throw new Error(typeof d === 'string' ? d : (d.msg || (Array.isArray(d)?d.map(x=>x.msg||JSON.stringify(x)).join('; '):JSON.stringify(d))));
+    }
+    const drafts = Array.isArray(r && r.drafts) ? r.drafts : [];
+    if(!drafts.length){
+      xkbPicker.error = (r && r.message) || '本页没有题目';
+      xkbPicker.previewLoading = false;
+      paintXkbModal();
+      return;
+    }
+    xkbPicker.drafts = drafts;
+    xkbPicker.dataCount = r.data_count;
+    xkbPicker.selected = {};
+    drafts.forEach((_, i) => { xkbPicker.selected[i] = true; });
+    xkbPicker.step = 'preview';
+  }catch(e){
+    xkbPicker.error = (e && e.message) || '拉取预览失败';
+  }
+  xkbPicker.previewLoading = false;
+  paintXkbModal();
+}
+async function confirmXuekubaoImportSelected(){
+  if(!bankSelectedId) return;
+  const items = (xkbPicker.drafts || []).filter((_, i) => xkbPicker.selected[i]);
+  if(!items.length){ toast('请至少勾选一道题'); return; }
+  xkbPicker.previewLoading = true;
+  paintXkbModal();
+  try{
+    const r = await api(`/api/banks/${bankSelectedId}/import-drafts`, {
+      method:'POST',
+      body:{ source:'xuekubao', items },
+    });
+    if(r && r.detail){
+      const d = r.detail;
+      throw new Error(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => x.msg || JSON.stringify(x)).join('; ') : JSON.stringify(d)));
+    }
+    if(r && r.count > 0){
+      toast(`已导入 ${r.count} 道题，请到审核台确认`);
+      closeXuekubaoPicker();
+      await loadBankList();
+      render();
+      return;
+    }
+    toast((r && r.message) || apiErrorMsg(r, '导入失败'));
+  }catch(e){
+    toast((e && e.message) || '导入失败');
+  }
+  xkbPicker.previewLoading = false;
+  paintXkbModal();
+}
+async function confirmXuekubaoSync(){
+  return loadXuekubaoPreview();
 }
 async function syncBankFromXuekubao(){
   openXuekubaoPicker();
@@ -1169,7 +1331,7 @@ function formatQuestionRichDetail(q){
   const parts = [];
   const opts = Array.isArray(q.options) ? q.options : [];
   if(cat==='choice' && opts.length){
-    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:6px"><b>选项：</b>${opts.map(o=>escapeAttr(o.label||'')).join(' · ')}</div>`);
+    parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:6px"><b>选项：</b>${opts.map(o=>`<div style="margin-top:4px">${renderQuestionHtml(o.label||'')}</div>`).join('')}</div>`);
   }
   const aj = (q.answer_json && typeof q.answer_json==='object') ? q.answer_json : {};
   if(cat==='blank' && aj.blanks){
@@ -1183,7 +1345,7 @@ function formatQuestionRichDetail(q){
     parts.push(`<div style="font-size:12px;color:#5c6761;margin-top:4px"><b>参考：</b>${escapeAttr(aj.sample || q.answer)}</div>`);
     if(aj.rubric) parts.push(`<div style="font-size:12px;color:#78817b;margin-top:2px"><b>要点：</b>${escapeAttr(aj.rubric)}</div>`);
   }
-  if(q.analysis) parts.push(`<div style="font-size:12px;color:#78817b;margin-top:4px"><b>解析：</b>${escapeAttr(q.analysis)}</div>`);
+  if(q.analysis) parts.push(`<div style="font-size:12px;color:#78817b;margin-top:4px"><b>解析：</b>${renderQuestionHtml(q.analysis)}</div>`);
   return parts.join('');
 }
 
@@ -1256,7 +1418,7 @@ function renderQuestionTab(){
         const extraText = formatQuestionExtra(q.extra);
         return `<div class="q-item" style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:#fafbf9;border:1px solid var(--line3);border-radius:10px;margin-bottom:8px">
           <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:#333;line-height:1.5"><span class="q-type" style="font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px;background:#edf1ff;color:#4566e8">${label}</span>${escapeAttr(q.question||'')}</div>
+            <div style="font-size:13px;font-weight:600;color:#333;line-height:1.5"><span class="q-type" style="font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px;background:#edf1ff;color:#4566e8">${label}</span>${renderQuestionHtml(q.question||'')}</div>
             ${ansText?`<div style="font-size:12px;color:#8e9691;margin-top:3px">${ansText}</div>`:''}
             ${richText}
             ${extraText}
