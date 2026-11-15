@@ -3063,7 +3063,7 @@ function renderPoolTab(){
   const tagBar = allTags.length
     ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">
         <span style="font-size:12px;color:#778079;line-height:24px">标签：</span>
-        ${allTags.map(t=>`<span onclick="setActiveTag('${escapeHtml(t)}')" style="cursor:pointer;padding:2px 10px;border-radius:12px;font-size:12px;border:1px solid var(--line3);${poolActiveTag===t?'background:#2e6bd8;color:#fff;border-color:#2e6bd8':''}">${escapeHtml(t)}</span>`).join('')}
+        ${allTags.map(t=>`<span onclick="setActiveTag('${escapeAttr(t)}')" style="cursor:pointer;padding:2px 10px;border-radius:12px;font-size:12px;border:1px solid var(--line3);${poolActiveTag===t?'background:#2e6bd8;color:#fff;border-color:#2e6bd8':''}">${escapeHtml(t)}</span>`).join('')}
       </div>`
     : '';
 
@@ -3174,25 +3174,25 @@ function renderPoolEditForm(p, extra){
   return `<div style="background:#f6f8f7;border-radius:10px;padding:10px;margin-top:8px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
       <span style="font-size:13px;color:#5c6761">内容</span>
-      <input id="poolEditContent" value="${escapeHtml(p.content||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+      <input id="poolEditContent" value="${escapeAttr(p.content||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
       <span style="font-size:13px;color:#5c6761">学科</span>
       <select id="poolEditSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option ${p.subject===s?'selected':''}>${s}</option>`).join('')}</select>
       <span style="font-size:13px;color:#5c6761">分类</span>
-      <input id="poolEditCategory" value="${escapeHtml(p.category||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:140px">
+      <input id="poolEditCategory" value="${escapeAttr(p.category||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:140px">
     </div>
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
       <span style="font-size:13px;color:#5c6761">释义</span>
-      <input id="poolEditMeaning" value="${escapeHtml(extra['释义']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+      <input id="poolEditMeaning" value="${escapeAttr(extra['释义']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
     </div>
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
       <span style="font-size:13px;color:#5c6761">原句</span>
-      <input id="poolEditOriginal" value="${escapeHtml(extra['原句']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+      <input id="poolEditOriginal" value="${escapeAttr(extra['原句']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
     </div>
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
       <span style="font-size:13px;color:#5c6761">目录</span>
       <select id="poolEditFolder" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${folderOpts}</select>
       <span style="font-size:13px;color:#5c6761">标签</span>
-      <input id="poolEditTags" value="${escapeHtml(curTags)}" placeholder="逗号分隔" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:180px">
+      <input id="poolEditTags" value="${escapeAttr(curTags)}" placeholder="逗号分隔" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:180px">
     </div>
     <div style="display:flex;gap:8px">
       <button class="btn-primary" style="padding:6px 16px" onclick="submitPoolEdit(${p.id})">保存</button>
