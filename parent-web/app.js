@@ -3256,7 +3256,9 @@ function renderBatchBar(){
   return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#eef4ff;border:1px solid #d6e4ff;border-radius:10px;padding:8px 10px;margin:8px 0">
     <span style="font-size:13px;color:#2e6bd8">已选 ${poolSelected.size} 项</span>
     <button class="btn-ghost" style="color:#c05b4a" onclick="batchDeletePool()">批量删除(${poolSelected.size})</button>
-    <button class="btn-ghost" onclick="batchTagPool()">批量打标签</button>
+    <span style="font-size:13px;color:#5c6761">打标签</span>
+    <input id="batchTagsInput" placeholder="逗号分隔，如 易错,重点" style="border:1px solid var(--line3);border-radius:8px;padding:5px 8px;width:180px">
+    <button class="btn-ghost" onclick="batchTagPool()">打标签</button>
     <span style="font-size:13px;color:#5c6761">移动到</span>
     <select id="batchMoveFolder" style="border:1px solid var(--line3);border-radius:8px;padding:5px 8px">${folderOpts}</select>
     <button class="btn-ghost" onclick="batchMovePool()">移动</button>
@@ -3275,8 +3277,7 @@ async function batchDeletePool(){
 
 async function batchTagPool(){
   if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
-  const raw = prompt('输入标签（逗号分隔，如 易错,重点）：');
-  if(raw===null) return;
+  const raw = document.getElementById('batchTagsInput').value;
   const tags = raw.split(',').map(s=>s.trim()).filter(Boolean);
   if(!tags.length){ toast('未输入有效标签'); return; }
   const r = await api('/api/knowledge-pool/batch-tags', {method:'POST', body:{point_ids:[...poolSelected], tags}});
