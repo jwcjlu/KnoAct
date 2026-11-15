@@ -88,6 +88,11 @@ class ThirdPartyImportReq(BaseModel):
     items: list[dict] = []
 
 
+class ImportDraftsReq(BaseModel):
+    source: str = "xuekubao"
+    items: list[dict] = []
+
+
 def _require_bank(bank_id: int, user: User, db: Session) -> QuestionBank:
     bank = db.get(QuestionBank, bank_id)
     if not bank or (user.role != "admin" and bank.user_id != user.id):
@@ -482,6 +487,31 @@ def preview_xuekubao_bank(
         "page": req.page,
         "data_count": raw.get("dataCount"),
     }
+
+
+@router.post("/{bank_id}/import-drafts")
+def import_drafts(
+    bank_id: int,
+    req: ImportDraftsReq,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """写入已标准化草稿（预览勾选后确认）。"""
+    bank = _require_bank(bank_id, user, db)
+    if len(req.items) > 50:
+        raise HTTPException(status_code=400, detail="单次最多导入 50 道题")
+    drafts = []
+    for it in req.items:
+        d = _dict_to_draft(it)
+        if d:
+            drafts.append(d)
+    if not drafts:
+        raise HTTPException(status_code=400, detail="没有可导入的题目")
+    _assert_draft_subject(bank, drafts)
+    tag = (req.source or "xuekubao").strip() or "xuekubao"
+    ids = _persist_drafts(db, bank, drafts, tag)
+    db.commit()
+    return {"count": len(ids), "ids": ids}
 
 
 @router.post("/{bank_id}/sync-xuekubao")

@@ -80,3 +80,121 @@ def test_preview_xuekubao_subject_mismatch_400(client, setup_db, monkeypatch):
         json={"knowledge_id": "1", "page": 1},
     )
     assert r.status_code == 400
+
+
+def test_import_drafts_persists_pending(client, setup_db):
+    h, bid = _math_bank_headers()
+    items = [
+        {
+            "qtype": "single_choice",
+            "question": "预览勾选题 A",
+            "options": [{"label": "1", "value": 0}],
+            "answer": "1",
+            "answer_json": {"correct_index": 0},
+            "tags": {"subject_name": "数学"},
+        },
+        {
+            "qtype": "fill_blank",
+            "question": "预览勾选题 B",
+            "answer": "2",
+            "tags": {"subject_name": "数学"},
+        },
+    ]
+    r = client.post(
+        f"/api/banks/{bid}/import-drafts",
+        headers=h,
+        json={"source": "xuekubao", "items": items},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["count"] == 2
+    assert len(data["ids"]) == 2
+    db = SessionLocal()
+    qs = db.query(Question).filter(Question.id.in_(data["ids"])).all()
+    assert len(qs) == 2
+    assert all(q.status == "pending" for q in qs)
+    assert all(q.bank_id == bid for q in qs)
+    db.close()
+
+
+def test_import_drafts_subject_mismatch_400(client, setup_db):
+    h, bid = _math_bank_headers()
+    r = client.post(
+        f"/api/banks/{bid}/import-drafts",
+        headers=h,
+        json={
+            "source": "xuekubao",
+            "items": [{"qtype": "short_answer", "question": "x", "tags": {"subject_name": "语文"}}],
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_import_drafts_rejects_too_many(client, setup_db):
+    h, bid = _math_bank_headers()
+    items = [{"qtype": "short_answer", "question": f"q{i}", "tags": {}} for i in range(51)]
+    r = client.post(
+        f"/api/banks/{bid}/import-drafts",
+        headers=h,
+        json={"source": "xuekubao", "items": items},
+    )
+    assert r.status_code == 400
+
+
+def test_import_drafts_persists_pending(client, setup_db):
+    h, bid = _math_bank_headers()
+    items = [
+        {
+            "qtype": "single_choice",
+            "question": "预览勾选题 A",
+            "options": [{"label": "1", "value": 0}],
+            "answer": "1",
+            "answer_json": {"correct_index": 0},
+            "tags": {"subject_name": "数学"},
+        },
+        {
+            "qtype": "fill_blank",
+            "question": "预览勾选题 B",
+            "answer": "2",
+            "tags": {"subject_name": "数学"},
+        },
+    ]
+    r = client.post(
+        f"/api/banks/{bid}/import-drafts",
+        headers=h,
+        json={"source": "xuekubao", "items": items},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["count"] == 2
+    assert len(data["ids"]) == 2
+    db = SessionLocal()
+    qs = db.query(Question).filter(Question.id.in_(data["ids"])).all()
+    assert len(qs) == 2
+    assert all(q.status == "pending" for q in qs)
+    assert all(q.bank_id == bid for q in qs)
+    db.close()
+
+
+def test_import_drafts_subject_mismatch_400(client, setup_db):
+    h, bid = _math_bank_headers()
+    r = client.post(
+        f"/api/banks/{bid}/import-drafts",
+        headers=h,
+        json={
+            "source": "xuekubao",
+            "items": [{"qtype": "short_answer", "question": "x", "tags": {"subject_name": "语文"}}],
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_import_drafts_rejects_too_many(client, setup_db):
+    h, bid = _math_bank_headers()
+    items = [{"qtype": "short_answer", "question": f"q{i}", "tags": {}} for i in range(51)]
+    r = client.post(
+        f"/api/banks/{bid}/import-drafts",
+        headers=h,
+        json={"source": "xuekubao", "items": items},
+    )
+    assert r.status_code == 400
