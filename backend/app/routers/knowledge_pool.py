@@ -137,6 +137,12 @@ def create_folder(req: FolderIn, user: User = Depends(require_role("parent", "ad
                   db: Session = Depends(get_db)):
     if not (req.name or "").strip():
         return {"error": "目录名不能为空"}
+    if req.parent_id is not None:
+        pf = db.get(KnowledgeFolder, req.parent_id)
+        if pf is None:
+            return {"error": "父目录不存在"}
+        if user.role != "admin" and pf.owner_id != user.id:
+            return {"error": "无权操作"}
     f = KnowledgeFolder(owner_id=user.id, name=req.name.strip(), subject=req.subject,
                         parent_id=req.parent_id)
     db.add(f); db.commit(); db.refresh(f)
@@ -155,6 +161,11 @@ def update_folder(folder_id: int, req: FolderIn,
     if req.name.strip():
         f.name = req.name.strip()
     if req.parent_id is not None:
+        pf = db.get(KnowledgeFolder, req.parent_id)
+        if pf is None:
+            return {"error": "父目录不存在"}
+        if user.role != "admin" and pf.owner_id != user.id:
+            return {"error": "无权操作"}
         f.parent_id = req.parent_id
     db.commit()
     return {"id": f.id}
@@ -184,6 +195,12 @@ def move_point(point_id: int, req: MoveIn, user: User = Depends(require_role("pa
         return {"error": "not found"}
     if p is False:
         return {"error": "无权操作"}
+    if req.folder_id is not None:
+        tf = db.get(KnowledgeFolder, req.folder_id)
+        if tf is None:
+            return {"error": "目录不存在"}
+        if user.role != "admin" and tf.owner_id != user.id:
+            return {"error": "无权操作"}
     p.folder_id = req.folder_id
     db.commit()
     return {"id": p.id, "folder_id": p.folder_id}

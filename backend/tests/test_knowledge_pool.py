@@ -108,3 +108,13 @@ def test_delete_folder_nonempty_refused(client, db):
     client.put(f"/api/knowledge-pool/{p.id}/move", json={"folder_id": fid}, headers=parent_h)
     r = client.delete(f"/api/knowledge-folders/{fid}", headers=parent_h)
     assert r.json().get("error")
+
+
+def test_move_point_cross_owner_refused(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p2, _, p2_h, _ = parent_child(db, prefix="other")
+    p = _mk_point(db, parent, content="look after")
+    # 另一个家长建的目录
+    other_fid = client.post("/api/knowledge-folders", json={"name": "other", "subject": "英语", "parent_id": None}, headers=p2_h).json()["id"]
+    r = client.put(f"/api/knowledge-pool/{p.id}/move", json={"folder_id": other_fid}, headers=parent_h)
+    assert r.json().get("error")
