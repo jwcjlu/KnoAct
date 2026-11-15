@@ -7,7 +7,7 @@ def _mk_point(db, owner, subject="英语", content="look after", extra=None):
     p = KnowledgePointPool(owner_id=owner.id, subject=subject, content=content,
                            category="短语", source="manual",
                            extra=json.dumps(extra or {"释义": "照顾"}, ensure_ascii=False))
-    db.add(p); db.flush()
+    db.add(p); db.commit()
     return p
 
 
@@ -36,3 +36,24 @@ def test_publish_idempotent_same_group(client, db):
     g1 = client.post(f"/api/plans/{plan_id}/publish", headers=parent_h).json()["group_id"]
     g2 = client.post(f"/api/plans/{plan_id}/publish", headers=parent_h).json()["group_id"]
     assert g1 == g2
+
+
+def test_pool_isolated_by_parent(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p2, _, p2_h, _ = parent_child(db, prefix="other")
+    _mk_point(db, parent, content="look after")
+    r = client.get("/api/knowledge-pool", headers=p2_h)
+    assert r.json() == []
+
+
+def test_crud_and_edit(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    r = client.post("/api/knowledge-pool", json={"subject": "英语", "category": "短语",
+                                                 "content": "give up", "extra": '{"释义":"放弃"}'},
+                    headers=parent_h)
+    pid = r.json()["id"]
+    r2 = client.put(f"/api/knowledge-pool/{pid}", json={"content": "give in",
+                                                        "extra": '{"释义":"让步"}'}, headers=parent_h)
+    assert r2.json()["content"] == "give in"
+    r3 = client.delete(f"/api/knowledge-pool/{pid}", headers=parent_h)
+    assert r3.json()["ok"] is True
