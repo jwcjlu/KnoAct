@@ -25,7 +25,8 @@ def _own(db: Session, user: User, model, obj_id: int):
 def _point_dict(p: KnowledgePointPool) -> dict:
     return {"id": p.id, "subject": p.subject, "category": p.category,
             "content": p.content, "extra": p.extra, "source": p.source,
-            "document_id": p.document_id}
+            "document_id": p.document_id, "folder_id": p.folder_id,
+            "tags": p.tags}
 
 
 class PointIn(BaseModel):
@@ -33,6 +34,8 @@ class PointIn(BaseModel):
     category: str = ""
     content: str = ""
     extra: str = "{}"
+    folder_id: int | None = None
+    tags: list[str] = []
 
 
 @router.get("/knowledge-pool")
@@ -53,7 +56,9 @@ def list_points(subject: str = "", category: str = "",
 def create_point(req: PointIn, user: User = Depends(require_role("parent", "admin")),
                  db: Session = Depends(get_db)):
     p = KnowledgePointPool(owner_id=user.id, subject=req.subject, category=req.category,
-                           content=req.content, extra=req.extra, source="manual")
+                           content=req.content, extra=req.extra, source="manual",
+                           folder_id=req.folder_id,
+                           tags=json.dumps(req.tags, ensure_ascii=False))
     db.add(p); db.commit(); db.refresh(p)
     return _point_dict(p)
 
@@ -71,6 +76,10 @@ def update_point(point_id: int, req: PointIn,
     p.category = req.category or p.category
     p.content = req.content or p.content
     p.extra = req.extra if req.extra != "{}" else p.extra
+    if req.folder_id is not None:
+        p.folder_id = req.folder_id
+    if req.tags:
+        p.tags = json.dumps(req.tags, ensure_ascii=False)
     db.commit()
     return _point_dict(p)
 

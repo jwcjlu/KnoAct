@@ -111,6 +111,10 @@ let poolSelected = new Set();  // 勾选的知识点 id（组合方案用）
 let poolForm = null;       // null | {mode:'add'} | {mode:'edit', id, subject, category, content, meaning}
 let poolPdfForm = null;    // null | {subject, kind}  上传 PDF 的学科/类型选择
 let planForm = null;       // null | {subject}  新建方案的学科选择
+let poolFolders = [];        // 目录树 [{id,name,subject,parent_id,point_count,children}]
+let poolActiveFolder = null; // 当前筛选目录 id；null=全部
+let poolActiveTag = null;    // 当前筛选标签；null=全部
+let folderForm = null;       // null | {mode:'add'|'rename', id?}  (id=父目录 for add)
 
 // 屏幕时间
 let screenGroups = [];     // [{id,name,kind,daily_limit_seconds}]
@@ -2984,15 +2988,102 @@ async function loadPool(){ poolPoints = await api('/api/knowledge-pool'); if(!Ar
 
 async function loadPlans(){ plans = await api('/api/plans'); if(!Array.isArray(plans)) plans=[]; }
 
+async function loadFolders(){ poolFolders = await api('/api/knowledge-folders'); if(!Array.isArray(poolFolders)) poolFolders=[]; }
+
+function poolSubject(){ return '英语'; }
+
+function flattenFolders(folders, depth=0){
+  const out = [];
+  for(const f of (folders||[])){
+    out.push({id:f.id, name:f.name, depth});
+    if(f.children && f.children.length) out.push(...flattenFolders(f.children, depth+1));
+  }
+  return out;
+}
+
+function parseTags(t){ try{ const v = JSON.parse(t||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+
+function renderFolderNode(f, depth){
+  const pad = depth * 16;
+  const active = poolActiveFolder === f.id;
+  return `<div style="padding-left:${pad}px;margin:2px 0">
+    <span style="cursor:pointer;${active?'font-weight:700;color:#2e6bd8':''}" onclick="setActiveFolder(${f.id})">
+      ${(f.children||[]).length ? '▸' : '·'} ${escapeHtml(f.name)} <span style="color:#9aa4a0;font-size:11px">(${f.point_count})</span>
+    </span>
+    <button class="btn-ghost" style="padding:0 6px;font-size:11px" onclick="openFolderForm('add',${f.id})">+子目录</button>
+    <button class="btn-ghost" style="padding:0 6px;font-size:11px" onclick="openFolderForm('rename',${f.id})">改</button>
+    <button class="btn-ghost" style="padding:0 6px;font-size:11px" onclick="delFolder(${f.id})">删</button>
+  </div>${(f.children||[]).map(c=>renderFolderNode(c, depth+1)).join('')}`;
+}
+
+function setActiveFolder(id){ poolActiveFolder = (poolActiveFolder===id) ? null : id; render(); }
+
+function setActiveTag(t){ poolActiveTag = (poolActiveTag===t) ? null : t; render(); }
+
+function openFolderForm(mode, id){ folderForm = {mode, id}; render(); }
+
+function renderFolderForm(){
+  if(!folderForm) return '';
+  const isRename = folderForm.mode==='rename';
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:10px;margin:8px 0;display:flex;gap:8px;align-items:center">
+    <input id="folderName" placeholder="${isRename?'新目录名':'目录名'}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:180px">
+    <button class="btn-primary" style="padding:6px 14px" onclick="submitFolder()">${isRename?'保存':'新建'}</button>
+    <button class="btn-ghost" style="padding:6px 14px" onclick="folderForm=null;render()">取消</button>
+  </div>`;
+}
+
+async function submitFolder(){
+  const name = document.getElementById('folderName').value.trim();
+  if(!name){ toast('请填写目录名'); return; }
+  let r;
+  if(folderForm.mode==='rename'){
+    r = await api(`/api/knowledge-folders/${folderForm.id}`, {method:'PUT', body:{name}});
+  } else {
+    r = await api('/api/knowledge-folders', {method:'POST', body:{name, subject: poolSubject(), parent_id: folderForm.id || null}});
+  }
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  folderForm = null; await loadFolders(); render();
+}
+
+async function delFolder(id){
+  if(!confirm('删除该目录？（需为空目录）')) return;
+  const r = await api(`/api/knowledge-folders/${id}`, {method:'DELETE'});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  if(poolActiveFolder === id) poolActiveFolder = null;
+  await loadFolders(); render();
+}
+
 function renderPoolTab(){
-  const rows = poolPoints.map(p=>{
+  // 目录 + 标签筛选
+  const filtered = poolPoints.filter(p =>
+    (!poolActiveFolder || p.folder_id === poolActiveFolder) &&
+    (!poolActiveTag || (parseTags(p.tags)||[]).includes(poolActiveTag)));
+
+  const allTags = [...new Set(poolPoints.flatMap(p=>parseTags(p.tags)))];
+  const tagBar = allTags.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">
+        <span style="font-size:12px;color:#778079;line-height:24px">标签：</span>
+        ${allTags.map(t=>`<span onclick="setActiveTag('${escapeHtml(t)}')" style="cursor:pointer;padding:2px 10px;border-radius:12px;font-size:12px;border:1px solid var(--line3);${poolActiveTag===t?'background:#2e6bd8;color:#fff;border-color:#2e6bd8':''}">${escapeHtml(t)}</span>`).join('')}
+      </div>`
+    : '';
+
+  const folderTree = `<div style="font-size:12px;color:#5c6761;margin:6px 0 10px">
+    <div style="cursor:pointer;${!poolActiveFolder?'font-weight:700;color:#2e6bd8':''}" onclick="setActiveFolder(null)">全部（${poolPoints.length}）</div>
+    ${poolFolders.map(f=>renderFolderNode(f,0)).join('')}
+    ${renderFolderForm()}
+    <button class="btn-ghost" style="padding:0 6px;font-size:11px;margin-top:6px" onclick="openFolderForm('add',null)">+ 新建目录</button>
+  </div>`;
+
+  const rows = filtered.map(p=>{
     let extra = {}; try{ extra = JSON.parse(p.extra||'{}'); }catch(e){}
     const isEditing = poolForm && poolForm.mode==='edit' && poolForm.id===p.id;
+    const original = extra['原句'] || '';
     return `<div class="row" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line3)">
       <input type="checkbox" ${poolSelected.has(p.id)?'checked':''} onchange="togglePoolSel(${p.id})">
       <div style="flex:1">
         <div style="font-weight:600">${escapeHtml(p.content||'')}</div>
         <div style="font-size:12px;color:#778079">${escapeHtml(p.subject)} · ${escapeHtml(p.category)} · ${escapeHtml(extra['释义']||extra['例句']||extra['作者']||'')}</div>
+        ${original ? `<div style="font-size:12px;color:#9aa4a0;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">原句：${escapeHtml(original)}</div>` : ''}
         ${isEditing ? renderPoolEditForm(p, extra) : ''}
       </div>
       <button class="btn-ghost" onclick="editPoolPoint(${p.id})">编辑</button>
@@ -3004,7 +3095,11 @@ function renderPoolTab(){
   const addForm = poolForm && poolForm.mode==='add' ? renderPoolAddForm() : '';
 
   return `<div class="parent-grid">
-    <div class="parent-panel" style="grid-column:1/-1">
+    <div class="parent-panel">
+      <div class="head"><div class="ic blue">${icon('folder',20)}</div><div><h3>目录</h3><div class="sub">按目录归类知识点</div></div></div>
+      <div class="bd">${folderTree}</div>
+    </div>
+    <div class="parent-panel">
       <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>知识点库</h3><div class="sub">上传讲义 PDF 解析成可复用知识点，勾选组合成训练方案</div></div></div>
       <div class="bd">
         <div style="display:flex;gap:8px;margin:12px 0">
@@ -3016,6 +3111,7 @@ function renderPoolTab(){
         ${poolPdfForm ? renderPdfForm() : ''}
         ${addForm}
         ${planForm ? renderPlanCreateForm() : ''}
+        ${tagBar}
         ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无知识点，点击「上传讲义 PDF」开始</div>'}
       </div>
     </div>
@@ -3039,6 +3135,8 @@ function renderPdfForm(){
 }
 
 function renderPoolAddForm(){
+  const folderOpts = `<option value="">未分类</option>` +
+    flattenFolders(poolFolders).map(f=>`<option value="${f.id}">${'　'.repeat(f.depth)}${escapeHtml(f.name)}</option>`).join('');
   return `<div style="background:#f6f8f7;border-radius:10px;padding:12px;margin:8px 0">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
       <span style="font-size:13px;color:#5c6761;min-width:36px">内容</span>
@@ -3052,6 +3150,16 @@ function renderPoolAddForm(){
       <span style="font-size:13px;color:#5c6761;min-width:36px">释义</span>
       <input id="poolAddMeaning" placeholder="中文释义（可留空）" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
     </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+      <span style="font-size:13px;color:#5c6761;min-width:36px">原句</span>
+      <input id="poolAddOriginal" placeholder="教材原句（可留空）" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+      <span style="font-size:13px;color:#5c6761;min-width:36px">目录</span>
+      <select id="poolAddFolder" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${folderOpts}</select>
+      <span style="font-size:13px;color:#5c6761">标签</span>
+      <input id="poolAddTags" placeholder="逗号分隔，如 易错,重点" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:180px">
+    </div>
     <div style="display:flex;gap:8px">
       <button class="btn-primary" style="padding:6px 16px" onclick="submitPoolAdd()">保存</button>
       <button class="btn-ghost" style="padding:6px 16px" onclick="poolForm=null;render()">取消</button>
@@ -3060,6 +3168,9 @@ function renderPoolAddForm(){
 }
 
 function renderPoolEditForm(p, extra){
+  const folderOpts = `<option value="">未分类</option>` +
+    flattenFolders(poolFolders).map(f=>`<option value="${f.id}" ${p.folder_id===f.id?'selected':''}>${'　'.repeat(f.depth)}${escapeHtml(f.name)}</option>`).join('');
+  const curTags = parseTags(p.tags).join(', ');
   return `<div style="background:#f6f8f7;border-radius:10px;padding:10px;margin-top:8px">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
       <span style="font-size:13px;color:#5c6761">内容</span>
@@ -3072,6 +3183,16 @@ function renderPoolEditForm(p, extra){
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
       <span style="font-size:13px;color:#5c6761">释义</span>
       <input id="poolEditMeaning" value="${escapeHtml(extra['释义']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+      <span style="font-size:13px;color:#5c6761">原句</span>
+      <input id="poolEditOriginal" value="${escapeHtml(extra['原句']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+      <span style="font-size:13px;color:#5c6761">目录</span>
+      <select id="poolEditFolder" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${folderOpts}</select>
+      <span style="font-size:13px;color:#5c6761">标签</span>
+      <input id="poolEditTags" value="${escapeHtml(curTags)}" placeholder="逗号分隔" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:180px">
     </div>
     <div style="display:flex;gap:8px">
       <button class="btn-primary" style="padding:6px 16px" onclick="submitPoolEdit(${p.id})">保存</button>
@@ -3117,8 +3238,16 @@ async function submitPoolAdd(){
   const subject = document.getElementById('poolAddSubject').value;
   const category = document.getElementById('poolAddCategory').value.trim();
   const meaning = document.getElementById('poolAddMeaning').value.trim();
-  const extraJson = meaning ? JSON.stringify({释义:meaning}) : '{}';
-  const r = await api('/api/knowledge-pool', {method:'POST', body:{subject, category, content, extra: extraJson}});
+  const original = document.getElementById('poolAddOriginal').value.trim();
+  const folderId = document.getElementById('poolAddFolder').value;
+  const tags = document.getElementById('poolAddTags').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const extra = {};
+  if(meaning) extra['释义'] = meaning;
+  if(original) extra['原句'] = original;
+  const extraJson = Object.keys(extra).length ? JSON.stringify(extra) : '{}';
+  const body = {subject, category, content, extra: extraJson, tags,
+                folder_id: folderId ? parseInt(folderId,10) : null};
+  const r = await api('/api/knowledge-pool', {method:'POST', body});
   if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
   poolForm = null; await loadPool(); render();
 }
@@ -3129,8 +3258,16 @@ async function submitPoolEdit(id){
   const subject = document.getElementById('poolEditSubject').value;
   const category = document.getElementById('poolEditCategory').value.trim();
   const meaning = document.getElementById('poolEditMeaning').value.trim();
-  const extraJson = meaning ? JSON.stringify({释义:meaning}) : '{}';
-  const r = await api(`/api/knowledge-pool/${id}`, {method:'PUT', body:{subject, category, content, extra: extraJson}});
+  const original = document.getElementById('poolEditOriginal').value.trim();
+  const folderId = document.getElementById('poolEditFolder').value;
+  const tags = document.getElementById('poolEditTags').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const extra = {};
+  if(meaning) extra['释义'] = meaning;
+  if(original) extra['原句'] = original;
+  const extraJson = Object.keys(extra).length ? JSON.stringify(extra) : '{}';
+  const body = {subject, category, content, extra: extraJson, tags,
+                folder_id: folderId ? parseInt(folderId,10) : null};
+  const r = await api(`/api/knowledge-pool/${id}`, {method:'PUT', body});
   if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
   poolForm = null; await loadPool(); render();
 }
@@ -3157,7 +3294,7 @@ function renderPlansTab(){
       <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>训练方案</h3><div class="sub">把知识点组合成可保存的方案，发布后生成专项训练</div></div></div>
       <div class="bd">
         <div style="display:flex;gap:8px;margin:12px 0">
-          <button class="btn-ghost" onclick="poolTab='pool';loadPool().then(()=>render())">去勾选知识点</button>
+          <button class="btn-ghost" onclick="poolTab='pool';loadPool().then(loadFolders).then(()=>render())">去勾选知识点</button>
           <button class="btn-ghost" onclick="poolTab=null;render()">返回</button>
         </div>
         ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无方案，先在知识点库勾选组合</div>'}
@@ -3233,7 +3370,7 @@ function renderDrillTab(){
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>专项训练</h3><div class="sub">识记型内容（短语/古诗/概念）闯关 + 间隔复习，练到真掌握</div></div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-          <button class="btn-ghost" style="padding:8px 16px" onclick="poolTab='pool';loadPool().then(()=>render())">知识点库</button>
+          <button class="btn-ghost" style="padding:8px 16px" onclick="poolTab='pool';loadPool().then(loadFolders).then(()=>render())">知识点库</button>
           <button class="btn-ghost" style="padding:8px 16px" onclick="poolTab='plans';loadPlans().then(()=>render())">训练方案</button>
           <button class="btn-primary" style="padding:8px 16px" onclick="drillTab='create';render()">新建专项</button>
         </div>
