@@ -1097,10 +1097,22 @@ async function loadXkbChapters(silent){
   xkbPicker.loading = false;
   paintXkbModal();
 }
+function xkbSelectedCount(){
+  return (xkbPicker.drafts || []).reduce((n, _, i) => n + (xkbPicker.selected[i] ? 1 : 0), 0);
+}
+function xkbToggleAll(on){
+  (xkbPicker.drafts || []).forEach((_, i) => { xkbPicker.selected[i] = !!on; });
+  paintXkbModal();
+}
+function xkbToggleOne(i, on){
+  xkbPicker.selected[i] = !!on;
+  paintXkbModal();
+}
 function xkbBackToPick(){
   xkbPicker.step = 'pick';
   xkbPicker.drafts = [];
   xkbPicker.selected = {};
+  xkbPicker.dataCount = null;
   paintXkbModal();
 }
 function paintXkbModal(){
@@ -1109,19 +1121,46 @@ function paintXkbModal(){
   if(!xkbPicker.open){ el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = 'flex';
   if(xkbPicker.step === 'preview'){
-    const n = xkbPicker.drafts.length;
-    el.innerHTML = `<div class="xkb-panel" role="dialog">
+    const n = xkbSelectedCount();
+    const m = (xkbPicker.drafts || []).length;
+    const items = (xkbPicker.drafts || []).map((d, i) => {
+      const checked = xkbPicker.selected[i] ? 'checked' : '';
+      const label = QTYPE_LABEL[d.qtype] || d.qtype || '题目';
+      const opts = Array.isArray(d.options) ? d.options : [];
+      const optHtml = opts.length
+        ? `<div style="margin-top:6px;font-size:12px;color:#5c6761">${opts.map(o => `<div>${renderQuestionHtml(o.label || '')}</div>`).join('')}</div>`
+        : '';
+      return `<label class="xkb-preview-item">
+      <input type="checkbox" ${checked} onchange="xkbToggleOne(${i}, this.checked)">
+      <div class="xkb-preview-body">
+        <span class="xkb-qtype">${escapeAttr(label)}</span>
+        ${renderQuestionHtml(d.question || '')}
+        ${optHtml}
+      </div>
+    </label>`;
+    }).join('');
+    el.innerHTML = `<div class="xkb-panel wide" role="dialog">
     <div class="hd">
       <h4>预览并勾选题目</h4>
+      <p>本页 ${m} 道${xkbPicker.dataCount != null ? `（来源约 ${escapeAttr(String(xkbPicker.dataCount))} 道）` : ''} · 不跨页保留勾选</p>
     </div>
     <div class="bd">
       ${xkbPicker.error ? `<div style="color:#c05b4a;font-size:13px;margin-bottom:10px">${escapeAttr(xkbPicker.error)}</div>` : ''}
-      ${xkbPicker.previewLoading ? '<div style="color:#8e9691;font-size:13px">拉取中…</div>' : ''}
-      <p style="font-size:13px;color:#6b746e;margin:0">已拉取 ${n} 道（预览列表下一任务）</p>
+      ${xkbPicker.previewLoading ? '<div style="color:#8e9691;font-size:13px;margin-bottom:10px">拉取中…</div>' : ''}
+      <div class="xkb-preview-toolbar">
+        <button type="button" class="btn-ghost" onclick="xkbToggleAll(true)">全选</button>
+        <button type="button" class="btn-ghost" onclick="xkbToggleAll(false)">全不选</button>
+        <span>已选 ${n} / ${m}</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px">页码
+          <input type="number" min="1" max="50" value="${xkbPicker.page || 1}" style="width:64px;padding:4px 8px;border-radius:8px;border:1px solid var(--line3)"
+            onchange="xkbPicker.page=Math.max(1,parseInt(this.value,10)||1);loadXuekubaoPreview()">
+        </label>
+      </div>
+      <div class="xkb-preview-list">${items}</div>
     </div>
     <div class="xkb-foot">
       <button type="button" class="btn-ghost" onclick="xkbBackToPick()">返回</button>
-      <button type="button" class="btn-primary" disabled>导入已选</button>
+      <button type="button" class="btn-primary" ${n < 1 || xkbPicker.previewLoading ? 'disabled' : ''} onclick="confirmXuekubaoImportSelected()">导入已选 (${n})</button>
     </div>
   </div>`;
     return;
@@ -1200,6 +1239,35 @@ async function loadXuekubaoPreview(){
     xkbPicker.step = 'preview';
   }catch(e){
     xkbPicker.error = (e && e.message) || '拉取预览失败';
+  }
+  xkbPicker.previewLoading = false;
+  paintXkbModal();
+}
+async function confirmXuekubaoImportSelected(){
+  if(!bankSelectedId) return;
+  const items = (xkbPicker.drafts || []).filter((_, i) => xkbPicker.selected[i]);
+  if(!items.length){ toast('请至少勾选一道题'); return; }
+  xkbPicker.previewLoading = true;
+  paintXkbModal();
+  try{
+    const r = await api(`/api/banks/${bankSelectedId}/import-drafts`, {
+      method:'POST',
+      body:{ source:'xuekubao', items },
+    });
+    if(r && r.detail){
+      const d = r.detail;
+      throw new Error(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => x.msg || JSON.stringify(x)).join('; ') : JSON.stringify(d)));
+    }
+    if(r && r.count > 0){
+      toast(`已导入 ${r.count} 道题，请到审核台确认`);
+      closeXuekubaoPicker();
+      await loadBankList();
+      render();
+      return;
+    }
+    toast((r && r.message) || apiErrorMsg(r, '导入失败'));
+  }catch(e){
+    toast((e && e.message) || '导入失败');
   }
   xkbPicker.previewLoading = false;
   paintXkbModal();
