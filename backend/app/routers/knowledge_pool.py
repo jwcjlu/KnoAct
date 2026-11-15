@@ -82,6 +82,9 @@ def delete_point(point_id: int, user: User = Depends(require_role("parent", "adm
         return {"error": "not found"}
     if p is False:
         return {"error": "无权操作"}
+    from ..models import TrainingItem
+    if db.query(TrainingItem.id).filter_by(point_pool_id=point_id).first():
+        return {"error": "该知识点已被训练方案发布使用，无法删除"}
     db.delete(p); db.commit()
     return {"ok": True}
 
@@ -132,12 +135,8 @@ async def from_pdf(subject: str = Form(...), handout_kind: str = Form("outline")
         db.commit()
         return {"document_id": doc.id, "count": created}
     finally:
-        # 纯中间产物：无 reader 页面引用，清理渲染页目录与源 PDF，避免磁盘无限增长
+        # 渲染页为纯中间产物（无 reader 页面引用），清理；源 PDF 保留，供 document_id 溯源
         shutil.rmtree(out_dir, ignore_errors=True)
-        try:
-            os.remove(path)
-        except OSError:
-            pass
 
 
 class PlanIn(BaseModel):
@@ -166,7 +165,13 @@ def get_plan(plan_id: int, user: User = Depends(require_role("parent", "admin"))
     if p is False:
         return {"error": "无权操作"}
     ids = json.loads(p.point_ids or "[]")
-    points = db.query(KnowledgePointPool).filter(KnowledgePointPool.id.in_(ids)).all() if ids else []
+    if ids:
+        q = db.query(KnowledgePointPool).filter(KnowledgePointPool.id.in_(ids))
+        if user.role != "admin":
+            q = q.filter(KnowledgePointPool.owner_id == user.id)
+        points = q.all()
+    else:
+        points = []
     return {"id": p.id, "subject": p.subject, "title": p.title,
             "point_ids": ids, "group_id": p.group_id, "status": p.status,
             "points": [_point_dict(x) for x in points]}
@@ -208,6 +213,17 @@ def delete_plan(plan_id: int, user: User = Depends(require_role("parent", "admin
         return {"error": "not found"}
     if p is False:
         return {"error": "无权操作"}
+    from ..models import TrainingGroup, TrainingItem, TrainingItemMastery
+    if p.group_id:
+        gid = p.group_id
+        item_ids = [r[0] for r in db.query(TrainingItem.id).filter_by(group_id=gid).all()]
+        for iid in item_ids:
+            db.query(TrainingItemMastery).filter_by(item_id=iid).delete()
+        db.query(TrainingItem).filter_by(group_id=gid).delete()
+        # 先解除 plan → group 的 FK 并 flush，再删 group，避免外键约束失败
+        p.group_id = None
+        db.flush()
+        db.query(TrainingGroup).filter_by(id=gid).delete()
     db.delete(p); db.commit()
     return {"ok": True}
 

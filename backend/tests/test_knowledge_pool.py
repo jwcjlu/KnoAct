@@ -57,3 +57,25 @@ def test_crud_and_edit(client, db):
     assert r2.json()["content"] == "give in"
     r3 = client.delete(f"/api/knowledge-pool/{pid}", headers=parent_h)
     assert r3.json()["ok"] is True
+
+
+def test_delete_published_point_refused(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p = _mk_point(db, parent)
+    plan_id = client.post("/api/plans", json={"subject": "英语", "title": "t",
+                                              "point_ids": [p.id]}, headers=parent_h).json()["id"]
+    client.post(f"/api/plans/{plan_id}/publish", headers=parent_h)
+    r = client.delete(f"/api/knowledge-pool/{p.id}", headers=parent_h)
+    assert r.json().get("error")
+
+
+def test_delete_plan_cascades_group(client, db):
+    parent, child, parent_h, _ = parent_child(db)
+    p = _mk_point(db, parent)
+    plan_id = client.post("/api/plans", json={"subject": "英语", "title": "t",
+                                              "point_ids": [p.id]}, headers=parent_h).json()["id"]
+    gid = client.post(f"/api/plans/{plan_id}/publish", headers=parent_h).json()["group_id"]
+    from app.models import TrainingGroup, TrainingItem
+    client.delete(f"/api/plans/{plan_id}", headers=parent_h)
+    assert db.get(TrainingGroup, gid) is None
+    assert db.query(TrainingItem).filter_by(group_id=gid).count() == 0
