@@ -103,6 +103,12 @@ let parentTasks = [];      // 当天全部任务（含待审核）
 let drillGroups = [];      // [{id, subject, title, source, kind, audit_status, item_count, ai_review}]
 let drillTab = null;       // null | 'create'
 
+// 知识点库 + 训练方案（专项训练的子视图）
+let poolPoints = [];       // [{id, subject, category, content, extra, source}]
+let plans = [];            // [{id, subject, title, point_ids, group_id, status}]
+let poolTab = null;        // null | 'pool' | 'plans'
+let poolSelected = new Set();  // 勾选的知识点 id（组合方案用）
+
 // 屏幕时间
 let screenGroups = [];     // [{id,name,kind,daily_limit_seconds}]
 let screenRules = [];      // [{app_package,app_name,group_id}]
@@ -2808,7 +2814,130 @@ async function loadDrillGroups(){
   if(!Array.isArray(drillGroups)) drillGroups = [];
 }
 
+// ===== 知识点库 + 训练方案（专项训练子视图） =====
+async function loadPool(){ poolPoints = await api('/api/knowledge-pool'); if(!Array.isArray(poolPoints)) poolPoints=[]; }
+
+async function loadPlans(){ plans = await api('/api/plans'); if(!Array.isArray(plans)) plans=[]; }
+
+function renderPoolTab(){
+  const rows = poolPoints.map(p=>{
+    let extra = {}; try{ extra = JSON.parse(p.extra||'{}'); }catch(e){}
+    return `<div class="row" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line3)">
+      <input type="checkbox" ${poolSelected.has(p.id)?'checked':''} onchange="togglePoolSel(${p.id})">
+      <div style="flex:1">
+        <div style="font-weight:600">${escapeHtml(p.content||'')}</div>
+        <div style="font-size:12px;color:#778079">${escapeHtml(p.subject)} · ${escapeHtml(p.category)} · ${escapeHtml(extra['释义']||extra['例句']||extra['作者']||'')}</div>
+      </div>
+      <button class="btn-ghost" onclick="editPoolPoint(${p.id})">编辑</button>
+      <button class="btn-ghost" onclick="delPoolPoint(${p.id})">删除</button>
+    </div>`;
+  }).join('');
+  return `<div class="parent-grid">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>知识点库</h3><div class="sub">上传讲义 PDF 解析成可复用知识点，勾选组合成训练方案</div></div></div>
+      <div class="bd">
+        <div style="display:flex;gap:8px;margin:12px 0">
+          <button class="btn-primary" onclick="uploadPoolPdf()">上传讲义 PDF</button>
+          <button class="btn-ghost" onclick="addPoolPoint()">手动新增</button>
+          <button class="btn-primary" onclick="createPlanFromSel()">组合成方案(${poolSelected.size})</button>
+          <button class="btn-ghost" onclick="poolTab=null;render()">返回</button>
+        </div>
+        ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无知识点，点击「上传讲义 PDF」开始</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+function togglePoolSel(id){ if(poolSelected.has(id)) poolSelected.delete(id); else poolSelected.add(id); render(); }
+
+function uploadPoolPdf(){
+  const subject = prompt('学科（语文/英语/数学）','英语');
+  if(!subject) return;
+  const kind = prompt('讲义类型（phrase 短语 / outline 归纳）','phrase');
+  if(!kind) return;
+  const inp = document.createElement('input'); inp.type='file'; inp.accept='application/pdf';
+  inp.onchange = async ()=>{
+    const file = inp.files[0]; if(!file) return;
+    const fd = new FormData(); fd.append('subject', subject); fd.append('handout_kind', kind); fd.append('file', file);
+    toast('正在识别讲义…（OCR 逐页提取，需一点时间）');
+    const r = await apiForm('/api/knowledge-pool/from-pdf', fd);
+    if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+    if(!r || !r.count){ toast(apiErrorMsg(r, '识别失败，请换清晰 PDF 或手动录入')); return; }
+    toast(`已提取 ${r.count} 条知识点`);
+    await loadPool(); render();
+  };
+  inp.click();
+}
+
+async function addPoolPoint(){
+  const content = prompt('知识点内容（如 look after）'); if(!content) return;
+  const subject = prompt('学科','英语'); if(!subject) return;
+  const category = prompt('分类','短语') || '';
+  const extra = prompt('释义（可留空）','') || '';
+  const extraJson = extra ? JSON.stringify({释义:extra}) : '{}';
+  await api('/api/knowledge-pool', {method:'POST', body:{subject, category, content, extra: extraJson}});
+  await loadPool(); render();
+}
+
+async function editPoolPoint(id){
+  const p = poolPoints.find(x=>x.id===id); if(!p) return;
+  const content = prompt('内容', p.content); if(!content) return;
+  let extra = {}; try{ extra = JSON.parse(p.extra||'{}'); }catch(e){ extra = {}; }
+  const meaning = prompt('释义（留空不变）', extra['释义']||'');
+  if(meaning !== null){ extra['释义'] = meaning; }
+  await api(`/api/knowledge-pool/${id}`, {method:'PUT', body:{content, extra: JSON.stringify(extra), subject:p.subject, category:p.category}});
+  await loadPool(); render();
+}
+
+async function delPoolPoint(id){
+  if(!confirm('删除该知识点？')) return;
+  await api(`/api/knowledge-pool/${id}`, {method:'DELETE'});
+  poolSelected.delete(id); await loadPool(); render();
+}
+
+function renderPlansTab(){
+  const rows = plans.map(p=>`<div class="row" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line3)">
+    <div style="flex:1">
+      <div style="font-weight:600">${escapeHtml(p.title||'未命名')}</div>
+      <div style="font-size:12px;color:#778079">${escapeHtml(p.subject)} · ${(p.point_ids||[]).length} 个知识点 · ${p.status==='published'?'已发布':'草稿'}</div>
+    </div>
+    ${p.status==='published'
+      ? `<button class="btn-ghost" onclick="publishPlan(${p.id})">重新发布</button>`
+      : `<button class="btn-primary" onclick="publishPlan(${p.id})">发布</button>`}
+  </div>`).join('');
+  return `<div class="parent-grid">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>训练方案</h3><div class="sub">把知识点组合成可保存的方案，发布后生成专项训练</div></div></div>
+      <div class="bd">
+        <div style="display:flex;gap:8px;margin:12px 0">
+          <button class="btn-ghost" onclick="poolTab='pool';loadPool().then(()=>render())">去勾选知识点</button>
+          <button class="btn-ghost" onclick="poolTab=null;render()">返回</button>
+        </div>
+        ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无方案，先在知识点库勾选组合</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+async function createPlanFromSel(){
+  if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
+  const title = prompt('方案名称'); if(!title) return;
+  const subject = prompt('学科','英语'); if(!subject) return;
+  const r = await api('/api/plans', {method:'POST', body:{subject, title, point_ids:[...poolSelected]}});
+  if(r && (r.error || r.detail)){ toast(apiErrorMsg(r, '创建方案失败')); return; }
+  poolSelected.clear(); poolTab='plans'; await loadPlans(); render();
+}
+
+async function publishPlan(id){
+  const r = await api(`/api/plans/${id}/publish`, {method:'POST'});
+  if(r && r.error){ toast(r.error); return; }
+  toast(`已生成专项训练（组 ${r.group_id}），请到专项训练列表审核`);
+  poolTab=null; await loadDrillGroups(); render();
+}
+
 function renderDrillTab(){
+  if(poolTab==='pool') return renderPoolTab();
+  if(poolTab==='plans') return renderPlansTab();
   if(drillTab==='create') return renderDrillCreate();
   const rows = drillGroups.map(g=>{
     const kind = DRILL_KIND_LABEL[g.kind] || g.kind || '-';
@@ -2838,7 +2967,11 @@ function renderDrillTab(){
   return `<div class="parent-grid">
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>专项训练</h3><div class="sub">识记型内容（短语/古诗/概念）闯关 + 间隔复习，练到真掌握</div></div>
-        <button class="btn-primary" style="margin-left:auto;padding:8px 16px" onclick="drillTab='create';render()">新建专项</button>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn-ghost" style="padding:8px 16px" onclick="poolTab='pool';loadPool().then(()=>render())">知识点库</button>
+          <button class="btn-ghost" style="padding:8px 16px" onclick="poolTab='plans';loadPlans().then(()=>render())">训练方案</button>
+          <button class="btn-primary" style="padding:8px 16px" onclick="drillTab='create';render()">新建专项</button>
+        </div>
       </div>
       <div class="bd">
         ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无专项，点击「新建专项」录入识记内容</div>'}
