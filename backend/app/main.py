@@ -55,6 +55,19 @@ def _ensure_db_tables() -> None:
         except Exception as exc:
             db.rollback()
             _log.warning("questions.passage_id 迁移失败: %s", exc)
+        try:
+            from sqlalchemy import inspect as _inspect, text as _text
+            _insp = _inspect(db.get_bind())
+            if "knowledge_point_pool" in set(_insp.get_table_names()):
+                _cols = {c["name"] for c in _insp.get_columns("knowledge_point_pool")}
+                with db.get_bind().begin() as _conn:
+                    if "folder_id" not in _cols:
+                        _conn.execute(_text("ALTER TABLE knowledge_point_pool ADD COLUMN folder_id INTEGER"))
+                    if "tags" not in _cols:
+                        _conn.execute(_text("ALTER TABLE knowledge_point_pool ADD COLUMN tags TEXT DEFAULT '[]'"))
+        except Exception as exc:
+            db.rollback()
+            _log.warning("knowledge_point_pool 列迁移失败: %s", exc)
     finally:
         db.close()
 
