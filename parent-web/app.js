@@ -3227,7 +3227,7 @@ function pickPoolPdfFile(){
     if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
     if(!r || !r.count){ toast(apiErrorMsg(r, '识别失败，请换清晰 PDF 或手动录入')); return; }
     toast(`已提取 ${r.count} 条知识点`);
-    poolPdfForm = null; await loadPool(); render();
+    poolPdfForm = null; await Promise.all([loadPool(), loadFolders()]); render();
   };
   inp.click();
 }

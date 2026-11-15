@@ -76,9 +76,9 @@ def update_point(point_id: int, req: PointIn,
     p.category = req.category or p.category
     p.content = req.content or p.content
     p.extra = req.extra if req.extra != "{}" else p.extra
-    if req.folder_id is not None:
+    if "folder_id" in req.model_fields_set:
         p.folder_id = req.folder_id
-    if req.tags is not None:
+    if "tags" in req.model_fields_set:
         p.tags = json.dumps(req.tags, ensure_ascii=False)
     db.commit()
     return _point_dict(p)
