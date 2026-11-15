@@ -973,6 +973,7 @@ const XKB_LEVEL_LABELS = ['学段','年级','学科','教材版本'];
 let xkbPicker = {
   open: false, loading: false, error: '', tree: [], sel: ['','','',''],
   chapters: null, knowledge: [], filter: '', picked: null, page: 1,
+  step: 'pick', drafts: [], selected: {}, previewLoading: false, dataCount: null,
 };
 
 function xkbLevelOptions(depth){
@@ -1048,7 +1049,8 @@ function xkbPickKnowledge(id){
 }
 async function openXuekubaoPicker(){
   if(!bankSelectedId){ toast('请先选择卷子'); return; }
-  xkbPicker = {open:true, loading:true, error:'', tree:[], sel:['','','',''], chapters:null, knowledge:[], filter:'', picked:null, page:1};
+  xkbPicker = {open:true, loading:true, error:'', tree:[], sel:['','','',''], chapters:null, knowledge:[], filter:'', picked:null, page:1,
+    step:'pick', drafts:[], selected:{}, previewLoading:false, dataCount:null};
   paintXkbModal();
   try{
     const r = await api('/api/xuekubao/subject-edition', {method:'POST', body:{}});
@@ -1095,11 +1097,35 @@ async function loadXkbChapters(silent){
   xkbPicker.loading = false;
   paintXkbModal();
 }
+function xkbBackToPick(){
+  xkbPicker.step = 'pick';
+  xkbPicker.drafts = [];
+  xkbPicker.selected = {};
+  paintXkbModal();
+}
 function paintXkbModal(){
   const el = document.getElementById('xkbModal');
   if(!el) return;
   if(!xkbPicker.open){ el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = 'flex';
+  if(xkbPicker.step === 'preview'){
+    const n = xkbPicker.drafts.length;
+    el.innerHTML = `<div class="xkb-panel" role="dialog">
+    <div class="hd">
+      <h4>预览并勾选题目</h4>
+    </div>
+    <div class="bd">
+      ${xkbPicker.error ? `<div style="color:#c05b4a;font-size:13px;margin-bottom:10px">${escapeAttr(xkbPicker.error)}</div>` : ''}
+      ${xkbPicker.previewLoading ? '<div style="color:#8e9691;font-size:13px">拉取中…</div>' : ''}
+      <p style="font-size:13px;color:#6b746e;margin:0">已拉取 ${n} 道（预览列表下一任务）</p>
+    </div>
+    <div class="xkb-foot">
+      <button type="button" class="btn-ghost" onclick="xkbBackToPick()">返回</button>
+      <button type="button" class="btn-primary" disabled>导入已选</button>
+    </div>
+  </div>`;
+    return;
+  }
   const cascade = XKB_LEVEL_LABELS.map((label, depth) => {
     const opts = xkbLevelOptions(depth);
     const disabled = depth > 0 && !xkbPicker.sel[depth - 1];
@@ -1137,20 +1163,49 @@ function paintXkbModal(){
     </div>
     <div class="xkb-foot">
       <button type="button" class="btn-ghost" onclick="closeXuekubaoPicker()">取消</button>
-      <button type="button" class="btn-primary" ${!xkbPicker.picked || xkbPicker.loading ? 'disabled' : ''} onclick="confirmXuekubaoSync()">导入题目</button>
+      <button type="button" class="btn-primary" ${!xkbPicker.picked || xkbPicker.loading || xkbPicker.previewLoading ? 'disabled' : ''} onclick="loadXuekubaoPreview()">拉取预览</button>
     </div>
   </div>`;
 }
-async function confirmXuekubaoSync(){
+async function loadXuekubaoPreview(){
   if(!bankSelectedId || !xkbPicker.picked) return;
-  closeXuekubaoPicker();
-  toast('正在从学库宝拉题…');
-  const r = await api(`/api/banks/${bankSelectedId}/sync-xuekubao`, {
-    method:'POST',
-    body:{knowledge_id: xkbPicker.picked, page: Math.max(1, xkbPicker.page || 1), max_import: 20, fetch_answers: true},
-  });
-  if(r && r.count > 0){ toast(`已导入 ${r.count} 道题，请到审核台确认`); await loadBankList(); render(); }
-  else toast((r && r.message) || apiErrorMsg(r, '同步失败或未配置学库宝密钥'));
+  xkbPicker.previewLoading = true;
+  xkbPicker.error = '';
+  paintXkbModal();
+  try{
+    const r = await api(`/api/banks/${bankSelectedId}/preview-xuekubao`, {
+      method:'POST',
+      body:{
+        knowledge_id: xkbPicker.picked,
+        page: Math.max(1, xkbPicker.page || 1),
+        max_import: 20,
+        fetch_answers: true,
+      },
+    });
+    if(r && r.detail){
+      const d = r.detail;
+      throw new Error(typeof d === 'string' ? d : (d.msg || (Array.isArray(d)?d.map(x=>x.msg||JSON.stringify(x)).join('; '):JSON.stringify(d))));
+    }
+    const drafts = Array.isArray(r && r.drafts) ? r.drafts : [];
+    if(!drafts.length){
+      xkbPicker.error = (r && r.message) || '本页没有题目';
+      xkbPicker.previewLoading = false;
+      paintXkbModal();
+      return;
+    }
+    xkbPicker.drafts = drafts;
+    xkbPicker.dataCount = r.data_count;
+    xkbPicker.selected = {};
+    drafts.forEach((_, i) => { xkbPicker.selected[i] = true; });
+    xkbPicker.step = 'preview';
+  }catch(e){
+    xkbPicker.error = (e && e.message) || '拉取预览失败';
+  }
+  xkbPicker.previewLoading = false;
+  paintXkbModal();
+}
+async function confirmXuekubaoSync(){
+  return loadXuekubaoPreview();
 }
 async function syncBankFromXuekubao(){
   openXuekubaoPicker();
