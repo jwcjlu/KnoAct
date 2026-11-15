@@ -534,6 +534,17 @@ class ReadingPassage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class KnowledgeFolder(Base):
+    """知识点库目录：parent_id 多级，按家长隔离。"""
+    __tablename__ = "knowledge_folders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(128))
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("knowledge_folders.id"), nullable=True)
+    subject: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class KnowledgePointPool(Base):
     """知识点库：讲义 PDF 解析出的可复用知识点，按家长隔离。"""
     __tablename__ = "knowledge_point_pool"
@@ -546,6 +557,8 @@ class KnowledgePointPool(Base):
     source: Mapped[str] = mapped_column(String(16), default="manual")  # pdf | manual
     document_id: Mapped[int | None] = mapped_column(ForeignKey("pdf_documents.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    folder_id: Mapped[int | None] = mapped_column(ForeignKey("knowledge_folders.id"), nullable=True)
+    tags: Mapped[str] = mapped_column(LongText, default="[]")  # JSON 数组，如 ["易错","重点"]
 
 
 class TrainingPlan(Base):
