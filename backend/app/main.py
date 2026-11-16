@@ -56,6 +56,13 @@ def _ensure_db_tables() -> None:
             db.rollback()
             _log.warning("questions.passage_id 迁移失败: %s", exc)
         try:
+            from .migrate_grade_buckets import migrate as _migrate_grade_buckets
+
+            _migrate_grade_buckets(db)
+        except Exception as exc:
+            db.rollback()
+            _log.warning("child grade/桶回填失败: %s", exc)
+        try:
             from sqlalchemy import inspect as _inspect, text as _text
             _insp = _inspect(db.get_bind())
             if "knowledge_point_pool" in set(_insp.get_table_names()):
