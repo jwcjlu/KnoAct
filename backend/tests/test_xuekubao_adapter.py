@@ -48,3 +48,28 @@ def test_fetch_not_configured():
     raw = adapter.fetch_by_knowledge(knowledge_id="kid", page=1, fetch_answers=False)
     assert raw.get("errorCode") == "not_configured"
     assert adapter.normalize(raw) == []
+
+
+def test_fetch_rejects_numeric_chapter_id():
+    """教材章节纯数字 ID 不是 knowledgeId，避免 getQuestions 回落数学题。"""
+    adapter = XuekubaoAdapter(base_url="https://api.xuekubao.com", access_key="k")
+    raw = adapter.fetch_by_knowledge(knowledge_id="15174", page=1, fetch_answers=False)
+    assert raw.get("errorCode") == "invalid"
+    assert raw.get("data") == []
+    assert "章节" in (raw.get("message") or "")
+
+
+def test_knowledge_tree_posts_knowledge_api(monkeypatch):
+    adapter = XuekubaoAdapter(base_url="https://api.xuekubao.com", access_key="k")
+    seen = {}
+
+    def fake_post(path, body=None):
+        seen["path"] = path
+        seen["body"] = body
+        return {"errorCode": "0", "data": [{"name": "拼音", "oldId": "abc", "child": []}]}
+
+    monkeypatch.setattr(adapter, "_post", fake_post)
+    raw = adapter.knowledge_tree(pharse_id="1", subject_id="1", grade_id="151", edition_id="81")
+    assert seen["path"] == "/api/v1/knowledgeApi"
+    assert seen["body"]["subjectId"] == "1"
+    assert raw["data"][0]["oldId"] == "abc"

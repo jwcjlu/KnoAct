@@ -1,4 +1,4 @@
-"""学库宝元数据代理：供家长端选章节 / 知识点（oldId → knowledgeId）。"""
+"""学库宝元数据代理：供家长端选知识点（knowledgeApi oldId → knowledgeId）。"""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -47,11 +47,10 @@ def chapter_tree(
     user: User = Depends(require_role("parent", "admin")),
     adapter: XuekubaoAdapter = Depends(_adapter),
 ):
-    """教材章节树；三级节点 oldId 可作为 knowledgeId。
+    """教材章节树（调试/兼容保留）。
 
-    学库宝 chapterApi 只传学段会返回整个学段的完整章节树，数据量巨大、
-    服务端常超 30s。因此要求至少带 grade_id 或 subject_id 收窄范围，
-    否则直接返回友好报错而非发起必超时的请求。
+    注意：语文等学科叶子 oldId 多为 0、单元为纯数字，**不能**当作 getQuestions
+    的 knowledgeId。拉题请用 ``/knowledge``。
     """
     if not (req.grade_id or req.subject_id):
         raise HTTPException(
@@ -59,6 +58,29 @@ def chapter_tree(
             detail="请先选择年级或学科再加载章节，仅选学段会拉取全量目录导致超时",
         )
     raw = adapter.chapter_tree(
+        pharse_id=req.pharse_id,
+        subject_id=req.subject_id,
+        grade_id=req.grade_id,
+        edition_id=req.edition_id,
+    )
+    if raw.get("data") is None and str(raw.get("errorCode")) not in ("0", "200"):
+        raise HTTPException(status_code=502, detail=raw.get("message") or "拉取失败")
+    return raw
+
+
+@router.post("/knowledge")
+def knowledge_tree(
+    req: ChapterTreeReq,
+    user: User = Depends(require_role("parent", "admin")),
+    adapter: XuekubaoAdapter = Depends(_adapter),
+):
+    """知识点树；节点 oldId（hex）即 getQuestions 的 knowledgeId。
+
+    语文等学科必须走此接口；chapterApi 的教材单元编号会导致拉到错学科题目。
+    """
+    if not req.subject_id:
+        raise HTTPException(status_code=400, detail="请先选择学科再加载知识点")
+    raw = adapter.knowledge_tree(
         pharse_id=req.pharse_id,
         subject_id=req.subject_id,
         grade_id=req.grade_id,
