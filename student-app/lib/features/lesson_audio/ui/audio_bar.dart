@@ -6,16 +6,19 @@ import '../models/lesson_audio.dart';
 
 /// 单个教材音频的播放条：可拖拽进度，整段播，或按 marks 分段（点某段从 start_sec 起播）。
 class AudioBar extends StatefulWidget {
-  const AudioBar({super.key, required this.audio, required this.url});
+  const AudioBar({super.key, required this.audio, required this.url, this.player});
   final LessonAudio audio;
   final String url;
+
+  /// 测试注入用；默认在 State 里 `AudioPlayer()`。
+  final AudioPlayer? player;
 
   @override
   State<AudioBar> createState() => _AudioBarState();
 }
 
 class _AudioBarState extends State<AudioBar> {
-  final _player = AudioPlayer();
+  late final AudioPlayer _player = widget.player ?? AudioPlayer();
   final List<StreamSubscription<dynamic>> _subs = [];
   bool _playing = false;
   Duration _position = Duration.zero;
@@ -60,9 +63,10 @@ class _AudioBarState extends State<AudioBar> {
     }
   }
 
-  Future<void> _seek(double sec) async {
-    await _player.seek(Duration(milliseconds: (sec * 1000).round()));
-    if (mounted) setState(() => _position = Duration(milliseconds: (sec * 1000).round()));
+  Future<void> _seek(double ms) async {
+    final d = Duration(milliseconds: ms.round());
+    await _player.seek(d);
+    if (mounted) setState(() => _position = d);
   }
 
   @override
