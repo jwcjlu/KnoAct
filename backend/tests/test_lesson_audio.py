@@ -32,3 +32,27 @@ def test_upload_audio_auto_matches_lesson(client, db):
     body = r.json()
     assert body["unit_label"] == "Unit 1"
     assert body["lesson_id"] == lesson.id
+
+
+def test_list_audio_and_patch_binding_and_marks(client, db):
+    from app.models import LessonAudio
+    parent = make_account(db, login_name="p_audio2", role="parent")
+    doc = make_document(db, subject="英语", filename="英语五年级上册.pdf")
+    db.commit()
+    row = LessonAudio(document_id=doc.id, unit_label="Word list",
+                      audio_path="uploads/audio/x.mp3", marks_json="[]")
+    db.add(row); db.commit(); db.refresh(row)
+
+    r = client.get(f"/api/lesson-audio?document_id={doc.id}", headers=auth_headers(parent))
+    assert r.status_code == 200
+    items = r.json()
+    assert any(it["id"] == row.id for it in items)
+
+    r = client.patch(f"/api/lesson-audio/{row.id}", json={"unit_label": "Unit 9"}, headers=auth_headers(parent))
+    assert r.status_code == 200
+    assert r.json()["unit_label"] == "Unit 9"
+
+    r = client.put(f"/api/lesson-audio/{row.id}/marks",
+                   json={"marks": [{"label": "A", "start_sec": 12.5}]}, headers=auth_headers(parent))
+    assert r.status_code == 200
+    assert r.json()["marks"][0]["start_sec"] == 12.5

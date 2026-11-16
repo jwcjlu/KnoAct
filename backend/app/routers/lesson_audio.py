@@ -63,5 +63,58 @@ def upload_audio(
     db.add(row)
     db.commit()
     db.refresh(row)
+    return _row_payload(row)
+
+
+class AudioPatchReq(BaseModel):
+    lesson_id: int | None = None
+    unit_label: str | None = None
+
+
+class MarksReq(BaseModel):
+    marks: list[dict] = []
+
+
+def _row_payload(row: LessonAudio) -> dict:
     return {"id": row.id, "lesson_id": row.lesson_id, "unit_label": row.unit_label,
-            "audio_path": row.audio_path, "marks": json.loads(row.marks_json)}
+            "audio_path": row.audio_path, "marks": json.loads(row.marks_json or "[]")}
+
+
+@router.get("")
+def list_audio(
+    document_id: int,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    ensure_pdf_document_access(user, document_id, db)
+    rows = db.query(LessonAudio).filter_by(document_id=document_id).order_by(LessonAudio.id).all()
+    return [_row_payload(r) for r in rows]
+
+
+@router.patch("/{audio_id}")
+def patch_audio(audio_id: int, req: AudioPatchReq,
+                user: User = Depends(require_role("parent", "admin")),
+                db: Session = Depends(get_db)):
+    row = db.get(LessonAudio, audio_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="音频不存在")
+    ensure_pdf_document_access(user, row.document_id, db)
+    if req.lesson_id is not None:
+        row.lesson_id = req.lesson_id
+    if req.unit_label is not None:
+        row.unit_label = req.unit_label
+    db.commit(); db.refresh(row)
+    return _row_payload(row)
+
+
+@router.put("/{audio_id}/marks")
+def put_marks(audio_id: int, req: MarksReq,
+              user: User = Depends(require_role("parent", "admin")),
+              db: Session = Depends(get_db)):
+    row = db.get(LessonAudio, audio_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="音频不存在")
+    ensure_pdf_document_access(user, row.document_id, db)
+    row.marks_json = json.dumps(req.marks, ensure_ascii=False)
+    db.commit(); db.refresh(row)
+    return _row_payload(row)
