@@ -14,6 +14,7 @@ import '../../ask/ui/ask_panel.dart';
 import '../../assignment/assignment_controller.dart';
 import '../../assignment/ui/assignment_sidebar.dart';
 import '../../lesson_audio/lesson_audio_controller.dart';
+import '../../lesson_audio/models/lesson_audio.dart';
 import '../../lesson_audio/ui/audio_bar.dart';
 import '../models/reader_selection.dart';
 import '../reader_controller.dart';
@@ -290,17 +291,31 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
     return async.maybeWhen(
       data: (rows) {
         final repo = ref.read(lessonAudioRepositoryProvider);
+        // 优先按 lesson_id 精确绑定（家长端手动绑定或自动匹配落库）；否则按标题整词匹配兜底。
+        LessonAudio? matched;
         for (final a in rows) {
-          // 整词匹配，避免 "Unit 1" 误匹配 "Unit 10"（与后端 _match_lesson_by_label 对齐）
-          final label = a.unitLabel;
-          final pattern = RegExp(r'\b' + RegExp.escape(label) + r'\b');
-          if (pattern.hasMatch(lesson.title)) {
-            return Container(
-              color: const Color(0xFFF5F7F6),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              child: AudioBar(audio: a, url: repo.audioUrl(a.audioPath)),
-            );
+          if (a.lessonId == lesson.id) {
+            matched = a;
+            break;
           }
+        }
+        if (matched == null) {
+          for (final a in rows) {
+            // 整词匹配，避免 "Unit 1" 误匹配 "Unit 10"
+            final label = a.unitLabel;
+            final pattern = RegExp(r'\b' + RegExp.escape(label) + r'\b');
+            if (pattern.hasMatch(lesson.title)) {
+              matched = a;
+              break;
+            }
+          }
+        }
+        if (matched != null) {
+          return Container(
+            color: const Color(0xFFF5F7F6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: AudioBar(audio: matched, url: repo.audioUrl(matched.audioPath)),
+          );
         }
         return null;
       },
