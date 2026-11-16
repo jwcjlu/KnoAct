@@ -88,9 +88,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/listening',
-        builder: (_, state) => ListeningPage(
-          documentId: int.tryParse(state.uri.queryParameters['document_id'] ?? '') ?? 0,
-        ),
+        builder: (_, state) {
+          final raw = int.tryParse(state.uri.queryParameters['document_id'] ?? '');
+          return ListeningPage(initialDocumentId: (raw != null && raw > 0) ? raw : null);
+        },
       ),
       GoRoute(
         path: '/bank-exercise',
