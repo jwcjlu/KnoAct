@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..core.access import ensure_pdf_document_access
+from ..core.access import ensure_pdf_document_access, require_learning_user
 from ..core.deps import require_role
 from ..database import get_db
 from ..models import Lesson, LessonAudio, User
@@ -15,6 +15,13 @@ from ..models import Lesson, LessonAudio, User
 router = APIRouter(prefix="/api/lesson-audio", tags=["lesson-audio"])
 
 _UNIT_RE = re.compile(r"^(?:\d+_)?Unit\s*(\d+)", re.IGNORECASE)
+_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_filename(filename: str) -> str:
+    """把文件名规范成 URL/文件系统安全形式（空格、非 ASCII、路径符统一替换为 _）。"""
+    stem, ext = os.path.splitext(os.path.basename(filename or "audio.mp3"))
+    return f"{_SAFE_RE.sub('_', stem)}{ext}"
 
 
 def parse_unit_label(filename: str) -> str:
@@ -51,7 +58,7 @@ def upload_audio(
         raise HTTPException(status_code=400, detail="仅支持 MP3 音频")
     os.makedirs("uploads/audio", exist_ok=True)
     label = parse_unit_label(file.filename)
-    safe = os.path.basename(file.filename or "audio.mp3")
+    safe = _safe_filename(file.filename)
     path = f"uploads/audio/{document_id}_{safe}"
     with open(path, "wb") as f:
         f.write(file.file.read())
@@ -85,7 +92,7 @@ def _row_payload(row: LessonAudio) -> dict:
 @router.get("")
 def list_audio(
     document_id: int,
-    user: User = Depends(require_role("parent", "admin")),
+    user: User = Depends(require_learning_user),
     db: Session = Depends(get_db),
 ):
     ensure_pdf_document_access(user, document_id, db)
