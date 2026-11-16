@@ -14,6 +14,7 @@ import '../features/dictation/ui/dictation_page.dart';
 import '../features/drill/ui/drill_page.dart';
 import '../features/home/ui/home_page.dart';
 import '../features/knowledge_review/ui/knowledge_page.dart';
+import '../features/lesson_audio/ui/listening_page.dart';
 import '../features/math_exercise/ui/math_page.dart';
 import '../features/profile/ui/profile_page.dart';
 import '../features/reader/ui/pdf_reader_spike_page.dart';
@@ -58,7 +59,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           path == '/reader' ||
           path == '/reader/view' ||
           path == '/reader/spike' ||
-          path == '/bank-exercise') {
+          path == '/bank-exercise' ||
+          path == '/listening') {
         return null;
       }
       return '/home';
@@ -83,6 +85,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/reader/spike',
         builder: (_, _) => const PdfReaderSpikePage(),
+      ),
+      GoRoute(
+        path: '/listening',
+        builder: (_, state) => ListeningPage(
+          documentId: int.tryParse(state.uri.queryParameters['document_id'] ?? '') ?? 0,
+        ),
       ),
       GoRoute(
         path: '/bank-exercise',
