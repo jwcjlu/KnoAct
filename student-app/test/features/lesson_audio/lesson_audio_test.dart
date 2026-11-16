@@ -31,4 +31,39 @@ void main() {
     expect(a.lessonId, 3);
     expect(a.marks.single.startSec, 12.5);
   });
+
+  test('splitAudioRows 把 Word list 拆到单词表组', () {
+    final rows = [
+      LessonAudio(id: 1, lessonId: 54, unitLabel: 'Unit 1', audioPath: 'a', marks: const []),
+      LessonAudio(id: 2, lessonId: null, unitLabel: 'Word list', audioPath: 'b', marks: const []),
+      LessonAudio(id: 3, lessonId: 56, unitLabel: 'Unit 3', audioPath: 'c', marks: const []),
+    ];
+    final (unit, wordList) = splitAudioRows(rows);
+    expect(unit.map((a) => a.unitLabel).toList(), ['Unit 1', 'Unit 3']);
+    expect(wordList.map((a) => a.unitLabel).toList(), ['Word list']);
+  });
+
+  test('splitAudioRows 无单词表时 wordList 为空', () {
+    final rows = [
+      LessonAudio(id: 1, lessonId: 54, unitLabel: 'Unit 1', audioPath: 'a', marks: const []),
+    ];
+    final (unit, wordList) = splitAudioRows(rows);
+    expect(unit.length, 1);
+    expect(wordList, isEmpty);
+  });
+
+  test('splitAudioRows 仅单词表时 unit 为空', () {
+    final rows = [
+      LessonAudio(id: 2, lessonId: null, unitLabel: 'Word list', audioPath: 'b', marks: const []),
+    ];
+    final (unit, wordList) = splitAudioRows(rows);
+    expect(unit, isEmpty);
+    expect(wordList.map((a) => a.unitLabel).toList(), ['Word list']);
+  });
+
+  test('splitAudioRows 空列表时两组皆空', () {
+    final (unit, wordList) = splitAudioRows(const []);
+    expect(unit, isEmpty);
+    expect(wordList, isEmpty);
+  });
 }

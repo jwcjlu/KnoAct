@@ -5,8 +5,9 @@
 
 常用链路：
   POST /api/v1/subjectEditionApi — 四级树：学段 → 年级(上下册) → 学科 → 版本（节点 ``code`` 为 chapterApi 参数）
-  POST /api/v1/chapterApi — 章节树，三级节点 ``oldId`` 即 ``knowledgeId``
-  POST /api/v1/getQuestions — ``knowledgeId`` + ``page``（必填）
+  POST /api/v1/knowledgeApi — 知识点树（``oldId`` 即 getQuestions 的 ``knowledgeId``；语文等学科必须用此树）
+  POST /api/v1/chapterApi — 教材章节树（数学叶子节点 ``oldId`` 常为 hex knowledgeId；语文叶子 ``oldId`` 多为 0，单元为纯数字，**不能**当 knowledgeId）
+  POST /api/v1/getQuestions — ``knowledgeId`` + ``page``（必填；无效 ID 会回落巨量数学题）
   POST /api/v1/getAnswer — ``qid``（逗号分隔，部分套餐可能无解析数据）
 
 环境变量：``XUEKUBAO_API_BASE``、``XUEKUBAO_ACCESS_KEY``、可选 ``XUEKUBAO_TIMEOUT``。
@@ -193,6 +194,29 @@ class XuekubaoAdapter(ThirdPartyAdapter):
             body["editionId"] = str(edition_id)
         return self._post("/api/v1/chapterApi", body)
 
+    def knowledge_tree(
+        self,
+        *,
+        pharse_id: str,
+        subject_id: str = "",
+        grade_id: str = "",
+        edition_id: str = "",
+    ) -> dict:
+        """知识点树；节点 ``oldId``（hex）才是 getQuestions 可用的 knowledgeId。
+
+        语文等学科的 chapterApi 只有教材目录（数字 oldId / 0），用本章接口才能拉到真题。
+        """
+        if not self.configured():
+            return {"errorCode": "not_configured", "message": "未配置 XUEKUBAO_ACCESS_KEY", "data": []}
+        body: dict[str, str] = {"pharseId": str(pharse_id)}
+        if subject_id:
+            body["subjectId"] = str(subject_id)
+        if grade_id:
+            body["gradeId"] = str(grade_id)
+        if edition_id:
+            body["editionId"] = str(edition_id)
+        return self._post("/api/v1/knowledgeApi", body)
+
     def fetch_answers(self, qids: list[str]) -> dict[str, dict]:
         ids = [str(x).strip() for x in qids if str(x).strip()]
         if not ids or not self.configured():
@@ -231,6 +255,13 @@ class XuekubaoAdapter(ThirdPartyAdapter):
         kid = (knowledge_id or "").strip()
         if not kid or kid == "0":
             return {"data": [], "errorCode": "invalid", "message": "knowledge_id 无效"}
+        # 教材章节数字编号不是 knowledgeId；无效时 getQuestions 会回落巨量数学题
+        if kid.isdigit():
+            return {
+                "data": [],
+                "errorCode": "invalid",
+                "message": "该 ID 是教材章节编号，不是知识点 ID；请从知识点树（knowledgeApi）选择",
+            }
         body: dict[str, Any] = {"knowledgeId": kid, "page": max(1, int(page))}
         if qtype_id:
             body["qtypeId"] = str(qtype_id)

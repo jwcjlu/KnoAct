@@ -192,7 +192,10 @@ def _assert_draft_subject(bank: QuestionBank, drafts: list[QuestionDraft]) -> No
         if q_subj and q_subj != bank_subj:
             raise HTTPException(
                 status_code=400,
-                detail=f"所选知识点属于「{q_subj}」，与当前卷子「{bank_subj}」不符，请先切换到对应学科的卷子再导入",
+                detail=(
+                    f"所选知识点属于「{q_subj}」，与当前卷子「{bank_subj}」不符；"
+                    f"请把拉题弹窗里的「学科」改成「{bank_subj}」，或换到对应学科的卷子"
+                ),
             )
 
 
@@ -215,8 +218,9 @@ def _fetch_xuekubao_drafts(db, bank: QuestionBank, req: XuekubaoSyncReq) -> tupl
     items = raw.get("data") if isinstance(raw.get("data"), list) else _extract_items_safe(raw)
     err = str(raw.get("errorCode") or "")
     if not items and err not in ("0", "200", ""):
+        status = 400 if err == "invalid" else 502
         raise HTTPException(
-            status_code=502,
+            status_code=status,
             detail=raw.get("message") or raw.get("errorCode") or "拉取失败",
         )
     drafts = adapter.normalize(raw)[: max(1, min(req.max_import, 50))]

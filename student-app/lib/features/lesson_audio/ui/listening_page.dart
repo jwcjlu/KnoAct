@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../reader/data/pdf_repository.dart';
 import '../lesson_audio_controller.dart';
+import '../models/lesson_audio.dart';
 import 'audio_bar.dart';
 
 /// 磨耳朵：先选教材 → 列该教材的 Unit 音频 → 播放/循环。
@@ -100,8 +101,16 @@ class _AudioListView extends ConsumerWidget {
             return const Center(child: Text('该教材还没有配套音频'));
           }
           final repo = ref.read(lessonAudioRepositoryProvider);
+          final (unit, wordList) = splitAudioRows(rows);
           return ListView(children: [
-            for (final a in rows) AudioBar(audio: a, url: repo.audioUrl(a.audioPath)),
+            for (final a in unit) AudioBar(audio: a, url: repo.audioUrl(a.audioPath)),
+            if (wordList.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
+                child: Text('单词表', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+              ),
+              for (final a in wordList) AudioBar(audio: a, url: repo.audioUrl(a.audioPath)),
+            ],
           ]);
         },
       ),

@@ -68,21 +68,60 @@ class PassageContentView extends StatelessWidget {
       children: [
         if (title != null && title!.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(title!, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            padding: const EdgeInsets.only(bottom: 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: Text(
+                title!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 17,
+                  height: 1.4,
+                  color: Color(0xFF1A221E),
+                ),
+              ),
+            ),
           ),
-        Text.rich(_spans(tokens)),
+        ..._blockWidgets(tokens),
       ],
     );
   }
 
-  static TextSpan _spans(List<PassageToken> tokens) {
-    return TextSpan(
-      style: const TextStyle(fontSize: 15, height: 1.7, color: Color(0xFF202723)),
-      children: [
-        for (final t in tokens) _span(t),
-      ],
-    );
+  static List<Widget> _blockWidgets(List<PassageToken> tokens) {
+    final lines = <List<PassageToken>>[];
+    var cur = <PassageToken>[];
+    for (final t in tokens) {
+      if (t.kind == 'br') {
+        if (cur.isNotEmpty) lines.add(cur);
+        cur = [];
+        continue;
+      }
+      cur.add(t);
+    }
+    if (cur.isNotEmpty) lines.add(cur);
+
+    final out = <Widget>[];
+    for (var i = 0; i < lines.length; i++) {
+      if (i > 0) out.add(const SizedBox(height: 10));
+      final line = lines[i];
+      final isHeading = line.length == 1 && (line.first.kind == 'h1' || line.first.kind == 'h2');
+      out.add(
+        Text.rich(
+          TextSpan(
+            style: TextStyle(
+              fontSize: isHeading ? 16 : 15,
+              height: isHeading ? 1.45 : 1.85,
+              fontWeight: isHeading ? FontWeight.w700 : FontWeight.w400,
+              color: const Color(0xFF202723),
+              letterSpacing: 0.15,
+            ),
+            children: [for (final t in line) _span(t)],
+          ),
+        ),
+      );
+    }
+    return out;
   }
 
   static InlineSpan _span(PassageToken t) {
@@ -91,7 +130,7 @@ class PassageContentView extends StatelessWidget {
         return const TextSpan(text: '\n');
       case 'h1':
       case 'h2':
-        return TextSpan(text: '${t.text}\n', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16));
+        return TextSpan(text: t.text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16));
       case 'bold':
         return TextSpan(text: t.text, style: const TextStyle(fontWeight: FontWeight.w700));
       case 'italic':

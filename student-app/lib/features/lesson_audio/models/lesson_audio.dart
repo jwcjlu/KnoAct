@@ -36,6 +36,16 @@ String audioUrlForPath(String path, {required String base}) {
   return '$b$p';
 }
 
+/// 把音频拆成 (课文音频, 单词表音频) 两组；单词表按 unit_label == "Word list" 判定。
+(List<LessonAudio>, List<LessonAudio>) splitAudioRows(List<LessonAudio> rows) {
+  final unit = <LessonAudio>[];
+  final wordList = <LessonAudio>[];
+  for (final a in rows) {
+    (a.unitLabel == 'Word list' ? wordList : unit).add(a);
+  }
+  return (unit, wordList);
+}
+
 double segmentStartFor(List<AudioMark> marks, double positionSec) {
   double start = 0;
   for (final m in marks) {

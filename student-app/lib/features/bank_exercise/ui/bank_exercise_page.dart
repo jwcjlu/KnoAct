@@ -239,7 +239,7 @@ class _QuestionCard extends StatelessWidget {
     }
 
     return SectionCard(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
@@ -251,9 +251,15 @@ class _QuestionCard extends StatelessWidget {
             QuestionHtmlView(
               html: question.question,
               prefix: '${index + 1}. ',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, height: 1.5),
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+                height: 1.75,
+                letterSpacing: 0.15,
+                color: Color(0xFF202723),
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 14),
             input,
             if (submitted && result != null) ...[
               const SizedBox(height: 8),
