@@ -64,6 +64,16 @@ class Textbook(Base):
     subject: Mapped[str] = mapped_column(String(16))
     unit: Mapped[str] = mapped_column(String(255))
 
+class LessonAudio(Base):
+    __tablename__ = "lesson_audios"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("pdf_documents.id"))
+    unit_label: Mapped[str] = mapped_column(String(255))
+    audio_path: Mapped[str] = mapped_column(String(255))
+    marks_json: Mapped[str] = mapped_column(LongText, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class LearningProgress(Base):
     __tablename__ = "learning_progress"
     __table_args__ = (
