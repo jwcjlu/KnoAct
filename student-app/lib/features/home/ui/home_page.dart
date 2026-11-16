@@ -153,6 +153,19 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
           ),
           const SizedBox(height: 16),
+          // 磨耳朵入口
+          Card(
+            color: AppColors.green,
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              leading: const Icon(Icons.headphones, color: Colors.white, size: 32),
+              title: const Text('磨耳朵', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+              subtitle: const Text('听课文真人音频，跟读练习', style: TextStyle(color: Colors.white70)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.white),
+              onTap: () => context.push(taskRoute('/listening', returnTo: '/home')),
+            ),
+          ),
+          const SizedBox(height: 16),
           if (wide)
             IntrinsicHeight(
               child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

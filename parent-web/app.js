@@ -1034,23 +1034,49 @@ function xkbLevelOptions(depth){
   return nodes;
 }
 function xkbSetLevel(depth, code){
+  // 学科与卷子锁定时不允许改成其它科
+  if(depth === 2 && xkbSubjectLocked()){
+    const bankSubj = xkbBankSubject();
+    const opts = xkbLevelOptions(2);
+    const hit = opts.find(n => String(n.code ?? n.id) === String(code || ''));
+    if(hit && !xkbMatchSubjectNode(hit, bankSubj)){
+      xkbPicker.error = `当前卷子是「${bankSubj}」，学科已锁定，不能改选「${hit.name || ''}」`;
+      paintXkbModal();
+      return;
+    }
+  }
   xkbPicker.sel[depth] = code || '';
   for(let i = depth + 1; i < XKB_LEVEL_LABELS.length; i++) xkbPicker.sel[i] = '';
   xkbPicker.chapters = null;
   xkbPicker.knowledge = [];
   xkbPicker.picked = null;
-  if(xkbPicker.sel[0]) loadXkbChapters();
+  xkbPicker.error = '';
+  if(depth < 2 && xkbSubjectLocked()){
+    // 改学段/年级后自动把学科扳回卷子学科
+    const subjOpts = xkbLevelOptions(2);
+    const bankSubj = xkbBankSubject();
+    const match = subjOpts.find(n => xkbMatchSubjectNode(n, bankSubj));
+    if(match) xkbPicker.sel[2] = String(match.code ?? match.id);
+  }
+  if(xkbPicker.sel[0] && xkbPicker.sel[2]) loadXkbChapters();
   else paintXkbModal();
+}
+function xkbIsKnowledgeId(kid){
+  // getQuestions 只要 hex 知识点 ID；教材章节纯数字编号会回落巨量数学题
+  if(!kid || kid === '0') return false;
+  if(/^\d+$/.test(kid)) return false;
+  return true;
 }
 function xkbWalkChapters(nodes, path, out){
   for(const n of nodes || []){
     if(!n || typeof n !== 'object') continue;
-    const name = (n.name || n.title || '').trim();
-    const kids = n.child || n.children || [];
+    const name = (n.name || n.title || n.knowledgeName || '').trim();
+    const kids = n.child || n.childList || n.children || [];
     const oldId = (n.oldId != null ? n.oldId : n.oldid != null ? n.oldid : n.knowledgeId);
     const kid = oldId != null ? String(oldId).trim() : '';
     const nextPath = name ? [...path, name] : path;
-    if(kid && kid !== '0'){
+    // 只收叶子：父节点 oldId 常无题或与子节点重复
+    if(!kids.length && xkbIsKnowledgeId(kid)){
       out.push({id: kid, name: name || kid, path: nextPath.join(' › ')});
     }
     if(kids.length) xkbWalkChapters(kids, nextPath, out);
@@ -1066,9 +1092,21 @@ function closeXuekubaoPicker(){
   xkbPicker.open = false;
   paintXkbModal();
 }
+function xkbBankSubject(){
+  const bank = bankList.find(b => b.id === bankSelectedId);
+  return ((bank && bank.subject) || '').trim();
+}
+function xkbSubjectLocked(){
+  return !!xkbBankSubject();
+}
+function xkbMatchSubjectNode(n, subj){
+  if(!subj) return false;
+  const name = (n.name || '').trim();
+  return name === subj || name.includes(subj) || subj.includes(name);
+}
 function guessXkbDefaults(){
   const bank = bankList.find(b => b.id === bankSelectedId);
-  const subj = (bank && bank.subject) || '';
+  const subj = xkbBankSubject();
   const grade = bank && bank.grade ? String(bank.grade) : bankFormDefaultGrade();
   const pick = (nodes, pred) => {
     if(!nodes || !nodes.length) return '';
@@ -1085,9 +1123,25 @@ function guessXkbDefaults(){
     (n.name || '').includes(`${['一','二','三','四','五','六','七','八','九'][grade-1] || grade}年级`)
   )) || pick(nodes, () => true);
   nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[1]) || {}).child || [];
-  xkbPicker.sel[2] = pick(nodes, n => subj && (n.name || '').includes(subj)) || pick(nodes, () => true);
+  // 卷子有学科时必须对齐，禁止回落成列表第一项（五年级上首项常是数学）
+  xkbPicker.sel[2] = pick(nodes, n => xkbMatchSubjectNode(n, subj));
+  if(!xkbPicker.sel[2] && !subj) xkbPicker.sel[2] = pick(nodes, () => true);
   nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[2]) || {}).child || [];
   xkbPicker.sel[3] = nodes.length === 1 ? String(nodes[0].code ?? nodes[0].id) : pick(nodes, () => true);
+}
+function xkbSelectedSubjectName(){
+  const opts = xkbLevelOptions(2);
+  const hit = opts.find(n => String(n.code ?? n.id) === String(xkbPicker.sel[2] || ''));
+  return ((hit && hit.name) || '').trim();
+}
+function xkbAssertSubjectAligned(){
+  const bankSubj = xkbBankSubject();
+  if(!bankSubj) return '';
+  const pickSubj = xkbSelectedSubjectName();
+  if(pickSubj && pickSubj !== bankSubj && !pickSubj.includes(bankSubj) && !bankSubj.includes(pickSubj)){
+    return `当前卷子是「${bankSubj}」，请把上方「学科」选成「${bankSubj}」再拉取（不要选${pickSubj}）`;
+  }
+  return '';
 }
 function xkbPickKnowledge(id){
   xkbPicker.picked = id;
@@ -1113,10 +1167,10 @@ async function openXuekubaoPicker(){
 async function loadXkbChapters(silent){
   if(!xkbPicker.sel[0]) return;
   const [pharse_id, grade_id, subject_id, edition_id] = xkbPicker.sel;
-  // 只选学段会拉取全量目录、后端必超时：需先选到年级和学科
-  if(!grade_id || !subject_id){
+  // 必须选学科：knowledgeApi 按学科返回知识点树（语文不能用 chapterApi 的单元数字 ID）
+  if(!subject_id){
     if(!silent){
-      xkbPicker.error = '请先选好「年级」和「学科」（仅选学段会拉取全量目录导致超时）';
+      xkbPicker.error = '请先选好「学科」再加载知识点';
       xkbPicker.loading = false;
       paintXkbModal();
     }
@@ -1124,7 +1178,7 @@ async function loadXkbChapters(silent){
   }
   if(!silent){ xkbPicker.loading = true; paintXkbModal(); }
   try{
-    const r = await api('/api/xuekubao/chapters', {method:'POST', body:{
+    const r = await api('/api/xuekubao/knowledge', {method:'POST', body:{
       pharse_id, subject_id, grade_id, edition_id,
     }});
     if(r && r.detail) throw new Error(r.detail);
@@ -1136,8 +1190,11 @@ async function loadXkbChapters(silent){
     xkbPicker.knowledge = out.filter(k => { if(seen.has(k.id)) return false; seen.add(k.id); return true; });
     xkbPicker.chapters = true;
     if(xkbPicker.knowledge.length && !xkbPicker.picked) xkbPicker.picked = xkbPicker.knowledge[0].id;
+    if(!xkbPicker.knowledge.length){
+      xkbPicker.error = '该学科下未解析到可用知识点（需要 hex 知识点 ID）';
+    }
   }catch(e){
-    xkbPicker.error = (e && e.message) || '章节加载失败';
+    xkbPicker.error = (e && e.message) || '知识点加载失败';
     xkbPicker.knowledge = [];
   }
   xkbPicker.loading = false;
@@ -1211,28 +1268,36 @@ function paintXkbModal(){
   </div>`;
     return;
   }
+  const bankSubj = xkbBankSubject();
   const cascade = XKB_LEVEL_LABELS.map((label, depth) => {
-    const opts = xkbLevelOptions(depth);
-    const disabled = depth > 0 && !xkbPicker.sel[depth - 1];
-    const options = `<option value="">${disabled ? '请先选上一级' : '请选择'}</option>` +
+    let opts = xkbLevelOptions(depth);
+    // 学科与卷子对齐：只展示对应学科，避免语文卷误选英语
+    if(depth === 2 && bankSubj){
+      const matched = opts.filter(n => xkbMatchSubjectNode(n, bankSubj));
+      if(matched.length) opts = matched;
+    }
+    const lockedSubj = depth === 2 && xkbSubjectLocked() && opts.length <= 1;
+    const disabled = (depth > 0 && !xkbPicker.sel[depth - 1]) || lockedSubj;
+    const options = `<option value="">${disabled && !lockedSubj ? '请先选上一级' : (lockedSubj ? '' : '请选择')}</option>` +
       opts.map(n => {
         const code = String(n.code ?? n.id);
         const sel = xkbPicker.sel[depth] === code ? ' selected' : '';
         return `<option value="${escapeAttr(code)}"${sel}>${escapeAttr(n.name || code)}</option>`;
       }).join('');
-    return `<label><span>${label}</span><select ${disabled?'disabled':''} onchange="xkbSetLevel(${depth}, this.value)">${options}</select></label>`;
+    const tip = lockedSubj ? ` <span style="color:#8e9691;font-weight:400">（与卷子一致）</span>` : '';
+    return `<label><span>${label}${tip}</span><select ${disabled?'disabled':''} onchange="xkbSetLevel(${depth}, this.value)">${options}</select></label>`;
   }).join('');
   const list = xkbFilteredKnowledge();
   const kps = list.length ? list.map(k => `
     <button type="button" class="xkb-kp-item ${xkbPicker.picked===k.id?'on':''}" onclick='xkbPickKnowledge(${JSON.stringify(k.id)})'>
       <span>${escapeAttr(k.name)}</span>
       <span class="xkb-kp-path">${escapeAttr(k.path)}</span>
-    </button>`).join('') : `<div style="padding:16px;color:#8e9691;font-size:13px">${xkbPicker.chapters ? '该教材下未解析到知识点' : '选好教材后自动加载章节'}</div>`;
+    </button>`).join('') : `<div style="padding:16px;color:#8e9691;font-size:13px">${xkbPicker.chapters ? '该学科下未解析到知识点' : '选好学科后自动加载知识点'}</div>`;
   const picked = xkbPicker.knowledge.find(k => k.id === xkbPicker.picked);
   el.innerHTML = `<div class="xkb-panel" role="dialog">
     <div class="hd">
       <h4>从学库宝按知识点拉题</h4>
-      <p>先选学段与教材，再点选知识点（无需手工填 ID）</p>
+      <p>${bankSubj ? `当前卷子学科「${escapeAttr(bankSubj)}」，知识点将按该学科加载` : '先选学段与学科，再点选知识点'}</p>
     </div>
     <div class="bd">
       ${xkbPicker.error ? `<div style="color:#c05b4a;font-size:13px;margin-bottom:10px">${escapeAttr(xkbPicker.error)}</div>` : ''}
@@ -1254,6 +1319,12 @@ function paintXkbModal(){
 }
 async function loadXuekubaoPreview(){
   if(!bankSelectedId || !xkbPicker.picked) return;
+  const mis = xkbAssertSubjectAligned();
+  if(mis){
+    xkbPicker.error = mis;
+    paintXkbModal();
+    return;
+  }
   xkbPicker.previewLoading = true;
   xkbPicker.error = '';
   paintXkbModal();
@@ -1868,6 +1939,7 @@ function renderPdfTab(){
       <div style="display:flex;gap:6px;margin-left:auto">
         <button class="btn-ghost" onclick="openDocBind(${d.id})">绑定孩子</button>
         <button class="btn-ghost" onclick="openDoc(${d.id})">查看/审核</button>
+        <button class="btn-ghost" onclick="openAudioPanel(${d.id})">教材音频</button>
         <button class="btn-ghost" onclick="resplitDoc(${d.id})">重新拆分</button>
         <button class="btn-ghost" style="color:#c05b4a" onclick="removeDoc(${d.id})">移除</button>
       </div>
@@ -1875,6 +1947,7 @@ function renderPdfTab(){
   const empty = pdfDocs.length===0 ? `<div style="text-align:center;padding:32px 0;color:#8e9691">还没有上传教材，点击下方按钮开始</div>` : rows;
   return `<div class="parent-grid">
     ${renderDocBind()}
+    ${renderAudioPanel()}
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('book',20)}</div><div><h3>教材管理</h3><div class="sub">上传 PDF，自动拆课；审核通过的课程进入孩子词库</div></div></div>
       <div class="bd">
@@ -1883,6 +1956,305 @@ function renderPdfTab(){
       </div>
     </div>
   </div>`;
+}
+
+// ---- 教材音频 ----
+let audioDocId = null;
+let audioRows = [];
+let audioLessons = [];
+
+async function openAudioPanel(docId){
+  audioDocId = docId;
+  audioRows = await api(`/api/lesson-audio?document_id=${docId}`);
+  if(!Array.isArray(audioRows)) audioRows = [];
+  audioLessons = await api(`/api/pdf/documents/${docId}/lessons`);
+  if(!Array.isArray(audioLessons)) audioLessons = [];
+  render();
+}
+
+function lessonTitle(lessonId){
+  const l = (audioLessons||[]).find(x=>x.id===lessonId);
+  return l ? l.title : null;
+}
+
+function renderAudioPanel(){
+  if(audioDocId===null) return '';
+  const rows = (audioRows||[]).map(r=>{
+    const lt = lessonTitle(r.lesson_id);
+    const opts = ['<option value="">未绑定</option>'].concat(
+      (audioLessons||[]).map(l=>`<option value="${l.id}" ${l.id===r.lesson_id?'selected':''}>${escapeAttr(l.title)}</option>`)
+    ).join('');
+    return `<div class="pdf-row">
+      <div class="ic">${icon('headphones',22)}</div>
+      <div>
+        <div class="nm">${escapeAttr(r.unit_label||'(未命名)')}</div>
+        <div class="meta">${lt?('自动匹配：'+escapeAttr(lt)):'未绑定课程'} · ${(r.marks||[]).length} 个标记</div>
+      </div>
+      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+        <select onchange="setAudioLesson(${r.id}, this)">
+          ${opts}
+        </select>
+        <button class="btn-ghost" onclick="renderMarkTool(${r.id})">标记</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="parent-panel" style="grid-column:1/-1">
+    <div class="head"><div class="ic blue">${icon('headphones',20)}</div><div><h3>教材音频</h3><div class="sub">上传教材配套真人音频，标记每课起点</div></div>
+      <button class="btn-ghost" style="margin-left:auto" onclick="audioDocId=null;render()">关闭</button></div>
+    <div class="bd">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+        <input type="file" id="audioFile" accept="audio/mpeg,.mp3" style="font-size:13px">
+        <button class="btn-primary" onclick="uploadLessonAudio()">上传</button>
+      </div>
+      <div class="pdf-list">${rows || '<div style="color:#8e9691;padding:8px 0">尚未上传音频</div>'}</div>
+    </div>
+    ${renderMarkToolOverlay()}
+  </div>`;
+}
+
+async function uploadLessonAudio(){
+  const input = document.getElementById('audioFile');
+  if(!input || !input.files || !input.files.length){
+    toast('请先选择 MP3 文件');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  fd.append('document_id', String(audioDocId));
+  toast('正在上传…');
+  const r = await apiForm('/api/lesson-audio', fd);
+  if(r && r.id){
+    toast('上传成功');
+    audioRows = await api(`/api/lesson-audio?document_id=${audioDocId}`);
+    if(!Array.isArray(audioRows)) audioRows = [];
+    render();
+  } else {
+    toast('上传失败：' + (r && (r.error||r.detail) ? (r.error||r.detail) : '未知错误'));
+  }
+}
+
+async function setAudioLesson(audioId, select){
+  const val = select.value === '' ? null : Number(select.value);
+  await api(`/api/lesson-audio/${audioId}`, {method:'PATCH', body:{lesson_id: val}});
+  audioRows = await api(`/api/lesson-audio?document_id=${audioDocId}`);
+  if(!Array.isArray(audioRows)) audioRows = [];
+  render();
+}
+
+// ---- 波形标记工具 ----
+let markToolAudioId = null;
+let markCtx = null;         // { audio, ctx, canvas, peaks, marks, playing }
+let markWavePeaks = [];
+
+function renderMarkToolOverlay(){
+  if(markToolAudioId===null) return '';
+  return `<div class="xkb-modal" style="display:flex">
+    <div class="xkb-panel">
+      <div class="hd"><h4>标记课程起点</h4><p>拖动波形定位，为每课记录起点时间</p></div>
+      <div class="bd" id="markToolBody"></div>
+    </div>
+  </div>`;
+}
+
+function openMarkTool(audioId){
+  markToolAudioId = audioId;
+  markCtx = null;
+  markWavePeaks = [];
+  render();
+  // 渲染完成后挂载音频/波形
+  setTimeout(()=>mountMarkTool(audioId), 0);
+}
+
+function closeMarkTool(){
+  if(markCtx && markCtx._cleanup) markCtx._cleanup();
+  markToolAudioId = null;
+  markCtx = null;
+  markWavePeaks = [];
+  render();
+}
+
+function markRow(){
+  const r = (audioRows||[]).find(x=>x.id===markToolAudioId);
+  return r;
+}
+
+async function mountMarkTool(audioId){
+  const body = document.getElementById('markToolBody');
+  if(!body) return;
+  const r = markRow();
+  if(!r){
+    body.innerHTML = '<div style="color:#8e9691">音频数据未找到</div>';
+    return;
+  }
+  const src = API + '/' + r.audio_path;
+  body.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <button class="btn-ghost" onclick="closeMarkTool()">关闭</button>
+    </div>
+    <audio id="markAudio" src="${escapeAttr(src)}" controls style="width:100%"></audio>
+    <div id="markWaveWrap" style="margin:12px 0;position:relative">
+      <canvas id="markWave" style="width:100%;height:96px;display:block;border-radius:10px;background:var(--line3, #eef1ee);cursor:pointer"></canvas>
+      <div id="markCursor" style="position:absolute;top:0;bottom:0;width:2px;background:#c05b4a;pointer-events:none;display:none"></div>
+    </div>
+    <div id="markTime" style="font-size:13px;color:var(--gray2,#8e9691);margin-bottom:12px">0.00s</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="markLabel" placeholder="如：Unit 1" style="border:1px solid var(--line3,#d7ddd8);border-radius:10px;padding:8px 12px;font-size:13px;flex:1">
+      <button class="btn-primary" onclick="addMark()">设为起点</button>
+    </div>
+    <div id="markList"></div>`;
+  const audio = document.getElementById('markAudio');
+  const canvas = document.getElementById('markWave');
+  const cursor = document.getElementById('markCursor');
+  const timeEl = document.getElementById('markTime');
+  if(!audio || !canvas) return;
+
+  markCtx = { audio, canvas, cursor, timeEl, marks: (r.marks||[]).slice(), playing:false };
+
+  // 波形：decode 失败则回退进度条
+  let decoded = false;
+  try{
+    const buf = await fetch(src).then(res=>res.arrayBuffer());
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    const audioBuf = await ac.decodeAudioData(buf);
+    const peaks = computePeaks(audioBuf);
+    markWavePeaks = peaks;
+    drawWaveform(canvas, peaks);
+    ac.close && ac.close();
+    decoded = true;
+  }catch(e){
+    markWavePeaks = [];
+    drawProgressFallback(canvas);
+  }
+
+  // 播放进度 / 时间
+  audio.addEventListener('timeupdate', ()=>{
+    if(!markCtx) return;
+    if(markCtx.timeEl) markCtx.timeEl.textContent = audio.currentTime.toFixed(2)+'s';
+    if(decoded && markWavePeaks.length) drawWaveform(canvas, markWavePeaks, audio.currentTime/audio.duration);
+  });
+
+  // 拖拽 seek
+  const seekRatio = (clientX)=>{
+    const rect = canvas.getBoundingClientRect();
+    let ratio = (clientX - rect.left)/rect.width;
+    ratio = Math.max(0, Math.min(1, ratio));
+    return ratio;
+  };
+  let dragging = false;
+  canvas.addEventListener('mousedown', (e)=>{
+    dragging = true;
+    seek(e);
+  });
+  const onMove = (e)=>{
+    if(dragging && markCtx && markCtx.canvas) seek(e);
+  };
+  const onUp = ()=>{ dragging = false; };
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  markCtx._cleanup = ()=>{
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    markCtx._cleanup = null;
+  };
+  function seek(e){
+    if(!markCtx || !markCtx.audio) return;
+    const ratio = seekRatio(e.clientX);
+    if(markCtx.audio.duration && isFinite(markCtx.audio.duration)){
+      markCtx.audio.currentTime = ratio * markCtx.audio.duration;
+    }
+    if(markCtx.timeEl) markCtx.timeEl.textContent = markCtx.audio.currentTime.toFixed(2)+'s';
+    if(markCtx.cursor){
+      markCtx.cursor.style.display = 'block';
+      markCtx.cursor.style.left = (ratio*100)+'%';
+    }
+  }
+
+  renderMarkList();
+}
+
+function computePeaks(audioBuf){
+  const ch = audioBuf.getChannelData(0);
+  const step = Math.max(1, Math.floor(ch.length / 600));
+  const peaks = [];
+  for(let i=0;i<ch.length;i+=step){
+    let max = 0;
+    for(let j=i;j<i+step && j<ch.length;j++){
+      const v = Math.abs(ch[j]);
+      if(v>max) max = v;
+    }
+    peaks.push(max);
+  }
+  return peaks;
+}
+
+function drawWaveform(canvas, peaks, progress){
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.clientWidth || 600;
+  const h = canvas.height = canvas.clientHeight || 96;
+  ctx.clearRect(0,0,w,h);
+  const barW = w/peaks.length;
+  const played = progress===undefined ? 1 : progress;
+  for(let i=0;i<peaks.length;i++){
+    const bh = Math.max(1, peaks[i]*h*0.9);
+    const x = i*barW;
+    ctx.fillStyle = (progress===undefined || (i/peaks.length)<=played) ? '#4a8ef0' : '#c9d2c9';
+    ctx.fillRect(x, (h-bh)/2, Math.max(1,barW-1), bh);
+  }
+}
+
+function drawProgressFallback(canvas){
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.clientWidth || 600;
+  const h = canvas.height = canvas.clientHeight || 96;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = '#4a8ef0';
+  ctx.fillRect(0, h/2-3, w, 6);
+}
+
+function renderMarkList(){
+  const list = document.getElementById('markList');
+  if(!list || !markCtx) return;
+  const items = markCtx.marks.map((m,i)=>`
+    <div class="pdf-row">
+      <div class="ic">${icon('clock',18)}</div>
+      <div><div class="nm">${escapeAttr(m.label||('第'+(i+1)+'课'))}</div><div class="meta">${Number(m.start_sec).toFixed(2)}s</div></div>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+        <button class="btn-ghost" onclick="seekToMark(${m.start_sec})">跳转</button>
+        <button class="btn-ghost" style="color:#c05b4a" onclick="removeMark(${i})">删除</button>
+      </div>
+    </div>`).join('');
+  list.innerHTML = items || '<div style="color:#8e9691;padding:8px 0">尚无标记，播放到每课起点时点击「设为起点」</div>';
+}
+
+async function addMark(){
+  if(!markCtx || !markCtx.audio) return;
+  const labelInput = document.getElementById('markLabel');
+  const label = (labelInput && labelInput.value.trim()) ? labelInput.value.trim() : ('第'+(markCtx.marks.length+1)+'课');
+  markCtx.marks.push({label, start_sec: markCtx.audio.currentTime});
+  const r = await api(`/api/lesson-audio/${markToolAudioId}/marks`, {method:'PUT', body:{marks: markCtx.marks}});
+  if(r && r.marks) markCtx.marks = r.marks;
+  // 同步回 audioRows 供返回面板显示
+  const row = markRow();
+  if(row) row.marks = markCtx.marks;
+  if(labelInput) labelInput.value = '';
+  renderMarkList();
+}
+
+async function removeMark(idx){
+  if(!markCtx) return;
+  markCtx.marks.splice(idx,1);
+  const r = await api(`/api/lesson-audio/${markToolAudioId}/marks`, {method:'PUT', body:{marks: markCtx.marks}});
+  if(r && r.marks) markCtx.marks = r.marks;
+  const row = markRow();
+  if(row) row.marks = markCtx.marks;
+  renderMarkList();
+}
+
+function seekToMark(sec){
+  if(!markCtx || !markCtx.audio) return;
+  markCtx.audio.currentTime = Number(sec);
+  markCtx.audio.play && markCtx.audio.play();
 }
 
 let docLessons = [];

@@ -13,6 +13,8 @@ import '../../ask/ask_controller.dart';
 import '../../ask/ui/ask_panel.dart';
 import '../../assignment/assignment_controller.dart';
 import '../../assignment/ui/assignment_sidebar.dart';
+import '../../lesson_audio/lesson_audio_controller.dart';
+import '../../lesson_audio/ui/audio_bar.dart';
 import '../models/reader_selection.dart';
 import '../reader_controller.dart';
 import '../data/pdf_repository.dart';
@@ -282,6 +284,30 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
     );
   }
 
+  Widget? _audioBar(WidgetRef ref, int? docId, PdfLesson lesson) {
+    if (docId == null) return null;
+    final async = ref.watch(lessonAudioProvider(docId));
+    return async.maybeWhen(
+      data: (rows) {
+        final repo = ref.read(lessonAudioRepositoryProvider);
+        for (final a in rows) {
+          // 整词匹配，避免 "Unit 1" 误匹配 "Unit 10"（与后端 _match_lesson_by_label 对齐）
+          final label = a.unitLabel;
+          final pattern = RegExp(r'\b' + RegExp.escape(label) + r'\b');
+          if (pattern.hasMatch(lesson.title)) {
+            return Container(
+              color: const Color(0xFFF5F7F6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: AudioBar(audio: a, url: repo.audioUrl(a.audioPath)),
+            );
+          }
+        }
+        return null;
+      },
+      orElse: () => null,
+    );
+  }
+
   Widget _sidePanel(PdfLesson lesson, bool chatBlocked, List<AnnotationItem> annotations) {
     final assigning = chatBlocked;
     return Container(
@@ -441,6 +467,7 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
                 ]),
               ),
             ),
+            ?_audioBar(ref, s.currentDocumentId, lesson),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, c) {
