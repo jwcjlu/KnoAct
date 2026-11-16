@@ -988,23 +988,49 @@ function xkbLevelOptions(depth){
   return nodes;
 }
 function xkbSetLevel(depth, code){
+  // 学科与卷子锁定时不允许改成其它科
+  if(depth === 2 && xkbSubjectLocked()){
+    const bankSubj = xkbBankSubject();
+    const opts = xkbLevelOptions(2);
+    const hit = opts.find(n => String(n.code ?? n.id) === String(code || ''));
+    if(hit && !xkbMatchSubjectNode(hit, bankSubj)){
+      xkbPicker.error = `当前卷子是「${bankSubj}」，学科已锁定，不能改选「${hit.name || ''}」`;
+      paintXkbModal();
+      return;
+    }
+  }
   xkbPicker.sel[depth] = code || '';
   for(let i = depth + 1; i < XKB_LEVEL_LABELS.length; i++) xkbPicker.sel[i] = '';
   xkbPicker.chapters = null;
   xkbPicker.knowledge = [];
   xkbPicker.picked = null;
-  if(xkbPicker.sel[0]) loadXkbChapters();
+  xkbPicker.error = '';
+  if(depth < 2 && xkbSubjectLocked()){
+    // 改学段/年级后自动把学科扳回卷子学科
+    const subjOpts = xkbLevelOptions(2);
+    const bankSubj = xkbBankSubject();
+    const match = subjOpts.find(n => xkbMatchSubjectNode(n, bankSubj));
+    if(match) xkbPicker.sel[2] = String(match.code ?? match.id);
+  }
+  if(xkbPicker.sel[0] && xkbPicker.sel[2]) loadXkbChapters();
   else paintXkbModal();
+}
+function xkbIsKnowledgeId(kid){
+  // getQuestions 只要 hex 知识点 ID；教材章节纯数字编号会回落巨量数学题
+  if(!kid || kid === '0') return false;
+  if(/^\d+$/.test(kid)) return false;
+  return true;
 }
 function xkbWalkChapters(nodes, path, out){
   for(const n of nodes || []){
     if(!n || typeof n !== 'object') continue;
-    const name = (n.name || n.title || '').trim();
-    const kids = n.child || n.children || [];
+    const name = (n.name || n.title || n.knowledgeName || '').trim();
+    const kids = n.child || n.childList || n.children || [];
     const oldId = (n.oldId != null ? n.oldId : n.oldid != null ? n.oldid : n.knowledgeId);
     const kid = oldId != null ? String(oldId).trim() : '';
     const nextPath = name ? [...path, name] : path;
-    if(kid && kid !== '0'){
+    // 只收叶子：父节点 oldId 常无题或与子节点重复
+    if(!kids.length && xkbIsKnowledgeId(kid)){
       out.push({id: kid, name: name || kid, path: nextPath.join(' › ')});
     }
     if(kids.length) xkbWalkChapters(kids, nextPath, out);
@@ -1020,9 +1046,21 @@ function closeXuekubaoPicker(){
   xkbPicker.open = false;
   paintXkbModal();
 }
+function xkbBankSubject(){
+  const bank = bankList.find(b => b.id === bankSelectedId);
+  return ((bank && bank.subject) || '').trim();
+}
+function xkbSubjectLocked(){
+  return !!xkbBankSubject();
+}
+function xkbMatchSubjectNode(n, subj){
+  if(!subj) return false;
+  const name = (n.name || '').trim();
+  return name === subj || name.includes(subj) || subj.includes(name);
+}
 function guessXkbDefaults(){
   const bank = bankList.find(b => b.id === bankSelectedId);
-  const subj = (bank && bank.subject) || '';
+  const subj = xkbBankSubject();
   const grade = bank && bank.grade ? String(bank.grade) : bankFormDefaultGrade();
   const pick = (nodes, pred) => {
     if(!nodes || !nodes.length) return '';
@@ -1039,9 +1077,25 @@ function guessXkbDefaults(){
     (n.name || '').includes(`${['一','二','三','四','五','六','七','八','九'][grade-1] || grade}年级`)
   )) || pick(nodes, () => true);
   nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[1]) || {}).child || [];
-  xkbPicker.sel[2] = pick(nodes, n => subj && (n.name || '').includes(subj)) || pick(nodes, () => true);
+  // 卷子有学科时必须对齐，禁止回落成列表第一项（五年级上首项常是数学）
+  xkbPicker.sel[2] = pick(nodes, n => xkbMatchSubjectNode(n, subj));
+  if(!xkbPicker.sel[2] && !subj) xkbPicker.sel[2] = pick(nodes, () => true);
   nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[2]) || {}).child || [];
   xkbPicker.sel[3] = nodes.length === 1 ? String(nodes[0].code ?? nodes[0].id) : pick(nodes, () => true);
+}
+function xkbSelectedSubjectName(){
+  const opts = xkbLevelOptions(2);
+  const hit = opts.find(n => String(n.code ?? n.id) === String(xkbPicker.sel[2] || ''));
+  return ((hit && hit.name) || '').trim();
+}
+function xkbAssertSubjectAligned(){
+  const bankSubj = xkbBankSubject();
+  if(!bankSubj) return '';
+  const pickSubj = xkbSelectedSubjectName();
+  if(pickSubj && pickSubj !== bankSubj && !pickSubj.includes(bankSubj) && !bankSubj.includes(pickSubj)){
+    return `当前卷子是「${bankSubj}」，请把上方「学科」选成「${bankSubj}」再拉取（不要选${pickSubj}）`;
+  }
+  return '';
 }
 function xkbPickKnowledge(id){
   xkbPicker.picked = id;
@@ -1067,10 +1121,10 @@ async function openXuekubaoPicker(){
 async function loadXkbChapters(silent){
   if(!xkbPicker.sel[0]) return;
   const [pharse_id, grade_id, subject_id, edition_id] = xkbPicker.sel;
-  // 只选学段会拉取全量目录、后端必超时：需先选到年级和学科
-  if(!grade_id || !subject_id){
+  // 必须选学科：knowledgeApi 按学科返回知识点树（语文不能用 chapterApi 的单元数字 ID）
+  if(!subject_id){
     if(!silent){
-      xkbPicker.error = '请先选好「年级」和「学科」（仅选学段会拉取全量目录导致超时）';
+      xkbPicker.error = '请先选好「学科」再加载知识点';
       xkbPicker.loading = false;
       paintXkbModal();
     }
@@ -1078,7 +1132,7 @@ async function loadXkbChapters(silent){
   }
   if(!silent){ xkbPicker.loading = true; paintXkbModal(); }
   try{
-    const r = await api('/api/xuekubao/chapters', {method:'POST', body:{
+    const r = await api('/api/xuekubao/knowledge', {method:'POST', body:{
       pharse_id, subject_id, grade_id, edition_id,
     }});
     if(r && r.detail) throw new Error(r.detail);
@@ -1090,8 +1144,11 @@ async function loadXkbChapters(silent){
     xkbPicker.knowledge = out.filter(k => { if(seen.has(k.id)) return false; seen.add(k.id); return true; });
     xkbPicker.chapters = true;
     if(xkbPicker.knowledge.length && !xkbPicker.picked) xkbPicker.picked = xkbPicker.knowledge[0].id;
+    if(!xkbPicker.knowledge.length){
+      xkbPicker.error = '该学科下未解析到可用知识点（需要 hex 知识点 ID）';
+    }
   }catch(e){
-    xkbPicker.error = (e && e.message) || '章节加载失败';
+    xkbPicker.error = (e && e.message) || '知识点加载失败';
     xkbPicker.knowledge = [];
   }
   xkbPicker.loading = false;
@@ -1165,28 +1222,36 @@ function paintXkbModal(){
   </div>`;
     return;
   }
+  const bankSubj = xkbBankSubject();
   const cascade = XKB_LEVEL_LABELS.map((label, depth) => {
-    const opts = xkbLevelOptions(depth);
-    const disabled = depth > 0 && !xkbPicker.sel[depth - 1];
-    const options = `<option value="">${disabled ? '请先选上一级' : '请选择'}</option>` +
+    let opts = xkbLevelOptions(depth);
+    // 学科与卷子对齐：只展示对应学科，避免语文卷误选英语
+    if(depth === 2 && bankSubj){
+      const matched = opts.filter(n => xkbMatchSubjectNode(n, bankSubj));
+      if(matched.length) opts = matched;
+    }
+    const lockedSubj = depth === 2 && xkbSubjectLocked() && opts.length <= 1;
+    const disabled = (depth > 0 && !xkbPicker.sel[depth - 1]) || lockedSubj;
+    const options = `<option value="">${disabled && !lockedSubj ? '请先选上一级' : (lockedSubj ? '' : '请选择')}</option>` +
       opts.map(n => {
         const code = String(n.code ?? n.id);
         const sel = xkbPicker.sel[depth] === code ? ' selected' : '';
         return `<option value="${escapeAttr(code)}"${sel}>${escapeAttr(n.name || code)}</option>`;
       }).join('');
-    return `<label><span>${label}</span><select ${disabled?'disabled':''} onchange="xkbSetLevel(${depth}, this.value)">${options}</select></label>`;
+    const tip = lockedSubj ? ` <span style="color:#8e9691;font-weight:400">（与卷子一致）</span>` : '';
+    return `<label><span>${label}${tip}</span><select ${disabled?'disabled':''} onchange="xkbSetLevel(${depth}, this.value)">${options}</select></label>`;
   }).join('');
   const list = xkbFilteredKnowledge();
   const kps = list.length ? list.map(k => `
     <button type="button" class="xkb-kp-item ${xkbPicker.picked===k.id?'on':''}" onclick='xkbPickKnowledge(${JSON.stringify(k.id)})'>
       <span>${escapeAttr(k.name)}</span>
       <span class="xkb-kp-path">${escapeAttr(k.path)}</span>
-    </button>`).join('') : `<div style="padding:16px;color:#8e9691;font-size:13px">${xkbPicker.chapters ? '该教材下未解析到知识点' : '选好教材后自动加载章节'}</div>`;
+    </button>`).join('') : `<div style="padding:16px;color:#8e9691;font-size:13px">${xkbPicker.chapters ? '该学科下未解析到知识点' : '选好学科后自动加载知识点'}</div>`;
   const picked = xkbPicker.knowledge.find(k => k.id === xkbPicker.picked);
   el.innerHTML = `<div class="xkb-panel" role="dialog">
     <div class="hd">
       <h4>从学库宝按知识点拉题</h4>
-      <p>先选学段与教材，再点选知识点（无需手工填 ID）</p>
+      <p>${bankSubj ? `当前卷子学科「${escapeAttr(bankSubj)}」，知识点将按该学科加载` : '先选学段与学科，再点选知识点'}</p>
     </div>
     <div class="bd">
       ${xkbPicker.error ? `<div style="color:#c05b4a;font-size:13px;margin-bottom:10px">${escapeAttr(xkbPicker.error)}</div>` : ''}
@@ -1208,6 +1273,12 @@ function paintXkbModal(){
 }
 async function loadXuekubaoPreview(){
   if(!bankSelectedId || !xkbPicker.picked) return;
+  const mis = xkbAssertSubjectAligned();
+  if(mis){
+    xkbPicker.error = mis;
+    paintXkbModal();
+    return;
+  }
   xkbPicker.previewLoading = true;
   xkbPicker.error = '';
   paintXkbModal();
