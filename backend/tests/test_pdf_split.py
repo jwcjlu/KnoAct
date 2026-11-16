@@ -7,6 +7,7 @@ from app.services.pdf_split import (
     _math_unit_title_from_ocr,
     _clean_math_topic,
     _dedupe_math_hits,
+    _detect_word_list,
 )
 
 
@@ -70,3 +71,54 @@ def test_clean_math_topic_strips_font_garbage():
 def test_dedupe_math_hits_same_unit():
     hits = [(65, "第五单元 多边形的面积"), (70, "第五单元 重复页眉"), (87, "第六单元 确定位置")]
     assert _dedupe_math_hits(hits) == [(65, "第五单元 多边形的面积"), (87, "第六单元 确定位置")]
+
+
+def test_detect_word_list_text_keyword():
+    # 文本型：书末页含 "Word List" 关键字
+    texts = ["目录", "Unit 1", "Unit 2"] + ["Word List apple banana"] + ["cat dog"]
+    result = _detect_word_list("x.pdf", "英语", texts, len(texts), db=None)
+    assert result == {"title": "Word list", "start_page": 4, "end_page": 5}
+
+
+def test_detect_word_list_ocr_scanned(monkeypatch):
+    # 扫描版：文本层只有水印，靠 OCR 二分类命中
+    import app.services.pdf_split as split
+
+    texts = ["3A00012026 AU"] * 10
+    calls = []
+
+    def fake_ocr(pdf_path, page_index, db, instruction):
+        calls.append(page_index)
+        return "yes" if page_index == 8 else "no"
+
+    monkeypatch.setattr(split, "_ocr_page", fake_ocr)
+    result = _detect_word_list("x.pdf", "英语", texts, len(texts), db=object())
+    assert result == {"title": "Word list", "start_page": 9, "end_page": 10}
+    assert 8 in calls  # 确实 OCR 了书末页
+
+
+def test_detect_word_list_ocr_takes_earliest(monkeypatch):
+    # 多个 yes 页时取最早的（书末连续几页都是单词表）
+    import app.services.pdf_split as split
+
+    texts = ["3A00012026 AU"] * 10
+
+    def fake_ocr(pdf_path, page_index, db, instruction):
+        return "yes" if page_index in (6, 7, 8) else "no"
+
+    monkeypatch.setattr(split, "_ocr_page", fake_ocr)
+    result = _detect_word_list("x.pdf", "英语", texts, len(texts), db=object())
+    assert result == {"title": "Word list", "start_page": 7, "end_page": 10}
+
+
+def test_detect_word_list_not_found(monkeypatch):
+    import app.services.pdf_split as split
+
+    texts = ["3A00012026 AU"] * 10
+    monkeypatch.setattr(split, "_ocr_page", lambda *a, **k: "no")
+    assert _detect_word_list("x.pdf", "英语", texts, len(texts), db=object()) is None
+
+
+def test_detect_word_list_non_english():
+    texts = ["Unit 1", "Word List"] * 2
+    assert _detect_word_list("x.pdf", "数学", texts, len(texts), db=object()) is None

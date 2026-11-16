@@ -418,14 +418,22 @@ def detect_lessons_from_pdf(pdf_path: str, subject: str, db=None) -> list[dict]:
     if not hits and _is_scanned(texts) and db is not None:
         hits = _detect_lessons_scanned(pdf_path, subject, texts, db)
 
-    if not hits:
-        return []
     lessons = []
     for j, (page_no, title) in enumerate(hits):
         end = hits[j + 1][0] - 1 if j + 1 < len(hits) else len(texts)
         if end < page_no:
             end = page_no
         lessons.append({"title": title, "start_page": page_no, "end_page": end})
+
+    # 英语教材：书末 Word list / Vocabulary 拆成独立一课，并从最后一课里截掉重叠页段
+    word_list = _detect_word_list(pdf_path, subject, texts, len(texts), db)
+    if word_list is not None:
+        wl_start = word_list["start_page"]
+        if lessons and lessons[-1]["end_page"] >= wl_start:
+            # Word list 页落在最后一课页范围内：截断最后一课，让单词表独立成课
+            lessons[-1]["end_page"] = wl_start - 1
+        if wl_start <= len(texts):
+            lessons.append(word_list)
     return lessons
 
 
@@ -472,6 +480,41 @@ def _detect_lessons_scanned(pdf_path: str, subject: str, texts: list[str], db) -
         seen.add(phys)
         hits.append((phys, title))
     return hits
+
+
+_WORD_LIST_KEYWORDS = ("word list", "wordlist", "vocabulary", "word bank", "new words", "words and")
+
+
+def _detect_word_list(pdf_path: str, subject: str, texts: list[str], total_pages: int, db) -> dict | None:
+    """检测英语教材书末的 Word list / Vocabulary 页，返回独立一课 {title,start_page,end_page} 或 None。
+
+    文本型：在页文本里搜关键字（快）；扫描版（文本层只有水印）：OCR 书末最多 12 页，
+    用「是/否」二分类识别单词表标题页，取**最早**命中的那页作为起始页。仅英语学科启用。
+    """
+    if subject != "英语" or not texts or total_pages <= 0:
+        return None
+
+    lo = max(0, total_pages - 12)
+    # 1) 文本关键字：从书末往前扫，命中含关键字且内容像词汇表的页
+    for i in range(total_pages - 1, lo - 1, -1):
+        low = (texts[i] or "").lower()
+        if any(k in low for k in _WORD_LIST_KEYWORDS):
+            return {"title": "Word list", "start_page": i + 1, "end_page": total_pages}
+
+    # 2) 扫描版 OCR 兜底：逐页问「是否单词表页」，取最早命中的页
+    if db is None:
+        return None
+    first_hit = None
+    for i in range(total_pages - 1, lo - 1, -1):
+        raw = _ocr_page(
+            pdf_path, i, db,
+            "这一页是不是单词表（Word list / Vocabulary / New words）？是请只回复 yes，否则只回复 no。",
+        )
+        if raw and raw.strip().lower().startswith("yes"):
+            first_hit = i
+    if first_hit is not None:
+        return {"title": "Word list", "start_page": first_hit + 1, "end_page": total_pages}
+    return None
 
 
 def render_pages(document_id: int, pdf_path: str, out_dir: str) -> list[dict]:
