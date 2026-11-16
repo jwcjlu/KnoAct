@@ -65,28 +65,39 @@ def _ensure_db_tables() -> None:
         try:
             from sqlalchemy import inspect as _inspect, text as _text
             _insp = _inspect(db.get_bind())
-            if "knowledge_point_pool" in set(_insp.get_table_names()):
-                _cols = {c["name"] for c in _insp.get_columns("knowledge_point_pool")}
+            _names = set(_insp.get_table_names())
+
+            def _add_column(table: str, column: str, ddl: str) -> None:
+                """幂等补列；单表失败不连坐其它表的迁移。"""
+                if table not in _names:
+                    return
+                cols = {c["name"] for c in _insp.get_columns(table)}
+                if column in cols:
+                    return
                 with db.get_bind().begin() as _conn:
-                    if "folder_id" not in _cols:
-                        _conn.execute(_text("ALTER TABLE knowledge_point_pool ADD COLUMN folder_id INTEGER"))
-                    if "tags" not in _cols:
-                        _conn.execute(_text("ALTER TABLE knowledge_point_pool ADD COLUMN tags TEXT DEFAULT '[]'"))
-            if "training_items" in set(_insp.get_table_names()):
-                _tcols = {c["name"] for c in _insp.get_columns("training_items")}
-                if "point_pool_id" not in _tcols:
-                    with db.get_bind().begin() as _conn:
-                        _conn.execute(_text("ALTER TABLE training_items ADD COLUMN point_pool_id INTEGER"))
-            if "pdf_documents" in set(_insp.get_table_names()):
-                _pcols = {c["name"] for c in _insp.get_columns("pdf_documents")}
-                with db.get_bind().begin() as _conn:
-                    if "content_kind" not in _pcols:
-                        _conn.execute(_text("ALTER TABLE pdf_documents ADD COLUMN content_kind VARCHAR(16) DEFAULT 'textbook'"))
-                    if "handout_kind" not in _pcols:
-                        _conn.execute(_text("ALTER TABLE pdf_documents ADD COLUMN handout_kind VARCHAR(16)"))
+                    _conn.execute(_text(ddl))
+
+            # knowledge_point_pool 老库补列（新表 create_all 已含这些列，此处仅兜底）
+            try:
+                _add_column("knowledge_point_pool", "folder_id", "ALTER TABLE knowledge_point_pool ADD COLUMN folder_id INTEGER")
+                _add_column("knowledge_point_pool", "tags", "ALTER TABLE knowledge_point_pool ADD COLUMN tags MEDIUMTEXT")
+            except Exception as exc:
+                db.rollback()
+                _log.warning("knowledge_point_pool 列迁移失败: %s", exc)
+            try:
+                _add_column("training_items", "point_pool_id", "ALTER TABLE training_items ADD COLUMN point_pool_id INTEGER")
+            except Exception as exc:
+                db.rollback()
+                _log.warning("training_items.point_pool_id 迁移失败: %s", exc)
+            try:
+                _add_column("pdf_documents", "content_kind", "ALTER TABLE pdf_documents ADD COLUMN content_kind VARCHAR(16) DEFAULT 'textbook'")
+                _add_column("pdf_documents", "handout_kind", "ALTER TABLE pdf_documents ADD COLUMN handout_kind VARCHAR(16)")
+            except Exception as exc:
+                db.rollback()
+                _log.warning("pdf_documents 列迁移失败: %s", exc)
         except Exception as exc:
             db.rollback()
-            _log.warning("knowledge_point_pool/training_items/pdf_documents 列迁移失败: %s", exc)
+            _log.warning("列迁移整体失败: %s", exc)
     finally:
         db.close()
 
