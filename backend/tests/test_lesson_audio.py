@@ -56,3 +56,22 @@ def test_list_audio_and_patch_binding_and_marks(client, db):
                    json={"marks": [{"label": "A", "start_sec": 12.5}]}, headers=auth_headers(parent))
     assert r.status_code == 200
     assert r.json()["marks"][0]["start_sec"] == 12.5
+
+
+def test_match_lesson_rejects_unit_10_for_unit_1(db):
+    from app.routers.lesson_audio import _match_lesson_by_label
+    doc = make_document(db, subject="英语", filename="英语五年级上册.pdf")
+    make_lesson(db, subject="英语", title="Unit 10 Review", document=doc)
+    db.commit()
+    # "Unit 1" 不应误匹配 "Unit 10"
+    assert _match_lesson_by_label(db, doc.id, "英语", "Unit 1") is None
+
+
+def test_upload_rejects_non_mp3(client, db):
+    parent = make_account(db, login_name="p_audio3", role="parent")
+    doc = make_document(db, subject="英语", filename="英语五年级上册.pdf")
+    db.commit()
+    files = {"file": ("01_Unit 1.txt", b"not-mp3", "text/plain")}
+    data = {"document_id": str(doc.id)}
+    r = client.post("/api/lesson-audio", files=files, data=data, headers=auth_headers(parent))
+    assert r.status_code == 400

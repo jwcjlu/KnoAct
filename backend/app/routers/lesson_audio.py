@@ -33,7 +33,9 @@ def _match_lesson_by_label(db: Session, document_id: int, subject: str, label: s
     if label == "Word list":
         return None
     q = db.query(Lesson).filter_by(document_id=document_id, subject=subject)
-    hits = [l for l in q.all() if label in (l.title or "")]
+    # 整词匹配，避免 "Unit 1" 误匹配 "Unit 10"（\b 边界 + 末尾断言）
+    pattern = re.compile(rf"\b{re.escape(label)}\b")
+    hits = [l for l in q.all() if pattern.search(l.title or "")]
     return hits[0] if len(hits) == 1 else None
 
 
