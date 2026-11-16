@@ -291,7 +291,10 @@ class _ReaderViewPageState extends ConsumerState<ReaderViewPage> {
       data: (rows) {
         final repo = ref.read(lessonAudioRepositoryProvider);
         for (final a in rows) {
-          if (lesson.title.contains(a.unitLabel)) {
+          // 整词匹配，避免 "Unit 1" 误匹配 "Unit 10"（与后端 _match_lesson_by_label 对齐）
+          final label = a.unitLabel;
+          final pattern = RegExp(r'\b' + RegExp.escape(label) + r'\b');
+          if (pattern.hasMatch(lesson.title)) {
             return Container(
               color: const Color(0xFFF5F7F6),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
