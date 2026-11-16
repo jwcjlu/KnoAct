@@ -5,7 +5,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, passages, xuekubao, drill, lesson_audio
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, passages, xuekubao, drill, lesson_audio, knowledge_pool
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -55,6 +55,24 @@ def _ensure_db_tables() -> None:
         except Exception as exc:
             db.rollback()
             _log.warning("questions.passage_id 迁移失败: %s", exc)
+        try:
+            from sqlalchemy import inspect as _inspect, text as _text
+            _insp = _inspect(db.get_bind())
+            if "knowledge_point_pool" in set(_insp.get_table_names()):
+                _cols = {c["name"] for c in _insp.get_columns("knowledge_point_pool")}
+                with db.get_bind().begin() as _conn:
+                    if "folder_id" not in _cols:
+                        _conn.execute(_text("ALTER TABLE knowledge_point_pool ADD COLUMN folder_id INTEGER"))
+                    if "tags" not in _cols:
+                        _conn.execute(_text("ALTER TABLE knowledge_point_pool ADD COLUMN tags TEXT DEFAULT '[]'"))
+            if "training_items" in set(_insp.get_table_names()):
+                _tcols = {c["name"] for c in _insp.get_columns("training_items")}
+                if "point_pool_id" not in _tcols:
+                    with db.get_bind().begin() as _conn:
+                        _conn.execute(_text("ALTER TABLE training_items ADD COLUMN point_pool_id INTEGER"))
+        except Exception as exc:
+            db.rollback()
+            _log.warning("knowledge_point_pool/training_items 列迁移失败: %s", exc)
     finally:
         db.close()
 
@@ -105,6 +123,7 @@ app.include_router(passages.router)
 app.include_router(xuekubao.router)
 app.include_router(drill.router)
 app.include_router(lesson_audio.router)
+app.include_router(knowledge_pool.router)
 
 _warn_insecure_auth_env()
 

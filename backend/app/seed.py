@@ -208,6 +208,20 @@ def _migrate_bucket_columns():
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} INTEGER"))
 
 
+def _migrate_knowledge_pool_columns():
+    """SQLite 加列迁移：知识点库目录/标签功能给 knowledge_point_pool 补 folder_id/tags。"""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    if "knowledge_point_pool" not in set(insp.get_table_names()):
+        return
+    cols = {c["name"] for c in insp.get_columns("knowledge_point_pool")}
+    with engine.begin() as conn:
+        if "folder_id" not in cols:
+            conn.execute(text("ALTER TABLE knowledge_point_pool ADD COLUMN folder_id INTEGER"))
+        if "tags" not in cols:
+            conn.execute(text("ALTER TABLE knowledge_point_pool ADD COLUMN tags TEXT DEFAULT '[]'"))
+
+
 DEFAULT_CHILD_NAME = "金同学"
 _LEGACY_CHILD_NAME = "金宇轩"
 
@@ -273,6 +287,7 @@ def seed():
     _migrate_pdf_document_created_at()
     _migrate_multi_student_columns()
     _migrate_bucket_columns()
+    _migrate_knowledge_pool_columns()
     _migrate_user_status()
     _migrate_account_columns(backfill=False)
     db = SessionLocal()
