@@ -51,4 +51,19 @@ void main() {
     expect(unit.length, 1);
     expect(wordList, isEmpty);
   });
+
+  test('splitAudioRows 仅单词表时 unit 为空', () {
+    final rows = [
+      LessonAudio(id: 2, lessonId: null, unitLabel: 'Word list', audioPath: 'b', marks: const []),
+    ];
+    final (unit, wordList) = splitAudioRows(rows);
+    expect(unit, isEmpty);
+    expect(wordList.map((a) => a.unitLabel).toList(), ['Word list']);
+  });
+
+  test('splitAudioRows 空列表时两组皆空', () {
+    final (unit, wordList) = splitAudioRows(const []);
+    expect(unit, isEmpty);
+    expect(wordList, isEmpty);
+  });
 }
