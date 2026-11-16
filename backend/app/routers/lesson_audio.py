@@ -26,3 +26,42 @@ def parse_unit_label(filename: str) -> str:
     if "word" in base.lower() and "list" in base.lower():
         return "Word list"
     return base
+
+
+def _match_lesson_by_label(db: Session, document_id: int, subject: str, label: str) -> Lesson | None:
+    """按 label（如 Unit 1）匹配教材下同一学科的课；0 或多个匹配均返回 None。"""
+    if label == "Word list":
+        return None
+    q = db.query(Lesson).filter_by(document_id=document_id, subject=subject)
+    hits = [l for l in q.all() if label in (l.title or "")]
+    return hits[0] if len(hits) == 1 else None
+
+
+@router.post("")
+def upload_audio(
+    file: UploadFile = File(...),
+    document_id: int = Form(...),
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    doc = ensure_pdf_document_access(user, document_id, db)
+    if not (file.filename or "").lower().endswith(".mp3"):
+        raise HTTPException(status_code=400, detail="仅支持 MP3 音频")
+    os.makedirs("uploads/audio", exist_ok=True)
+    label = parse_unit_label(file.filename)
+    safe = os.path.basename(file.filename or "audio.mp3")
+    path = f"uploads/audio/{document_id}_{safe}"
+    with open(path, "wb") as f:
+        f.write(file.file.read())
+    lesson = _match_lesson_by_label(db, document_id, doc.subject, label)
+    row = LessonAudio(
+        lesson_id=lesson.id if lesson else None,
+        document_id=document_id,
+        unit_label=label,
+        audio_path=path,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "lesson_id": row.lesson_id, "unit_label": row.unit_label,
+            "audio_path": row.audio_path, "marks": json.loads(row.marks_json)}
