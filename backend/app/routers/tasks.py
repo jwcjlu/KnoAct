@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..core.access import ensure_user_access, require_learning_user, resolve_target_user_id
 from ..core.deps import require_role
 from ..database import get_db
-from ..models import Task, Point, User
+from ..models import Task, Point, User, TrainingItem
 from ..services.task_gen import generate_tasks_for_user
 from ..services.answer_record import record_answer
 
@@ -503,6 +503,17 @@ def drill_complete(task_id: int, req: DrillCompleteReq, user: User = Depends(req
         m.interval = ni; m.lapse += nl; m.last_hinted = nh
         m.attempts = json.dumps(json.loads(m.attempts or "[]") + [bool(is_correct)], ensure_ascii=False)
         m.next_review_at = now + timedelta(days=ni)
+        item = db.get(TrainingItem, int(item_id))
+        if item is not None:
+            record_answer(
+                db, user_id=user.id, subject="", module="drill",
+                question=item.primary,
+                student_answer="",  # 回忆式作答，无文本答案
+                correct_answer=(item.common_mistake or ""),
+                is_correct=bool(is_correct),
+                difficulty="", source_type="training_item",
+                source_id=int(item_id), bucket_id=t.bucket_id,
+            )
         if nh:
             hinted_any = True
     t.content = json.dumps(content, ensure_ascii=False)
