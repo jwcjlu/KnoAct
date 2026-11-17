@@ -583,3 +583,23 @@ class TrainingPlan(Base):
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft | published
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AnswerRecord(Base):
+    """做题明细：每次作答一行，家长端「当天做题明细」监管用。"""
+    __tablename__ = "answer_records"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
+    subject: Mapped[str] = mapped_column(String(16), default="")
+    module: Mapped[str] = mapped_column(String(32), default="")
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)
+    question: Mapped[str] = mapped_column(LongText)
+    student_answer: Mapped[str] = mapped_column(LongText, default="")
+    correct_answer: Mapped[str] = mapped_column(LongText, default="")
+    is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
+    difficulty: Mapped[str] = mapped_column(String(16), default="")
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=True)
+    source_type: Mapped[str] = mapped_column(String(16), default="")
+    source_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
