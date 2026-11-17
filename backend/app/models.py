@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, Text as TextCls, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import String, Integer, Float, Boolean, DateTime, Date, Text as TextCls, ForeignKey, JSON, UniqueConstraint, Index
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
@@ -588,6 +588,9 @@ class TrainingPlan(Base):
 class AnswerRecord(Base):
     """做题明细：每次作答一行，家长端「当天做题明细」监管用。"""
     __tablename__ = "answer_records"
+    __table_args__ = (
+        Index("ix_answer_records_user_created", "user_id", "created_at"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     bucket_id: Mapped[int | None] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
