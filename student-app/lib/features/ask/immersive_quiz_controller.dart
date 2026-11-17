@@ -47,6 +47,8 @@ class ImmersiveQuizState {
 }
 
 class ImmersiveQuizController extends Notifier<ImmersiveQuizState> {
+  DateTime _startedAt = DateTime.now();
+
   @override
   ImmersiveQuizState build() {
     ref.listen<int?>(
@@ -76,6 +78,7 @@ class ImmersiveQuizController extends Notifier<ImmersiveQuizState> {
       return;
     }
     state = ImmersiveQuizState(quizId: r.quizId, questions: r.questions, busy: false);
+    _startedAt = DateTime.now();
   }
 
   void pickAnswer(String questionId, int index) {
@@ -89,10 +92,12 @@ class ImmersiveQuizController extends Notifier<ImmersiveQuizState> {
     if (state.answers.length < state.questions.length) return;
     state = state.copyWith(busy: true);
     try {
+      final durationMs = DateTime.now().difference(_startedAt).inMilliseconds;
       final results = await ref.read(readAskCardsRepositoryProvider).submitQuiz(
             quizId: quizId,
             questions: state.questions,
             answers: state.answers,
+            durationMs: durationMs,
           );
       if (!ref.mounted) return;
       state = state.copyWith(busy: false, submitted: true, results: results);

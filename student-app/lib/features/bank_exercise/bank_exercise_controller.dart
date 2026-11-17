@@ -66,6 +66,7 @@ class BankExerciseState {
 
 class BankExerciseController extends Notifier<BankExerciseState> {
   late BankRepository _repo;
+  DateTime _startedAt = DateTime.now();
 
   @override
   BankExerciseState build() {
@@ -84,6 +85,7 @@ class BankExerciseController extends Notifier<BankExerciseState> {
     );
     try {
       final qs = await _repo.fetchQuestions(bankId, questionIds: questionIds);
+      _startedAt = DateTime.now();
       state = state.copyWith(loading: false, questions: qs);
     } catch (e) {
       state = state.copyWith(loading: false, error: '加载题目失败');
@@ -138,7 +140,10 @@ class BankExerciseController extends Notifier<BankExerciseState> {
     if (bankId == null || state.busy) return;
     state = state.copyWith(busy: true, error: null);
     try {
-      final answers = state.questions.map(_answerPayload).toList();
+      final durationMs = DateTime.now().difference(_startedAt).inMilliseconds;
+      final answers = state.questions
+          .map((q) => _answerPayload(q)..['duration_ms'] = durationMs)
+          .toList();
       final result = await _repo.submit(bankId: bankId, answers: answers);
       final taskId = state.taskId;
       if (taskId != null) {
