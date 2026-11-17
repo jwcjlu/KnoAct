@@ -21,7 +21,7 @@ def test_list_today_records(client, setup_db, db):
     db.add(old); db.commit()
 
     resp = client.get(
-        f"/api/answer-records?user_id={child.id}&date={date.today().isoformat()}",
+        f"/api/answer-records?user_id={child.id}&target_date={date.today().isoformat()}",
         headers=auth_headers(parent),
     )
     assert resp.status_code == 200
@@ -38,6 +38,16 @@ def test_answer_records_requires_parent_or_admin(client, setup_db, db):
     # 孩子自己（非 parent/admin）→ 403
     assert client.get(f"/api/answer-records?user_id={child.id}",
                       headers=auth_headers(child)).status_code == 403
+
+
+def test_answer_records_parent_cannot_read_other_child(client, setup_db, db):
+    # IDOR 防护：家长 A 不能查家长 B 的孩子
+    parent_a = make_account(db, "mama_a", "parent")
+    parent_b = make_account(db, "mama_b", "parent")
+    child_b = make_account(db, "kid_b", "child", parent=parent_b)
+    resp = client.get(f"/api/answer-records?user_id={child_b.id}",
+                      headers=auth_headers(parent_a))
+    assert resp.status_code == 403
 
 
 def test_answer_records_unknown_child_404(client, setup_db, db):

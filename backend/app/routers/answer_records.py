@@ -4,26 +4,30 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ..core.access import ensure_user_access
 from ..core.deps import require_role
 from ..database import get_db
 from ..models import AnswerRecord, User
 
 router = APIRouter(prefix="/api/answer-records", tags=["answer-records"])
 
+# 东八区（Asia/Shanghai）相对 UTC 的偏移：当天 0 点 = UTC 前一日 16:00
+_CHINA_UTC_OFFSET = timedelta(hours=8)
+
 
 @router.get("")
 def list_answer_records(
     user_id: int,
-    date: date | None = None,
+    target_date: date | None = None,
     user: User = Depends(require_role("parent", "admin")),
     db: Session = Depends(get_db),
 ):
     child = db.get(User, user_id)
     if child is None or child.role != "child":
         raise HTTPException(status_code=404, detail="孩子不存在")
-    # 「当天」按东八区（Asia/Shanghai）切：UTC 当日 0 点 − 8h
-    d = date or datetime.utcnow().date()
-    day_start_utc = datetime(d.year, d.month, d.day) - timedelta(hours=8)
+    ensure_user_access(user, user_id, db)
+    d = target_date or datetime.utcnow().date()
+    day_start_utc = datetime(d.year, d.month, d.day) - _CHINA_UTC_OFFSET
     day_end_utc = day_start_utc + timedelta(days=1)
     rows = (
         db.query(AnswerRecord)
