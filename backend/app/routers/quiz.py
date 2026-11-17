@@ -117,6 +117,8 @@ def quiz_submit(req: QuizSubmitReq, user: User = Depends(require_learning_user),
                                bucket_id=quiz.bucket_id)
     if quiz.user_id:
         from ..services.quiz import record_quiz_mistake
+        lesson = db.get(Lesson, quiz.lesson_id)
+        subject = (lesson.subject if lesson else "") or ""
         for q, r in zip(questions, results):
             sel = next((a.get("selected_index") for a in req.answers
                         if a.get("question_id") == q["id"]), None)
@@ -124,7 +126,7 @@ def quiz_submit(req: QuizSubmitReq, user: User = Depends(require_learning_user),
                     if isinstance(sel, int) and 0 <= sel < len(q["choices"]) else "")
             correct = q["choices"][q["correct_index"]]
             record_answer(
-                db, user_id=quiz.user_id, subject="", module="quiz",
+                db, user_id=quiz.user_id, subject=subject, module="quiz",
                 lesson_id=quiz.lesson_id,
                 question=q["prompt"], student_answer=your,
                 correct_answer=correct, is_correct=r["is_correct"] is True,

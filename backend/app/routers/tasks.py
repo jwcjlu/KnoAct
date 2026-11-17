@@ -247,7 +247,7 @@ def knowledge_review(task_id: int, req: KnowledgeReviewReq,
             record_attempt(db, req.user_id, "knowledge", p["id"], is_correct,
                            bucket_id=bid)
         record_answer(
-            db, user_id=req.user_id, subject="", module="knowledge",
+            db, user_id=req.user_id, subject=t.subject, module="knowledge",
             question=p.get("question") or "",
             student_answer=user_answer,
             correct_answer=p.get("answer") or "",
@@ -506,10 +506,10 @@ def drill_complete(task_id: int, req: DrillCompleteReq, user: User = Depends(req
         item = db.get(TrainingItem, int(item_id))
         if item is not None:
             record_answer(
-                db, user_id=user.id, subject="", module="drill",
+                db, user_id=user.id, subject=t.subject, module="drill",
                 question=item.primary,
                 student_answer="",  # 回忆式作答，无文本答案
-                correct_answer=(item.common_mistake or ""),
+                correct_answer=item.primary,
                 is_correct=bool(is_correct),
                 difficulty="", source_type="training_item",
                 source_id=int(item_id), bucket_id=t.bucket_id,

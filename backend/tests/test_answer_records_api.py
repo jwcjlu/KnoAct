@@ -54,3 +54,22 @@ def test_answer_records_unknown_child_404(client, setup_db, db):
     admin = make_account(db, "root_ar", "admin")
     resp = client.get("/api/answer-records?user_id=99999", headers=auth_headers(admin))
     assert resp.status_code == 404
+
+
+def test_answer_records_timezone_boundary(client, setup_db, db):
+    # 东八区当天 00:30 = UTC 前一日 16:30：应归入「当天」而非前一天
+    parent = make_account(db, "mama_tz", "parent")
+    child = make_account(db, "kid_tz", "child", parent=parent)
+    # 构造「东八区 2026-01-01 00:30」= UTC 2025-12-31 16:30
+    utc_ts = datetime(2025, 12, 31, 16, 30, 0)
+    row = record_answer(db, user_id=child.id, subject="英语", module="dictation",
+                        question="boundary", is_correct=True,
+                        source_type="word_bank", source_id=1)
+    row.created_at = utc_ts
+    db.commit()
+
+    resp = client.get(f"/api/answer-records?user_id={child.id}&target_date=2026-01-01",
+                      headers=auth_headers(parent))
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+    assert resp.json()["records"][0]["question"] == "boundary"
