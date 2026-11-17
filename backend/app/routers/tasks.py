@@ -12,6 +12,7 @@ from ..core.deps import require_role
 from ..database import get_db
 from ..models import Task, Point, User
 from ..services.task_gen import generate_tasks_for_user
+from ..services.answer_record import record_answer
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -245,6 +246,15 @@ def knowledge_review(task_id: int, req: KnowledgeReviewReq,
         if p.get("id"):
             record_attempt(db, req.user_id, "knowledge", p["id"], is_correct,
                            bucket_id=bid)
+        record_answer(
+            db, user_id=req.user_id, subject="", module="knowledge",
+            question=p.get("question") or "",
+            student_answer=user_answer,
+            correct_answer=p.get("answer") or "",
+            is_correct=is_correct,
+            source_type="knowledge_point", source_id=p.get("id"),
+            duration_ms=a.get("duration_ms"), bucket_id=bid,
+        )
         p["last_correct"] = is_correct
         results.append({"id": p.get("id"), "is_correct": is_correct, "answer": p.get("answer") or ""})
     t.content = json.dumps(points, ensure_ascii=False)
