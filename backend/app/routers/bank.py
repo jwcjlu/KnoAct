@@ -20,6 +20,7 @@ from ..services.source_config import tiku_cn_adapter, xuekubao_adapter
 from ..database import get_db
 from ..models import Mistake, Question, QuestionBank, ReadingPassage, User
 from ..services.ai import ocr_image
+from ..services.answer_record import record_answer
 from ..services.bucket_guard import resolve_bucket_id
 from ..services.grade_question import grade_question, grade_subjective_with_ai
 from ..services.ocr_import import structure_questions_from_text
@@ -377,6 +378,17 @@ def submit_bank(req: BankSubmitReq, user: User = Depends(require_learning_user),
             r = grade_question(qq.qtype_category, answer_json, student)
         results.append({"question_id": qq.id, "is_correct": r["is_correct"],
                         "correct_answer_text": r["correct_answer_text"], "detail": r["detail"]})
+        record_answer(
+            db, user_id=user.id, subject=qq.subject or "",
+            module="practice", lesson_id=qq.lesson_id,
+            question=qq.question,
+            student_answer=_format_student_answer(a, qq),
+            correct_answer=r.get("correct_answer_text") or qq.answer,
+            is_correct=r["is_correct"] is True,
+            difficulty=qq.difficulty or "",
+            duration_ms=a.get("duration_ms"),
+            source_type="question", source_id=qq.id,
+        )
         if r["is_correct"] is False:
             bid = resolve_bucket_id(db, user.id, None)
             db.add(Mistake(
