@@ -76,6 +76,7 @@ let knowledgeRows = [];
 let goalRows = [];
 let reportRows = [];
 let masteryReport = null;
+let answerRecords = [];   // 当天做题明细
 async function loadMasteryReport(){
   if(!uid){ masteryReport = null; return null; }
   const u = uid, b = bucketId;
@@ -274,7 +275,7 @@ async function loadBuckets(){
 }
 async function reloadChildData(){
   if(parentTab==='目标') await loadGoals();
-  else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport()]);
+  else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport(), loadAnswerRecords()]);
   else if(parentTab==='任务') await loadParentTasks();
   else if(parentTab==='屏幕时间') await Promise.all([loadScreenGroups(), loadScreenUsage()]);
 }
@@ -448,7 +449,7 @@ function setParentTab(t){
   if(t==='题库管理'){ loadBankList().then(()=>render()); return; }
   if(t==='题目审核台'){ loadReviewQuestions().then(()=>render()); return; }
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
-  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
+  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport(), loadAnswerRecords()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
   if(t==='专项训练'){ loadDrillGroups().then(()=>render()); return; }
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
@@ -478,6 +479,13 @@ async function loadReport(){
   const q = b ? `&bucket_id=${b}` : '';
   const rows = await api(`/api/mistakes/report?user_id=${u}${q}`);
   if(u === uid) reportRows = rows;
+}
+async function loadAnswerRecords(){
+  if(!uid){ answerRecords = []; return; }
+  const u = uid;
+  const d = new Date().toISOString().slice(0,10);
+  const r = await api(`/api/answer-records?user_id=${u}&target_date=${d}`);
+  if(u === uid) answerRecords = Array.isArray(r?.records) ? r.records : [];
 }
 async function loadLearningPreferences(){
   if(!uid){ return; }
@@ -2507,7 +2515,43 @@ function renderReportTab(){
           </div>`).join('') || '<p style="font-size:13px;color:var(--gray2)">暂无掌握度记录</p>'}
       </div>
     </div>
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('list',20)}</div>
+        <div><h3>当天做题明细</h3><div class="sub">按科目/模块分组，逐题查看题目、孩子答案与标准答案</div></div></div>
+      <div class="bd">${renderAnswerRecords()}</div>
+    </div>
   </div>`;
+}
+function renderAnswerRecords(){
+  if(!answerRecords.length) return '<p style="font-size:13px;color:var(--gray2)">今天还没有做题记录</p>';
+  const groups = {};
+  for(const r of answerRecords){
+    const s = r.subject || '其他';
+    const m = r.module || '其他';
+    (groups[s] ??= {})[m] ??= [];
+    groups[s][m].push(r);
+  }
+  const MODULE_LABEL = {dictation:'听写',reading:'阅读',listening:'听力',quiz:'边读边问',drill:'专项训练',practice:'题库练习',knowledge:'基础知识'};
+  return Object.entries(groups).map(([subject, modules])=>`
+    <div style="margin-bottom:16px">
+      <div style="font-size:14px;font-weight:700;color:var(--ink2);margin-bottom:8px">${escapeAttr(subject)}</div>
+      ${Object.entries(modules).map(([module, rs])=>`
+        <div style="margin-left:12px;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:600;color:var(--gray2);margin-bottom:6px">${MODULE_LABEL[module]||module} · ${rs.length} 题</div>
+          ${rs.map((r)=>`
+            <div style="padding:8px 10px;border-radius:8px;background:var(--bg2);margin-bottom:6px;font-size:13px">
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:${r.is_correct?'var(--green2)':'var(--orange2)'};font-weight:700">${r.is_correct?'✓':'✗'}</span>
+                <div style="flex:1">
+                  <div>${escapeAttr(r.question)}</div>
+                  ${r.student_answer?`<div style="color:var(--gray2)">你的答案：${escapeAttr(r.student_answer)}</div>`:''}
+                  <div style="color:var(--gray2)">标准答案：${escapeAttr(r.correct_answer)}</div>
+                  ${r.duration_ms?`<span style="color:#8e9691;font-size:12px">${Math.round(r.duration_ms/1000)}s</span>`:''}
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>`).join('');
 }
 
 // ---- 规则 ----
