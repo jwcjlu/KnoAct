@@ -31,7 +31,7 @@ class HomeController extends AsyncNotifier<HomeData> {
   Future<HomeData> build() {
     final uid = ref.watch(currentChildIdProvider);
     // 学年桶切换（含首次解析出 active 桶）时重新加载，把 bucketId 带进 balance 查询
-    ref.watch(homeBucketsProvider.select((s) => s.bucketId));
+    final bucketId = ref.watch(homeBucketsProvider.select((s) => s.bucketId));
     _gen++;
     if (uid != _uid) {
       _uid = uid;
@@ -39,15 +39,16 @@ class HomeController extends AsyncNotifier<HomeData> {
     }
     // 未登录（退出登录到跳回登录页之间）保持加载中：不请求，也不产生错误
     if (uid == null) return Completer<HomeData>().future;
-    return _load(uid, _subject);
+    return _load(uid, _subject, bucketId: bucketId);
   }
 
-  Future<HomeData> _load(int uid, String subject) async {
+  Future<HomeData> _load(int uid, String subject, {int? bucketId}) async {
     final repo = ref.read(homeRepositoryProvider);
+    final bid = bucketId ?? ref.read(homeBucketsProvider).bucketId;
     final results = await Future.wait([
       repo.snapshot(uid, subject),
       repo.tasks(uid, apiDate(DateTime.now())),
-      repo.balance(uid, bucketId: ref.read(homeBucketsProvider).bucketId),
+      repo.balance(uid, bucketId: bid),
     ]);
     return HomeData(
       childId: uid,
@@ -62,7 +63,9 @@ class HomeController extends AsyncNotifier<HomeData> {
     final uid = ref.read(currentChildIdProvider);
     if (uid == null) return;
     final gen = ++_gen;
-    final next = await AsyncValue.guard(() => _load(uid, subject));
+    final next = await AsyncValue.guard(
+      () => _load(uid, subject, bucketId: ref.read(homeBucketsProvider).bucketId),
+    );
     if (!ref.mounted || gen != _gen) return;
     state = next;
   }

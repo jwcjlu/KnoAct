@@ -65,10 +65,20 @@ def _ai_grade(db: Session, user_answer: str, answer: str) -> bool:
         return False
 
 
+def _norm_text(s: str) -> str:
+    """归一化空白与中英文引号，便于标准答案原样比对。"""
+    t = (s or "").strip()
+    for a, b in (("\u201c", '"'), ("\u201d", '"'), ("\u2018", "'"), ("\u2019", "'"),
+                 ("\u3000", " "), ("\r\n", "\n"), ("\r", "\n")):
+        t = t.replace(a, b)
+    return " ".join(t.split())
+
+
 def grade_knowledge_answer(user_answer: str, keywords: list[str], answer: str,
                            db: Session | None = None) -> tuple[bool, bool]:
     """混合判分。返回 (is_correct, used_ai)。
 
+    - 与标准答案归一化后完全一致 → 判对（避免关键词拼盘导致误杀）
     - 关键词命中 >= 阈值 → 判对（规则）
     - 空答案或关键词全不命中 → 判错（规则）
     - 中间态（0 < 命中 < 阈值）→ AI 兜底（db 提供时）
@@ -76,6 +86,9 @@ def grade_knowledge_answer(user_answer: str, keywords: list[str], answer: str,
     ua = (user_answer or "").strip()
     if not ua:
         return False, False
+    std = (answer or "").strip()
+    if std and _norm_text(ua) == _norm_text(std):
+        return True, False
     rate = _hit_rate(ua, keywords)
     if rate >= _HIT_THRESHOLD:
         return True, False

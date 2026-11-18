@@ -65,7 +65,7 @@ class FakeCenterRepository implements CenterRepository {
   Future<CenterMaterial> reading(int userId) => _material(readingMaterial);
 
   @override
-  Future<void> submitWrong({
+  Future<void> submitAnswer({
     required int userId,
     required String question,
     required String yourAnswer,
@@ -77,6 +77,22 @@ class FakeCenterRepository implements CenterRepository {
     if (gate != null) await gate.future;
     if (failWrong) throw Exception('wrong failed');
   }
+
+  @override
+  Future<void> submitWrong({
+    required int userId,
+    required String question,
+    required String yourAnswer,
+    required String correctAnswer,
+    required String sourceType,
+  }) =>
+      submitAnswer(
+        userId: userId,
+        question: question,
+        yourAnswer: yourAnswer,
+        correctAnswer: correctAnswer,
+        sourceType: sourceType,
+      );
 }
 
 class FakeTaskRepository implements HomeRepository {

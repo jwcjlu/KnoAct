@@ -89,10 +89,28 @@ def test_review_wrong_to_mistake(setup_db):
     resp = _client().post("/api/review/submit", json={"user_id": uid, "question": "go 的第三人称单数", "your_answer": "gos", "correct_answer": "goes", "source_type": "review"},
                           headers=_h(uid))
     assert resp.status_code == 200
-    from app.models import Mistake
+    from app.models import Mistake, AnswerRecord
     from app.database import SessionLocal
     s = SessionLocal()
     assert s.query(Mistake).count() >= 1
+    ar = s.query(AnswerRecord).filter_by(user_id=uid).one()
+    assert ar.is_correct is False and ar.module == "review"
+    s.close()
+
+
+def test_review_correct_writes_answer_record_without_mistake(setup_db):
+    uid = _seed_user()
+    resp = _client().post("/api/review/submit", json={
+        "user_id": uid, "question": "Q", "your_answer": "A",
+        "correct_answer": "A", "source_type": "listening",
+    }, headers=_h(uid))
+    assert resp.status_code == 200
+    from app.models import Mistake, AnswerRecord
+    from app.database import SessionLocal
+    s = SessionLocal()
+    assert s.query(Mistake).filter_by(user_id=uid).count() == 0
+    ar = s.query(AnswerRecord).filter_by(user_id=uid).one()
+    assert ar.is_correct is True and ar.module == "listening"
     s.close()
 
 

@@ -93,12 +93,22 @@ def dictation_grade(req: GradeReq, user: User = Depends(require_learning_user),
         w = db.get(WordBank, req.word_id)
     else:
         w = db.query(WordBank).filter_by(word=req.word).first()
+    bid = resolve_bucket_id(db, uid, None) if uid else None
     if w:
         from ..services.mastery import record_attempt as record_mastery
         # user_id 是可空外键：未传（0）时存 NULL
-        bid = resolve_bucket_id(db, uid, None) if uid else None
         record_mastery(db, uid or None, "word", w.id, correct,
                        bucket_id=bid)
+    if uid:
+        from ..services.answer_record import record_answer
+        record_answer(
+            db, user_id=uid, subject=(w.subject if w else "") or "",
+            module="dictation", question=req.word,
+            student_answer=req.answer, correct_answer=req.word,
+            is_correct=correct, source_type="word_bank",
+            source_id=w.id if w else None, bucket_id=bid,
+        )
+        db.commit()
     return {"correct": correct}
 
 class WrongWord(BaseModel):
@@ -164,14 +174,23 @@ class ReviewSubmitReq(BaseModel):
 def review_submit(req: ReviewSubmitReq, user: User = Depends(require_learning_user),
                   db: Session = Depends(get_db)):
     ensure_user_access(user, req.user_id, db)
-    if req.your_answer.strip() != req.correct_answer.strip():
-        bid = resolve_bucket_id(db, req.user_id, None)
+    is_correct = req.your_answer.strip() == req.correct_answer.strip()
+    bid = resolve_bucket_id(db, req.user_id, None)
+    from ..services.answer_record import record_answer
+    module = "listening" if req.source_type == "listening" else (req.source_type or "review")
+    record_answer(
+        db, user_id=req.user_id, subject="", module=module,
+        question=req.question, student_answer=req.your_answer,
+        correct_answer=req.correct_answer, is_correct=is_correct,
+        source_type=req.source_type or "review", bucket_id=bid,
+    )
+    if not is_correct:
         db.add(Mistake(
             user_id=req.user_id, source_type=req.source_type,
             question=req.question, your_answer=req.your_answer, correct_answer=req.correct_answer,
             bucket_id=bid,
         ))
-        db.commit()
+    db.commit()
     return {"ok": True}
 
 def _listening_payload_from_content(data: dict) -> dict:

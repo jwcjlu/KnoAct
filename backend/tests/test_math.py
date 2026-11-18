@@ -238,6 +238,91 @@ def test_math_task_grade_scoped_to_bucket(setup_db):
     s2.close()
 
 
+def test_math_task_grade_writes_answer_records(setup_db):
+    """数学任务判分必须写入 answer_records，供家长端当天做题明细。"""
+    import json
+    from datetime import date
+    from app.models import User, Task, AnswerRecord
+    from app.database import SessionLocal
+    from app.routers.math import router as math_router
+    s = SessionLocal()
+    p = make_account(s, "p_mar", "parent")
+    make_account(s, "晨晨", "child", parent=p)
+    s.commit()
+    uid = s.query(User).filter_by(name="晨晨").first().id
+    content = {
+        "calc": [
+            {"question": "0.6+0.3", "answer": "0.9"},
+            {"question": "10×0.01", "answer": "0.1"},
+        ],
+        "word": [],
+    }
+    t = Task(user_id=uid, date=date.today(), subject="数学", task_type="math", title="数学",
+             content=json.dumps(content, ensure_ascii=False), points=20, content_status="published")
+    s.add(t); s.commit()
+    tid = t.id
+    s.close()
+
+    app = FastAPI()
+    app.include_router(math_router)
+    c = TestClient(app)
+    h = bound_child_headers(uid)
+    r = c.post(f"/api/math/task/{tid}/grade",
+               json={"user_id": uid, "answers": ["9", "0.1"]}, headers=h)
+    assert r.json()["ok"] is True
+    assert r.json()["correct"] == 1
+
+    s2 = SessionLocal()
+    rows = s2.query(AnswerRecord).filter_by(user_id=uid).order_by(AnswerRecord.id).all()
+    assert len(rows) == 2
+    assert rows[0].module == "math"
+    assert rows[0].subject == "数学"
+    assert rows[0].question == "0.6+0.3"
+    assert rows[0].student_answer == "9"
+    assert rows[0].correct_answer == "0.9"
+    assert rows[0].is_correct is False
+    assert rows[1].question == "10×0.01"
+    assert rows[1].is_correct is True
+    s2.close()
+
+
+def test_math_lesson_grade_writes_answer_records(setup_db):
+    """课内数学练习 /api/math/grade 也要落做题明细。"""
+    from app.models import User, Lesson, Text, Question, UserDocument, AnswerRecord
+    from app.database import SessionLocal
+    from app.routers.math import router as math_router
+    s = SessionLocal()
+    make_lesson(s, subject="数学", title="小数", extract_status="done")
+    s.commit()
+    lesson = s.query(Lesson).filter_by(subject="数学").first()
+    s.add(Text(lesson_id=lesson.id, content="小数乘法"))
+    p = make_account(s, "p_mlar", "parent")
+    uid = make_account(s, "晨晨", "child", parent=p).id
+    s.add(UserDocument(user_id=uid, document_id=lesson.document_id))
+    q = Question(lesson_id=lesson.id, qtype="math", question="0.5×2", answer="1")
+    s.add(q); s.commit()
+    lid, qid = lesson.id, q.id
+    s.close()
+
+    app = FastAPI()
+    app.include_router(math_router)
+    c = TestClient(app)
+    h = bound_child_headers(uid)
+    r = c.post("/api/math/grade",
+               json={"user_id": uid, "lesson_id": lid,
+                     "answers": [{"question_id": qid, "answer": "1"}]}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["correct"] == 1
+
+    s2 = SessionLocal()
+    row = s2.query(AnswerRecord).filter_by(user_id=uid).one()
+    assert row.module == "math"
+    assert row.question == "0.5×2"
+    assert row.student_answer == "1"
+    assert row.is_correct is True
+    s2.close()
+
+
 def test_progress_advance_subject_isolation(setup_db):
     from app.models import User, Lesson, LearningProgress
     from app.database import SessionLocal

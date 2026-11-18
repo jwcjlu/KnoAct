@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..core.access import ensure_lesson_document_access, ensure_user_access, require_learning_user
 from ..database import get_db
 from ..models import Text, Question, Mistake, Task, User
+from ..services.answer_record import record_answer
 
 router = APIRouter(prefix="/api/math", tags=["math"])
 
@@ -64,6 +65,9 @@ def math_grade(req: GradeReq, user: User = Depends(require_learning_user),
     from ..services.math_gen import grade_math_answer
     from ..services.bucket_guard import resolve_bucket_id
     bid = resolve_bucket_id(db, req.user_id, None)
+    from ..models import Lesson
+    lesson = db.get(Lesson, req.lesson_id)
+    subject = (lesson.subject if lesson else "") or "数学"
     questions = db.query(Question).filter_by(lesson_id=req.lesson_id, qtype="math").all()
     by_id = {q.id: q for q in questions}
     results = []
@@ -75,6 +79,13 @@ def math_grade(req: GradeReq, user: User = Depends(require_learning_user),
         user_ans = str(a.get("answer") or "")
         is_correct = grade_math_answer(user_ans, q.answer)
         results.append({"question_id": q.id, "is_correct": is_correct, "correct_answer": q.answer})
+        record_answer(
+            db, user_id=req.user_id, subject=subject, module="math",
+            lesson_id=req.lesson_id, question=q.question,
+            student_answer=user_ans, correct_answer=q.answer or "",
+            is_correct=is_correct, source_type="math_question", source_id=q.id,
+            duration_ms=a.get("duration_ms"), bucket_id=bid,
+        )
         if not is_correct:
             _record_mistake(db, req.user_id, q.question, user_ans, q.answer, bucket_id=bid)
     db.commit()
@@ -171,6 +182,13 @@ def math_task_grade(task_id: int, req: TaskGradeReq, user: User = Depends(requir
         results.append({"is_correct": is_correct, "correct_answer": q.get("answer", "")})
         q["your_answer"] = user_ans
         q["is_correct"] = is_correct
+        record_answer(
+            db, user_id=req.user_id, subject=task.subject or "数学", module="math",
+            question=q.get("question", ""), student_answer=user_ans,
+            correct_answer=str(q.get("answer", "") or ""),
+            is_correct=is_correct, source_type="math_task", source_id=task.id,
+            bucket_id=bid if bid is not None else task.bucket_id,
+        )
         if not is_correct:
             _record_mistake(db, req.user_id, q.get("question", ""), user_ans, q.get("answer", ""),
                             bucket_id=bid)
