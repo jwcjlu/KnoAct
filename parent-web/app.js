@@ -76,6 +76,7 @@ let knowledgeRows = [];
 let goalRows = [];
 let reportRows = [];
 let masteryReport = null;
+let answerRecords = [];   // 当天做题明细
 async function loadMasteryReport(){
   if(!uid){ masteryReport = null; return null; }
   const u = uid, b = bucketId;
@@ -274,7 +275,7 @@ async function loadBuckets(){
 }
 async function reloadChildData(){
   if(parentTab==='目标') await loadGoals();
-  else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport()]);
+  else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport(), loadAnswerRecords()]);
   else if(parentTab==='任务') await loadParentTasks();
   else if(parentTab==='屏幕时间') await Promise.all([loadScreenGroups(), loadScreenUsage()]);
 }
@@ -358,9 +359,9 @@ function renderChildMgmt(){
   const rows = visible.map(c=>{
     const isArchived = c.status === 'archived';
     return `<div class="pdf-row">
-      <div><div class="nm">${escapeAttr(c.name)}${isArchived?' <span style="color:#c05b4a">（已归档）</span>':''}</div>
+      <div class="pdf-info"><div class="nm">${escapeAttr(c.name)}${isArchived?' <span style="color:#c05b4a">（已归档）</span>':''}</div>
         <div class="meta">${c.grade?c.grade+'年级':''}${c.edition?' · '+c.edition:''}</div></div>
-      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+      <div class="pdf-actions">
         <button class="btn-ghost" onclick="editChild(${c.id})">编辑</button>
         <button class="btn-ghost" onclick="openChildDocs(${c.id})">看教材</button>
         ${isArchived
@@ -385,8 +386,8 @@ function renderChildMgmt(){
 function renderChildDocs(){
   if(!childDocs) return '';
   const rows = childDocs.documents.map(d=>`
-    <div class="pdf-row"><div><div class="nm">${escapeAttr(d.filename)}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''}</div></div>
-      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+    <div class="pdf-row"><div class="pdf-info"><div class="nm">${escapeAttr(d.filename)}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''}</div></div>
+      <div class="pdf-actions">
         <button class="btn-ghost" style="color:#c05b4a" onclick="unbindFromChild(${childDocs.child_id}, ${d.id})">解除绑定</button>
       </div></div>`).join('');
   return `<div class="parent-panel" style="grid-column:1/-1">
@@ -448,7 +449,7 @@ function setParentTab(t){
   if(t==='题库管理'){ loadBankList().then(()=>render()); return; }
   if(t==='题目审核台'){ loadReviewQuestions().then(()=>render()); return; }
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
-  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
+  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport(), loadAnswerRecords()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
   if(t==='专项训练'){ loadDrillGroups().then(()=>render()); return; }
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
@@ -478,6 +479,15 @@ async function loadReport(){
   const q = b ? `&bucket_id=${b}` : '';
   const rows = await api(`/api/mistakes/report?user_id=${u}${q}`);
   if(u === uid) reportRows = rows;
+}
+async function loadAnswerRecords(){
+  if(!uid){ answerRecords = []; return; }
+  const u = uid;
+  // 用本地日历日（东八区），勿用 toISOString 的 UTC 日，避免早晚跨日查空
+  const now = new Date();
+  const d = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const r = await api(`/api/answer-records?user_id=${u}&target_date=${d}`);
+  if(u === uid) answerRecords = Array.isArray(r?.records) ? r.records : [];
 }
 async function loadLearningPreferences(){
   if(!uid){ return; }
@@ -1846,9 +1856,9 @@ async function rejectFamilyRequest(id){
 function renderFamilyBindPanel(){
   const reqRows = familyRequests.map(r=>`
     <div class="pdf-row">
-      <div><div class="nm">${escapeAttr(r.child_name || r.child_login_name || '孩子')}</div>
+      <div class="pdf-info"><div class="nm">${escapeAttr(r.child_name || r.child_login_name || '孩子')}</div>
         <div class="meta">登录名：${escapeAttr(r.child_login_name || '—')}</div></div>
-      <div style="display:flex;gap:6px;margin-left:auto">
+      <div class="pdf-actions">
         <button class="btn-primary" style="padding:8px 14px" onclick="approveFamilyRequest(${r.id})">通过</button>
         <button class="btn-ghost" style="color:#c05b4a" onclick="rejectFamilyRequest(${r.id})">拒绝</button>
       </div>
@@ -1896,8 +1906,8 @@ function renderParent(){
   }
   return `<div class="parent-banner">
     <div class="l"><div class="ic">${icon('star',20)}</div><div><div class="t">家长端 · 管理学习目标与规则</div><div class="s">在这里录入教材、设定目标、查看薄弱报告</div></div></div>
-    <div class="parent-tabs-narrow" style="gap:8px;background:#f2f4f1;border-radius:12px;padding:4px">${tabs}</div>
     <div id="child-select-host">${childSelectHtml()}</div>
+    <div class="parent-tabs-narrow">${tabs}</div>
   </div>${body}`;
 }
 
@@ -1935,8 +1945,8 @@ function renderPdfTab(){
   const rows = pdfDocs.map(d=>`
     <div class="pdf-row">
       <div class="ic">${icon('book',22)}</div>
-      <div><div class="nm">${d.filename}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''} · ${d.lesson_count} 课 · 已审核 ${d.audited_count} 课</div></div>
-      <div style="display:flex;gap:6px;margin-left:auto">
+      <div class="pdf-info"><div class="nm">${d.filename}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''} · ${d.lesson_count} 课 · 已审核 ${d.audited_count} 课</div></div>
+      <div class="pdf-actions">
         <button class="btn-ghost" onclick="openDocBind(${d.id})">绑定孩子</button>
         <button class="btn-ghost" onclick="openDoc(${d.id})">查看/审核</button>
         <button class="btn-ghost" onclick="openAudioPanel(${d.id})">教材音频</button>
@@ -1986,11 +1996,11 @@ function renderAudioPanel(){
     ).join('');
     return `<div class="pdf-row">
       <div class="ic">${icon('headphones',22)}</div>
-      <div>
+      <div class="pdf-info">
         <div class="nm">${escapeAttr(r.unit_label||'(未命名)')}</div>
         <div class="meta">${lt?('自动匹配：'+escapeAttr(lt)):'未绑定课程'} · ${(r.marks||[]).length} 个标记</div>
       </div>
-      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+      <div class="pdf-actions">
         <select onchange="setAudioLesson(${r.id}, this)">
           ${opts}
         </select>
@@ -2218,8 +2228,8 @@ function renderMarkList(){
   const items = markCtx.marks.map((m,i)=>`
     <div class="pdf-row">
       <div class="ic">${icon('clock',18)}</div>
-      <div><div class="nm">${escapeAttr(m.label||('第'+(i+1)+'课'))}</div><div class="meta">${Number(m.start_sec).toFixed(2)}s</div></div>
-      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+      <div class="pdf-info"><div class="nm">${escapeAttr(m.label||('第'+(i+1)+'课'))}</div><div class="meta">${Number(m.start_sec).toFixed(2)}s</div></div>
+      <div class="pdf-actions">
         <button class="btn-ghost" onclick="seekToMark(${m.start_sec})">跳转</button>
         <button class="btn-ghost" style="color:#c05b4a" onclick="removeMark(${i})">删除</button>
       </div>
@@ -2258,8 +2268,79 @@ function seekToMark(sec){
 }
 
 let docLessons = [];
+let lessonEdit = null; // {id, title, subject, words:[{id,word,extra}], points:[{id,content,category}]}
+
+function snapshotLessonEdit(){
+  const root = document.getElementById('lesEdit');
+  if(!root || !lessonEdit || Number(root.dataset.id) !== lessonEdit.id) return;
+  const title = document.getElementById('lesTitle');
+  if(title) lessonEdit.title = title.value;
+  lessonEdit.words.forEach((w,i)=>{
+    const a = document.getElementById('lesWord'+i);
+    const b = document.getElementById('lesExtra'+i);
+    if(a) w.word = a.value;
+    if(b) w.extra = b.value;
+  });
+  lessonEdit.points.forEach((p,i)=>{
+    const a = document.getElementById('lesPoint'+i);
+    if(a) p.content = a.value;
+  });
+}
+function startLessonEdit(id){
+  snapshotLessonEdit();
+  const l = docLessons.find(x=>x.id===id);
+  if(!l) return;
+  lessonEdit = {
+    id: l.id,
+    subject: l.subject,
+    title: l.title || '',
+    words: (l.words||[]).map(w=>({id:w.id, word:w.word||'', extra:w.extra||''})),
+    points: (l.points||[]).map(p=>({id:p.id, content:p.content||'', category:p.category||'本课'})),
+  };
+  render();
+}
+function cancelLessonEdit(){ lessonEdit = null; render(); }
+function addLessonWord(){
+  snapshotLessonEdit();
+  lessonEdit.words.push({id:null, word:'', extra:''});
+  render();
+}
+function removeLessonWord(i){
+  snapshotLessonEdit();
+  lessonEdit.words.splice(i, 1);
+  render();
+}
+function addLessonPoint(){
+  snapshotLessonEdit();
+  lessonEdit.points.push({id:null, content:'', category:'本课'});
+  render();
+}
+function removeLessonPoint(i){
+  snapshotLessonEdit();
+  lessonEdit.points.splice(i, 1);
+  render();
+}
+async function saveLessonEdit(){
+  snapshotLessonEdit();
+  if(!lessonEdit) return;
+  const title = (lessonEdit.title||'').trim();
+  if(!title){ toast('课名不能为空'); return; }
+  const words = lessonEdit.words
+    .map(w=>({id:w.id, word:(w.word||'').trim(), extra:(w.extra||'').trim()}))
+    .filter(w=>w.word);
+  const points = lessonEdit.points
+    .map(p=>({id:p.id, content:(p.content||'').trim(), category:p.category||'本课'}))
+    .filter(p=>p.content);
+  const r = await api(`/api/pdf/lessons/${lessonEdit.id}/content`, {method:'PUT', body:{title, words, points}});
+  if(!r || r.error){ toast(apiErrorMsg(r, '保存失败')); return; }
+  lessonEdit = null;
+  docLessons = await api(`/api/pdf/documents/${confirmDocId}/lessons`);
+  toast('已保存');
+  render();
+}
 async function openDoc(id){
   confirmDocId = id;
+  lessonEdit = null;
   docLessons = await api(`/api/pdf/documents/${id}/lessons`);
   pdfTab='confirm'; render();
 }
@@ -2308,42 +2389,103 @@ async function pollExtract(){
   toast('提取仍在进行，稍后可重新进入教材查看');
 }
 async function auditLesson(id, action){
+  snapshotLessonEdit();
   const fd = new FormData();
   fd.append('action', action);
   await apiForm(`/api/pdf/lessons/${id}/audit`, fd);
   docLessons = await api(`/api/pdf/documents/${confirmDocId}/lessons`);
-  toast(action==='通过'?'已审核通过、入库':'已驳回');
+  toast(action==='通过'?'已审核通过、入库':action==='撤回'?'已撤回审核':'已驳回');
   render();
+}
+function isWordListTitle(title){
+  const t = String(title||'').trim().toLowerCase();
+  return t === 'word list' || t === '单词列表';
+}
+function renderWordList(words){
+  const groups = [];
+  for(const w of words||[]){
+    const m = /^(Unit\s*\d+)\s*·\s*([\s\S]*)$/.exec(w.extra||'');
+    const unit = m ? m[1] : '其他';
+    const gloss = m ? m[2] : (w.extra||'');
+    let g = groups.find(x=>x.unit===unit);
+    if(!g){ g = {unit, items:[]}; groups.push(g); }
+    g.items.push({word:w.word, gloss});
+  }
+  if(!groups.length) return '<span style="font-size:12px;color:var(--gray3)">（待提取）</span>';
+  return `<div class="wl-block">${groups.map(g=>`
+    <div class="wl-unit">${escapeAttr(g.unit)}</div>
+    <div class="wl-grid">${g.items.map(it=>`<div class="wl-item"><b>${escapeAttr(it.word)}</b><span>${escapeAttr(it.gloss)}</span></div>`).join('')}</div>
+  `).join('')}</div>`;
 }
 function renderLessonConfirm(){
   const auditBadge = a => a==='approved'?`<span class="st-badge" style="background:var(--green-soft);color:var(--green)">已通过</span>`
     : a==='rejected'?`<span class="st-badge" style="background:#fff3f0;color:#c05b4a">已驳回</span>`
     : `<span class="st-badge" style="background:var(--orange-soft);color:var(--orange2)">待审核</span>`;
-  const items = docLessons.map(l=>`
-    <div class="lc-item">
+  const extraPh = s => s==='英语'?'释义':(s==='数学'?'说明':'拼音 / 释义');
+  const viewBlock = l => `
       <div class="top">
-        <span class="ttl">${l.title}</span>
+        <span class="ttl">${escapeAttr(l.title)}</span>
         <span class="pg">第 ${l.start_page}–${l.end_page} 页</span>
         ${auditBadge(l.audit_status)}
       </div>
       <div class="extract">
-        <div class="ex-row"><span class="ex-lbl">生词表</span><div class="ex-chips">${l.words.map(w=>`<span class="kw-chip">${w.word}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>
-        <div class="ex-row"><span class="ex-lbl">知识点</span><div class="ex-chips">${l.points.map(p=>`<span class="kw-chip" style="background:var(--purple-soft);color:var(--purple)">${p.content}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>
+        ${isWordListTitle(l.title)
+          ? `<div class="ex-row"><span class="ex-lbl">单词</span><div class="ex-chips" style="display:block">${renderWordList(l.words)}</div></div>`
+          : `<div class="ex-row"><span class="ex-lbl">生词表</span><div class="ex-chips">${l.words.map(w=>`<span class="kw-chip">${escapeAttr(w.word)}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>
+             <div class="ex-row"><span class="ex-lbl">知识点</span><div class="ex-chips">${l.points.map(p=>`<span class="kw-chip" style="background:var(--purple-soft);color:var(--purple)">${escapeAttr(p.content)}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>`}
+      </div>`;
+  const editBlock = l => {
+    const e = lessonEdit;
+    const words = e.words.map((w,i)=>`
+      <div class="les-line">
+        <input class="w" id="lesWord${i}" value="${escapeAttr(w.word)}" placeholder="生词">
+        <input class="x" id="lesExtra${i}" value="${escapeAttr(w.extra)}" placeholder="${extraPh(e.subject)}">
+        <button type="button" class="del" onclick="removeLessonWord(${i})">删除</button>
+      </div>`).join('');
+    const points = e.points.map((p,i)=>`
+      <div class="les-line">
+        <input id="lesPoint${i}" value="${escapeAttr(p.content)}" placeholder="知识点">
+        <button type="button" class="del" onclick="removeLessonPoint(${i})">删除</button>
+      </div>`).join('');
+    return `
+      <div class="top">
+        <span class="pg">第 ${l.start_page}–${l.end_page} 页</span>
+        ${auditBadge(l.audit_status)}
       </div>
+      <div class="les-edit" id="lesEdit" data-id="${e.id}">
+        <input class="ttl-input" id="lesTitle" value="${escapeAttr(e.title)}" placeholder="课名">
+        <div class="ex-row"><span class="ex-lbl">生词表</span><div style="flex:1">
+          ${words || '<div style="font-size:12px;color:var(--gray3);margin-bottom:6px">还没有生词</div>'}
+          <button type="button" class="kw-chip-add les-add" onclick="addLessonWord()">添加生词</button>
+        </div></div>
+        <div class="ex-row"><span class="ex-lbl">知识点</span><div style="flex:1">
+          ${points || '<div style="font-size:12px;color:var(--gray3);margin-bottom:6px">还没有知识点</div>'}
+          <button type="button" class="kw-chip-add les-add" onclick="addLessonPoint()">添加知识点</button>
+        </div></div>
+      </div>`;
+  };
+  const items = docLessons.map(l=>{
+    const editing = lessonEdit && lessonEdit.id===l.id;
+    return `
+    <div class="lc-item">
+      ${editing ? editBlock(l) : viewBlock(l)}
       <div class="ex-actions">
-        <button class="btn-ghost" onclick="toast('可编辑生词与知识点')">编辑</button>
-        ${l.extract_status!=='done'?`<button class="btn-primary" onclick="doExtract()">提取生词/知识点</button>`:''}
+        ${editing
+          ? `<button class="btn-ghost" onclick="cancelLessonEdit()">取消</button><button class="btn-primary" onclick="saveLessonEdit()">保存</button>`
+          : `<button class="btn-ghost" onclick="startLessonEdit(${l.id})">编辑</button>`}
+        ${!editing && l.extract_status!=='done'?`<button class="btn-primary" onclick="doExtract()">提取生词/知识点</button>`:''}
         ${l.audit_status==='pending'?`<button class="btn-ghost" style="color:#c05b4a" onclick="auditLesson(${l.id},'驳回')">驳回</button><button class="btn-primary" onclick="auditLesson(${l.id},'通过')">审核通过</button>`
           : l.audit_status==='rejected'?`<button class="btn-primary" onclick="auditLesson(${l.id},'通过')">重新审核</button>`
-          : `<button class="btn-ghost" onclick="toast('已审核，可重新编辑后再次审核')">重新审核</button>`}
+          : `<button class="btn-ghost" onclick="auditLesson(${l.id},'撤回')">撤回审核</button>`}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return `<div class="parent-grid">
     <div class="parent-panel" style="grid-column:1/-1">
-      <div class="head"><div class="ic blue">${icon('brain',20)}</div><div><h3>拆课结果 · 逐课审核</h3><div class="sub">先提取，再审核；审核通过后课程生词进入孩子听写词库</div></div></div>
+      <div class="head"><div class="ic blue">${icon('brain',20)}</div><div><h3>拆课结果 · 逐课审核</h3><div class="sub">先提取，再审核；审核通过后课程生词进入孩子听写词库。编辑可改课名、生词释义和知识点</div></div></div>
       <div class="bd"><div class="lesson-confirm-list">${items}</div></div>
     </div>
-    <div style="grid-column:1/-1"><span class="pdf-back" onclick="pdfTab=null;render()">${icon('arrow',14)} 返回教材列表</span></div>
+    <div style="grid-column:1/-1"><span class="pdf-back" onclick="pdfTab=null;lessonEdit=null;render()">${icon('arrow',14)} 返回教材列表</span></div>
   </div>`;
 }
 async function uploadPdf(input){
@@ -2499,15 +2641,53 @@ function renderReportTab(){
           <span style="font-size:13px;color:var(--gray2)">已掌握 <b style="color:var(--green2)">${masteryReport?.mastered||0}</b> ·
           薄弱 <b style="color:var(--orange2)">${masteryReport?.weak||0}</b> · 共 ${masteryReport?.total||0}</span>
         </div>
-        ${(masteryReport?.rows||[]).map(r=>`
-          <div class="weak-row">
-            <span class="w-name">${escapeAttr(r.category)} · ${escapeAttr(r.title)}</span>
-            <div class="w-bar"><div class="w-fill" style="width:${Math.round(r.mastery*100)}%;background:${r.mastered?'var(--green2)':'var(--orange2)'}"></div></div>
-            <span class="w-val">${r.mastered?'✓ ':''}${Math.round(r.mastery*100)}%</span>
-          </div>`).join('') || '<p style="font-size:13px;color:var(--gray2)">暂无掌握度记录</p>'}
+        <div class="mastery-list">${(masteryReport?.rows||[]).map(r=>`
+          <div class="mastery-row">
+            <div class="m-head">
+              <span class="m-name" title="${escapeAttr(r.category)} · ${escapeAttr(r.title)}">${escapeAttr(r.category)} · ${escapeAttr(r.title)}</span>
+              <span class="m-val" style="color:${r.mastered?'var(--green2)':'var(--orange2)'}">${r.mastered?'✓ ':''}${Math.round(r.mastery*100)}%</span>
+            </div>
+            <div class="m-bar"><div class="m-fill" style="width:${Math.round(r.mastery*100)}%;background:${r.mastered?'var(--green2)':'var(--orange2)'}"></div></div>
+          </div>`).join('') || '<p style="font-size:13px;color:var(--gray2)">暂无掌握度记录</p>'}</div>
       </div>
     </div>
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('list',20)}</div>
+        <div><h3>当天做题明细</h3><div class="sub">按科目/模块分组，逐题查看题目、孩子答案与标准答案</div></div></div>
+      <div class="bd">${renderAnswerRecords()}</div>
+    </div>
   </div>`;
+}
+function renderAnswerRecords(){
+  if(!answerRecords.length) return '<p style="font-size:13px;color:var(--gray2)">今天还没有做题记录</p>';
+  const groups = {};
+  for(const r of answerRecords){
+    const s = r.subject || '其他';
+    const m = r.module || '其他';
+    (groups[s] ??= {})[m] ??= [];
+    groups[s][m].push(r);
+  }
+  const MODULE_LABEL = {dictation:'听写',reading:'阅读',listening:'听力',quiz:'边读边问',drill:'专项训练',practice:'题库练习',knowledge:'基础知识',math:'数学练习'};
+  return Object.entries(groups).map(([subject, modules])=>`
+    <div style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:700;color:var(--ink2);margin-bottom:10px">${escapeAttr(subject)}</div>
+      ${Object.entries(modules).map(([module, rs])=>`
+        <div style="margin-bottom:12px">
+          <div style="font-size:13px;font-weight:600;color:var(--gray2);margin-bottom:8px">${MODULE_LABEL[module]||module} · ${rs.length} 题</div>
+          ${rs.map((r)=>`
+            <div class="answer-rec">
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <span style="color:${r.is_correct?'var(--green2)':'var(--orange2)'};font-weight:700;flex-shrink:0">${r.is_correct?'✓':'✗'}</span>
+                <div class="ar-body">
+                  <div class="ar-q">${escapeAttr(r.question)}</div>
+                  ${r.student_answer?`<div class="ar-meta">你的答案：${escapeAttr(r.student_answer)}</div>`:''}
+                  <div class="ar-meta">标准答案：${escapeAttr(r.correct_answer)}</div>
+                  ${r.duration_ms?`<div class="ar-meta" style="color:#8e9691">${Math.round(r.duration_ms/1000)}s</div>`:''}
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>`).join('');
 }
 
 // ---- 规则 ----

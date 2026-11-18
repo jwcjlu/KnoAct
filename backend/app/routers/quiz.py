@@ -9,6 +9,7 @@ from ..core.access import ensure_lesson_document_access, ensure_user_access, req
 from ..database import get_db
 from ..models import Quiz, Text, KnowledgePoint, Lesson, User
 from ..services.quiz import grade_answers, strip_key
+from ..services.answer_record import record_answer
 from ..services.bucket_guard import resolve_bucket_id
 
 router = APIRouter(prefix="/api", tags=["read-and-ask"])
@@ -116,17 +117,28 @@ def quiz_submit(req: QuizSubmitReq, user: User = Depends(require_learning_user),
                                bucket_id=quiz.bucket_id)
     if quiz.user_id:
         from ..services.quiz import record_quiz_mistake
+        lesson = db.get(Lesson, quiz.lesson_id)
+        subject = (lesson.subject if lesson else "") or ""
         for q, r in zip(questions, results):
-            if r["is_correct"]:
-                continue
             sel = next((a.get("selected_index") for a in req.answers
                         if a.get("question_id") == q["id"]), None)
             your = (q["choices"][sel]
                     if isinstance(sel, int) and 0 <= sel < len(q["choices"]) else "")
             correct = q["choices"][q["correct_index"]]
-            record_quiz_mistake(db, quiz.user_id, q["prompt"], your, correct,
-                                q.get("knowledge_point_id"),
-                                bucket_id=quiz.bucket_id)
+            record_answer(
+                db, user_id=quiz.user_id, subject=subject, module="quiz",
+                lesson_id=quiz.lesson_id,
+                question=q["prompt"], student_answer=your,
+                correct_answer=correct, is_correct=r["is_correct"] is True,
+                source_type="quiz", source_id=q["id"],
+                duration_ms=next((a.get("duration_ms") for a in req.answers
+                                  if a.get("question_id") == q["id"]), None),
+                bucket_id=quiz.bucket_id,
+            )
+            if not r["is_correct"]:
+                record_quiz_mistake(db, quiz.user_id, q["prompt"], your, correct,
+                                    q.get("knowledge_point_id"),
+                                    bucket_id=quiz.bucket_id)
     score = sum(1 for r in results if r["is_correct"])
     quiz.score = score
     db.commit()

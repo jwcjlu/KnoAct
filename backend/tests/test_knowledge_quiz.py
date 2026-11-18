@@ -26,3 +26,20 @@ def test_grade_keyword_none_match():
 def test_grade_empty_answer():
     ok, used_ai = grade_knowledge_answer("", keywords=["π"], answer="周长=π×直径")
     assert ok is False and used_ai is False
+
+
+def test_grade_exact_standard_answer_wins_over_bad_keywords():
+    """标准答案原样提交必须判对：关键词若是整段拼盘，子串匹配会全 miss。"""
+    answer = (
+        "把“1”平均分成10份，其中1份是1/10，写成0.1；"
+        "平均分成100份，其中1份是1/100，写成0.01；"
+        "平均分成1000份，其中1份是1/1000，写成0.001。"
+    )
+    keywords = ["平均分成10份、100份、1000份", "1/10，0.1", "1/100，0.01", "1/1000，0.001"]
+    ok, used_ai = grade_knowledge_answer(answer, keywords, answer)
+    assert ok is True and used_ai is False
+
+
+def test_grade_exact_answer_ignores_surrounding_whitespace():
+    ok, used_ai = grade_knowledge_answer("  周长=π×直径  ", keywords=["完全无关"], answer="周长=π×直径")
+    assert ok is True and used_ai is False

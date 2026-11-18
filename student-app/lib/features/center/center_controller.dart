@@ -201,25 +201,31 @@ class CenterController extends Notifier<CenterState> {
     final inputs = [...state.inputs]..[index] = stored;
     state = state.copyWith(results: results, inputs: inputs);
     if (ok) state = state.withMessage('回答正确！');
-    // 与错题收录同时发起提交：收录期间离开/切 Tab 不能清掉已完成任务的提交
-    await _submitAndReport(wrong: ok ? null : _recordWrong(q, yourAnswer, correctAnswer, uid));
+    // 对错都上报明细；错题顺带收录。收录期间离开/切 Tab 不能清掉已完成任务的提交
+    await _submitAndReport(wrong: _recordAnswer(q, yourAnswer, correctAnswer, uid, ok: ok));
   }
 
-  /// 返回提示文案；结果已过期（切 Tab / 换孩子）时返回 null
-  Future<String?> _recordWrong(CenterQuestion q, String yourAnswer, String correctAnswer, int uid) async {
+  /// 返回提示文案；结果已过期（切 Tab / 换孩子）时返回 null。答对时无文案。
+  Future<String?> _recordAnswer(
+    CenterQuestion q,
+    String yourAnswer,
+    String correctAnswer,
+    int uid, {
+    required bool ok,
+  }) async {
     final token = _loadToken;
-    String msg;
+    String? msg;
     try {
-      await ref.read(centerRepositoryProvider).submitWrong(
+      await ref.read(centerRepositoryProvider).submitAnswer(
             userId: uid,
             question: q.question,
             yourAnswer: yourAnswer,
             correctAnswer: correctAnswer,
             sourceType: state.tab.sourceType,
           );
-      msg = '答错了，已收录进错题本';
+      if (!ok) msg = '答错了，已收录进错题本';
     } catch (_) {
-      msg = '答错了（收录错题本失败，请稍后重试）';
+      if (!ok) msg = '答错了（收录错题本失败，请稍后重试）';
     }
     return _stale(token, uid) ? null : msg;
   }
@@ -233,7 +239,8 @@ class CenterController extends Notifier<CenterState> {
     if (!ref.mounted || _uid != uid) return;
     final submitMsg = switch (submit) {
       null => null,
-      (ok: true, current: _, taskId: _) => wrong == null ? '已提交，等待家长确认' : '任务已提交，等待家长确认',
+      // wrongMsg 非空表示本轮有错题收录文案，用「任务已提交」避免和「回答正确」叠成两套语气
+      (ok: true, current: _, taskId: _) => wrongMsg == null ? '已提交，等待家长确认' : '任务已提交，等待家长确认',
       (ok: false, current: true, taskId: _) => '提交任务失败，请稍后重试',
       (ok: false, current: false, taskId: _) => '提交任务失败，请回首页重新开始该任务',
     };
