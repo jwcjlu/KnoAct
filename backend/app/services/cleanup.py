@@ -6,8 +6,8 @@
 from sqlalchemy.orm import Session
 
 from ..models import (
-    Annotation, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson, Mistake,
-    Note, Question, Quiz, Text, Turn, WordBank, WordMastery,
+    Annotation, AnswerRecord, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson,
+    LessonAudio, Mistake, Note, Question, Quiz, Text, Turn, WordBank, WordMastery,
 )
 
 
@@ -55,5 +55,10 @@ def purge_lessons(db: Session, lesson_ids: list[int]) -> None:
         {LearningProgress.current_lesson_id: None}, synchronize_session=False)
     db.query(Turn).filter(Turn.lesson_id.in_(lesson_ids)).update(
         {Turn.lesson_id: None}, synchronize_session=False)
+    # 音频跟着教材走，拆课会换一批 lesson id，只解开绑定、不删文件
+    db.query(LessonAudio).filter(LessonAudio.lesson_id.in_(lesson_ids)).update(
+        {LessonAudio.lesson_id: None}, synchronize_session=False)
+    db.query(AnswerRecord).filter(AnswerRecord.lesson_id.in_(lesson_ids)).update(
+        {AnswerRecord.lesson_id: None}, synchronize_session=False)
     # fetch：把已加载的课程对象移出 session，免得新课程复用同一 id 时撞 identity map
     db.query(Lesson).filter(Lesson.id.in_(lesson_ids)).delete(synchronize_session="fetch")

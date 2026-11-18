@@ -6,9 +6,9 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal
 from app.models import (
-    Annotation, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson, Mistake, Note,
-    PdfDocument, PdfPage, Question, Quiz, Text, Textbook, ToolCall, Turn, UserDocument, WordBank,
-    WordMastery,
+    Annotation, AnswerRecord, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson,
+    LessonAudio, Mistake, Note, PdfDocument, PdfPage, Question, Quiz, Text, Textbook, ToolCall,
+    Turn, UserDocument, WordBank, WordMastery,
 )
 from app.routers.knowledge import router as knowledge_router
 from app.routers.pdf import router as pdf_router
@@ -49,6 +49,9 @@ def _seed(storage_path=""):
                 your_answer="A", correct_answer="B", knowledge_point_id=kp.id),
         PdfPage(document_id=doc.id, page_number=1, image_path="p1.png"),
         Textbook(document_id=doc.id, subject="语文", unit="第一单元"),
+        LessonAudio(document_id=doc.id, lesson_id=lid, unit_label="Unit 1", audio_path="uploads/audio/t.mp3"),
+        AnswerRecord(user_id=uid, subject="语文", module="dictation", lesson_id=lid,
+                     question="白鹭", student_answer="白露", correct_answer="白鹭", is_correct=False),
     ])
     turn = Turn(user_id=uid, lesson_id=lid, capability="chat", mode="chat", question="白鹭是什么？")
     s.add(turn); s.flush()
@@ -79,6 +82,8 @@ def _assert_lesson_purged(s, ids):
     turn = s.get(Turn, ids["turn"])
     assert turn is not None and turn.lesson_id is None
     assert s.query(ToolCall).filter_by(turn_id=ids["turn"]).count() == 1
+    record = s.query(AnswerRecord).filter_by(user_id=ids["uid"]).one()
+    assert record.lesson_id is None
 
 
 def test_reextract_lesson_detaches_word_and_point_references(setup_db, monkeypatch):
@@ -128,6 +133,8 @@ def test_resplit_document_purges_lessons_and_references(setup_db, monkeypatch, t
     _assert_lesson_purged(s, ids)
     titles = [l.title for l in s.query(Lesson).filter_by(document_id=ids["doc"]).order_by(Lesson.start_page)]
     assert titles == ["新第1课", "新第2课"]
+    audio = s.query(LessonAudio).filter_by(document_id=ids["doc"]).one()
+    assert audio.lesson_id is None and audio.audio_path == "uploads/audio/t.mp3"
     s.close()
 
 
@@ -150,6 +157,7 @@ def test_delete_document_purges_lessons_and_references(setup_db, monkeypatch, tm
     assert s.get(PdfDocument, ids["doc"]) is None
     assert s.query(PdfPage).filter_by(document_id=ids["doc"]).count() == 0
     assert s.query(Textbook).filter_by(document_id=ids["doc"]).count() == 0
+    assert s.query(LessonAudio).filter_by(document_id=ids["doc"]).count() == 0
     s.close()
     assert not src.exists()
 

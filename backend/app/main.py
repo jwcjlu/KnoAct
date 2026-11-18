@@ -32,13 +32,17 @@ app = FastAPI(title="知学伴 API")
 
 @app.on_event("startup")
 def _ensure_db_tables() -> None:
-    """已有 SQLite/MySQL 库不会自动补新表；启动时幂等 create_all（与 seed 首步一致）。"""
+    """对照模型补缺失的表和列。create_all 只建新表，老表缺列由 schema_sync 补。"""
     if "pytest" in sys.modules:
         return
     from .database import SessionLocal
     from .models import Base  # noqa: F401 — 注册全部表
     from .database import engine
-    Base.metadata.create_all(bind=engine)
+    from .schema_sync import sync_schema
+    try:
+        sync_schema(engine, Base.metadata)
+    except Exception as exc:
+        _log.warning("启动时补表/补列失败: %s", exc)
     db = SessionLocal()
     try:
         try:
@@ -62,42 +66,6 @@ def _ensure_db_tables() -> None:
         except Exception as exc:
             db.rollback()
             _log.warning("child grade/桶回填失败: %s", exc)
-        try:
-            from sqlalchemy import inspect as _inspect, text as _text
-            _insp = _inspect(db.get_bind())
-            _names = set(_insp.get_table_names())
-
-            def _add_column(table: str, column: str, ddl: str) -> None:
-                """幂等补列；单表失败不连坐其它表的迁移。"""
-                if table not in _names:
-                    return
-                cols = {c["name"] for c in _insp.get_columns(table)}
-                if column in cols:
-                    return
-                with db.get_bind().begin() as _conn:
-                    _conn.execute(_text(ddl))
-
-            # knowledge_point_pool 老库补列（新表 create_all 已含这些列，此处仅兜底）
-            try:
-                _add_column("knowledge_point_pool", "folder_id", "ALTER TABLE knowledge_point_pool ADD COLUMN folder_id INTEGER")
-                _add_column("knowledge_point_pool", "tags", "ALTER TABLE knowledge_point_pool ADD COLUMN tags MEDIUMTEXT")
-            except Exception as exc:
-                db.rollback()
-                _log.warning("knowledge_point_pool 列迁移失败: %s", exc)
-            try:
-                _add_column("training_items", "point_pool_id", "ALTER TABLE training_items ADD COLUMN point_pool_id INTEGER")
-            except Exception as exc:
-                db.rollback()
-                _log.warning("training_items.point_pool_id 迁移失败: %s", exc)
-            try:
-                _add_column("pdf_documents", "content_kind", "ALTER TABLE pdf_documents ADD COLUMN content_kind VARCHAR(16) DEFAULT 'textbook'")
-                _add_column("pdf_documents", "handout_kind", "ALTER TABLE pdf_documents ADD COLUMN handout_kind VARCHAR(16)")
-            except Exception as exc:
-                db.rollback()
-                _log.warning("pdf_documents 列迁移失败: %s", exc)
-        except Exception as exc:
-            db.rollback()
-            _log.warning("列迁移整体失败: %s", exc)
     finally:
         db.close()
 
