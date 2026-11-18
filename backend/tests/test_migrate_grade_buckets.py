@@ -32,3 +32,23 @@ def test_migrate_idempotent(setup_db, db):
     migrate(db)  # 二次运行不应重复建桶
     buckets = db.query(SchoolYearBucket).filter_by(user_id=child.id).all()
     assert len(buckets) == 1
+
+
+def test_migrate_backfills_traces_when_bucket_already_exists(setup_db, db):
+    # 已有 active 桶但痕迹未归属（旧 bug：continue 跳过回填）
+    child = User(name="晨晨", role="child", grade=5)
+    db.add(child); db.commit()
+    bucket = SchoolYearBucket(user_id=child.id, grade=5,
+                              school_year="2025-2026", status="active")
+    db.add(bucket); db.commit()
+    db.add(Mistake(user_id=child.id, source_type="dictation",
+                   question="听写：苹果", your_answer="苹菓", correct_answer="苹果"))
+    db.commit()
+
+    migrate(db)
+
+    m = db.query(Mistake).filter_by(user_id=child.id).first()
+    assert m.bucket_id == bucket.id
+    # 不应重复建桶
+    buckets = db.query(SchoolYearBucket).filter_by(user_id=child.id).all()
+    assert len(buckets) == 1

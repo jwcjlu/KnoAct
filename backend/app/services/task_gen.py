@@ -10,6 +10,20 @@ from ..models import (
 )
 
 
+def _content_lesson_ids(db: Session, subject: str, document_ids: list[int], up_to_lesson_id: int) -> list[int]:
+    """已学范围内的课。书末「单词列表」只供查阅，不进听写/知识点池，避免和各课生词重复。"""
+    from .pdf_split import is_word_list_title
+    if not document_ids:
+        return []
+    rows = db.query(Lesson.id, Lesson.title).filter(
+        Lesson.subject == subject,
+        Lesson.document_id.in_(document_ids),
+        Lesson.audit_status == "approved",
+        Lesson.id <= up_to_lesson_id,
+    ).all()
+    return [i for i, title in rows if not is_word_list_title(title)]
+
+
 def _current_lesson(db: Session, subject: str, user_id: int):
     """按科返回当前课：只在孩子绑定的教材里选；LearningProgress 匹配 (user_id, subject)
     则用它（须在绑定范围内），否则回退绑定教材该科第一课。未绑定任何教材则返回 None。"""
@@ -49,11 +63,7 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
     now = datetime.utcnow()
 
     bound_doc_ids = [r[0] for r in db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
-    lesson_ids = [r[0] for r in db.query(Lesson.id).filter(
-        Lesson.subject == subject,
-        Lesson.document_id.in_(bound_doc_ids),
-        Lesson.audit_status == "approved",
-        Lesson.id <= lesson.id).all()]
+    lesson_ids = _content_lesson_ids(db, subject, bound_doc_ids, lesson.id)
     if not lesson_ids:
         return None
 
@@ -144,11 +154,7 @@ def _gen_knowledge(db, lesson, user_id, count, bucket_id=None):
     now = datetime.utcnow()
 
     bound_doc_ids = [r[0] for r in db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
-    lesson_ids = [r[0] for r in db.query(Lesson.id).filter(
-        Lesson.subject == subject,
-        Lesson.document_id.in_(bound_doc_ids),
-        Lesson.audit_status == "approved",
-        Lesson.id <= lesson.id).all()]
+    lesson_ids = _content_lesson_ids(db, subject, bound_doc_ids, lesson.id)
     if not lesson_ids:
         return None
 

@@ -76,6 +76,7 @@ let knowledgeRows = [];
 let goalRows = [];
 let reportRows = [];
 let masteryReport = null;
+let answerRecords = [];   // 当天做题明细
 async function loadMasteryReport(){
   if(!uid){ masteryReport = null; return null; }
   const u = uid, b = bucketId;
@@ -102,6 +103,19 @@ let parentTasks = [];      // 当天全部任务（含待审核）
 // 专项训练
 let drillGroups = [];      // [{id, subject, title, source, kind, audit_status, item_count, ai_review}]
 let drillTab = null;       // null | 'create'
+
+// 知识点库 + 训练方案（专项训练的子视图）
+let poolPoints = [];       // [{id, subject, category, content, extra, source}]
+let plans = [];            // [{id, subject, title, point_ids, group_id, status}]
+let poolTab = null;        // null | 'pool' | 'plans'
+let poolSelected = new Set();  // 勾选的知识点 id（组合方案用）
+let poolForm = null;       // null | {mode:'add'} | {mode:'edit', id, subject, category, content, meaning}
+let poolPdfForm = null;    // null | {subject, kind}  上传 PDF 的学科/类型选择
+let planForm = null;       // null | {subject}  新建方案的学科选择
+let poolFolders = [];        // 目录树 [{id,name,subject,parent_id,point_count,children}]
+let poolActiveFolder = null; // 当前筛选目录 id；null=全部
+let poolActiveTag = null;    // 当前筛选标签；null=全部
+let folderForm = null;       // null | {mode:'add'|'rename', id?}  (id=父目录 for add)
 
 // 屏幕时间
 let screenGroups = [];     // [{id,name,kind,daily_limit_seconds}]
@@ -164,10 +178,43 @@ function apiErrorMsg(data, fallback='请求失败'){
   if(data.error) return String(data.error);
   return fallback;
 }
+let _refreshPromise = null;
+async function _refreshAuth(){
+  const rt = getRefreshToken();
+  if(!rt) return false;
+  if(!_refreshPromise){
+    _refreshPromise = (async()=>{
+      try{
+        const r = await fetch(API + '/api/auth/refresh', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({refresh_token: rt}),
+        });
+        if(r.ok){
+          const d = await r.json();
+          if(d && d.access_token){
+            setTokens(d.access_token, d.refresh_token);
+            return true;
+          }
+        }
+      }catch(e){}
+      clearAuthTokens();
+      return false;
+    })().finally(()=>{ _refreshPromise = null; });
+  }
+  return _refreshPromise;
+}
 async function api(path, opts={}){
   const init = {headers: authHeaders(), ...opts};
   if(opts.body) init.body = JSON.stringify(opts.body);
-  const r = await fetch(API + path, init);
+  let r = await fetch(API + path, init);
+  if(r.status === 401 && path !== '/api/auth/refresh' && path !== '/api/auth/login'){
+    const ok = await _refreshAuth();
+    if(ok){
+      init.headers = authHeaders();
+      if(opts.body) init.body = JSON.stringify(opts.body);
+      r = await fetch(API + path, init);
+    }
+  }
   const ct = r.headers.get('content-type')||'';
   return ct.includes('json') ? r.json() : r.text();
 }
@@ -228,7 +275,7 @@ async function loadBuckets(){
 }
 async function reloadChildData(){
   if(parentTab==='目标') await loadGoals();
-  else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport()]);
+  else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport(), loadAnswerRecords()]);
   else if(parentTab==='任务') await loadParentTasks();
   else if(parentTab==='屏幕时间') await Promise.all([loadScreenGroups(), loadScreenUsage()]);
 }
@@ -312,9 +359,9 @@ function renderChildMgmt(){
   const rows = visible.map(c=>{
     const isArchived = c.status === 'archived';
     return `<div class="pdf-row">
-      <div><div class="nm">${escapeAttr(c.name)}${isArchived?' <span style="color:#c05b4a">（已归档）</span>':''}</div>
+      <div class="pdf-info"><div class="nm">${escapeAttr(c.name)}${isArchived?' <span style="color:#c05b4a">（已归档）</span>':''}</div>
         <div class="meta">${c.grade?c.grade+'年级':''}${c.edition?' · '+c.edition:''}</div></div>
-      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+      <div class="pdf-actions">
         <button class="btn-ghost" onclick="editChild(${c.id})">编辑</button>
         <button class="btn-ghost" onclick="openChildDocs(${c.id})">看教材</button>
         ${isArchived
@@ -339,8 +386,8 @@ function renderChildMgmt(){
 function renderChildDocs(){
   if(!childDocs) return '';
   const rows = childDocs.documents.map(d=>`
-    <div class="pdf-row"><div><div class="nm">${escapeAttr(d.filename)}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''}</div></div>
-      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+    <div class="pdf-row"><div class="pdf-info"><div class="nm">${escapeAttr(d.filename)}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''}</div></div>
+      <div class="pdf-actions">
         <button class="btn-ghost" style="color:#c05b4a" onclick="unbindFromChild(${childDocs.child_id}, ${d.id})">解除绑定</button>
       </div></div>`).join('');
   return `<div class="parent-panel" style="grid-column:1/-1">
@@ -402,7 +449,7 @@ function setParentTab(t){
   if(t==='题库管理'){ loadBankList().then(()=>render()); return; }
   if(t==='题目审核台'){ loadReviewQuestions().then(()=>render()); return; }
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
-  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport()]).then(()=>render()); return; }
+  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport(), loadAnswerRecords()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
   if(t==='专项训练'){ loadDrillGroups().then(()=>render()); return; }
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
@@ -432,6 +479,15 @@ async function loadReport(){
   const q = b ? `&bucket_id=${b}` : '';
   const rows = await api(`/api/mistakes/report?user_id=${u}${q}`);
   if(u === uid) reportRows = rows;
+}
+async function loadAnswerRecords(){
+  if(!uid){ answerRecords = []; return; }
+  const u = uid;
+  // 用本地日历日（东八区），勿用 toISOString 的 UTC 日，避免早晚跨日查空
+  const now = new Date();
+  const d = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const r = await api(`/api/answer-records?user_id=${u}&target_date=${d}`);
+  if(u === uid) answerRecords = Array.isArray(r?.records) ? r.records : [];
 }
 async function loadLearningPreferences(){
   if(!uid){ return; }
@@ -988,23 +1044,49 @@ function xkbLevelOptions(depth){
   return nodes;
 }
 function xkbSetLevel(depth, code){
+  // 学科与卷子锁定时不允许改成其它科
+  if(depth === 2 && xkbSubjectLocked()){
+    const bankSubj = xkbBankSubject();
+    const opts = xkbLevelOptions(2);
+    const hit = opts.find(n => String(n.code ?? n.id) === String(code || ''));
+    if(hit && !xkbMatchSubjectNode(hit, bankSubj)){
+      xkbPicker.error = `当前卷子是「${bankSubj}」，学科已锁定，不能改选「${hit.name || ''}」`;
+      paintXkbModal();
+      return;
+    }
+  }
   xkbPicker.sel[depth] = code || '';
   for(let i = depth + 1; i < XKB_LEVEL_LABELS.length; i++) xkbPicker.sel[i] = '';
   xkbPicker.chapters = null;
   xkbPicker.knowledge = [];
   xkbPicker.picked = null;
-  if(xkbPicker.sel[0]) loadXkbChapters();
+  xkbPicker.error = '';
+  if(depth < 2 && xkbSubjectLocked()){
+    // 改学段/年级后自动把学科扳回卷子学科
+    const subjOpts = xkbLevelOptions(2);
+    const bankSubj = xkbBankSubject();
+    const match = subjOpts.find(n => xkbMatchSubjectNode(n, bankSubj));
+    if(match) xkbPicker.sel[2] = String(match.code ?? match.id);
+  }
+  if(xkbPicker.sel[0] && xkbPicker.sel[2]) loadXkbChapters();
   else paintXkbModal();
+}
+function xkbIsKnowledgeId(kid){
+  // getQuestions 只要 hex 知识点 ID；教材章节纯数字编号会回落巨量数学题
+  if(!kid || kid === '0') return false;
+  if(/^\d+$/.test(kid)) return false;
+  return true;
 }
 function xkbWalkChapters(nodes, path, out){
   for(const n of nodes || []){
     if(!n || typeof n !== 'object') continue;
-    const name = (n.name || n.title || '').trim();
-    const kids = n.child || n.children || [];
+    const name = (n.name || n.title || n.knowledgeName || '').trim();
+    const kids = n.child || n.childList || n.children || [];
     const oldId = (n.oldId != null ? n.oldId : n.oldid != null ? n.oldid : n.knowledgeId);
     const kid = oldId != null ? String(oldId).trim() : '';
     const nextPath = name ? [...path, name] : path;
-    if(kid && kid !== '0'){
+    // 只收叶子：父节点 oldId 常无题或与子节点重复
+    if(!kids.length && xkbIsKnowledgeId(kid)){
       out.push({id: kid, name: name || kid, path: nextPath.join(' › ')});
     }
     if(kids.length) xkbWalkChapters(kids, nextPath, out);
@@ -1020,9 +1102,21 @@ function closeXuekubaoPicker(){
   xkbPicker.open = false;
   paintXkbModal();
 }
+function xkbBankSubject(){
+  const bank = bankList.find(b => b.id === bankSelectedId);
+  return ((bank && bank.subject) || '').trim();
+}
+function xkbSubjectLocked(){
+  return !!xkbBankSubject();
+}
+function xkbMatchSubjectNode(n, subj){
+  if(!subj) return false;
+  const name = (n.name || '').trim();
+  return name === subj || name.includes(subj) || subj.includes(name);
+}
 function guessXkbDefaults(){
   const bank = bankList.find(b => b.id === bankSelectedId);
-  const subj = (bank && bank.subject) || '';
+  const subj = xkbBankSubject();
   const grade = bank && bank.grade ? String(bank.grade) : bankFormDefaultGrade();
   const pick = (nodes, pred) => {
     if(!nodes || !nodes.length) return '';
@@ -1039,9 +1133,25 @@ function guessXkbDefaults(){
     (n.name || '').includes(`${['一','二','三','四','五','六','七','八','九'][grade-1] || grade}年级`)
   )) || pick(nodes, () => true);
   nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[1]) || {}).child || [];
-  xkbPicker.sel[2] = pick(nodes, n => subj && (n.name || '').includes(subj)) || pick(nodes, () => true);
+  // 卷子有学科时必须对齐，禁止回落成列表第一项（五年级上首项常是数学）
+  xkbPicker.sel[2] = pick(nodes, n => xkbMatchSubjectNode(n, subj));
+  if(!xkbPicker.sel[2] && !subj) xkbPicker.sel[2] = pick(nodes, () => true);
   nodes = (nodes.find(n => String(n.code ?? n.id) === xkbPicker.sel[2]) || {}).child || [];
   xkbPicker.sel[3] = nodes.length === 1 ? String(nodes[0].code ?? nodes[0].id) : pick(nodes, () => true);
+}
+function xkbSelectedSubjectName(){
+  const opts = xkbLevelOptions(2);
+  const hit = opts.find(n => String(n.code ?? n.id) === String(xkbPicker.sel[2] || ''));
+  return ((hit && hit.name) || '').trim();
+}
+function xkbAssertSubjectAligned(){
+  const bankSubj = xkbBankSubject();
+  if(!bankSubj) return '';
+  const pickSubj = xkbSelectedSubjectName();
+  if(pickSubj && pickSubj !== bankSubj && !pickSubj.includes(bankSubj) && !bankSubj.includes(pickSubj)){
+    return `当前卷子是「${bankSubj}」，请把上方「学科」选成「${bankSubj}」再拉取（不要选${pickSubj}）`;
+  }
+  return '';
 }
 function xkbPickKnowledge(id){
   xkbPicker.picked = id;
@@ -1067,10 +1177,10 @@ async function openXuekubaoPicker(){
 async function loadXkbChapters(silent){
   if(!xkbPicker.sel[0]) return;
   const [pharse_id, grade_id, subject_id, edition_id] = xkbPicker.sel;
-  // 只选学段会拉取全量目录、后端必超时：需先选到年级和学科
-  if(!grade_id || !subject_id){
+  // 必须选学科：knowledgeApi 按学科返回知识点树（语文不能用 chapterApi 的单元数字 ID）
+  if(!subject_id){
     if(!silent){
-      xkbPicker.error = '请先选好「年级」和「学科」（仅选学段会拉取全量目录导致超时）';
+      xkbPicker.error = '请先选好「学科」再加载知识点';
       xkbPicker.loading = false;
       paintXkbModal();
     }
@@ -1078,7 +1188,7 @@ async function loadXkbChapters(silent){
   }
   if(!silent){ xkbPicker.loading = true; paintXkbModal(); }
   try{
-    const r = await api('/api/xuekubao/chapters', {method:'POST', body:{
+    const r = await api('/api/xuekubao/knowledge', {method:'POST', body:{
       pharse_id, subject_id, grade_id, edition_id,
     }});
     if(r && r.detail) throw new Error(r.detail);
@@ -1090,8 +1200,11 @@ async function loadXkbChapters(silent){
     xkbPicker.knowledge = out.filter(k => { if(seen.has(k.id)) return false; seen.add(k.id); return true; });
     xkbPicker.chapters = true;
     if(xkbPicker.knowledge.length && !xkbPicker.picked) xkbPicker.picked = xkbPicker.knowledge[0].id;
+    if(!xkbPicker.knowledge.length){
+      xkbPicker.error = '该学科下未解析到可用知识点（需要 hex 知识点 ID）';
+    }
   }catch(e){
-    xkbPicker.error = (e && e.message) || '章节加载失败';
+    xkbPicker.error = (e && e.message) || '知识点加载失败';
     xkbPicker.knowledge = [];
   }
   xkbPicker.loading = false;
@@ -1165,28 +1278,36 @@ function paintXkbModal(){
   </div>`;
     return;
   }
+  const bankSubj = xkbBankSubject();
   const cascade = XKB_LEVEL_LABELS.map((label, depth) => {
-    const opts = xkbLevelOptions(depth);
-    const disabled = depth > 0 && !xkbPicker.sel[depth - 1];
-    const options = `<option value="">${disabled ? '请先选上一级' : '请选择'}</option>` +
+    let opts = xkbLevelOptions(depth);
+    // 学科与卷子对齐：只展示对应学科，避免语文卷误选英语
+    if(depth === 2 && bankSubj){
+      const matched = opts.filter(n => xkbMatchSubjectNode(n, bankSubj));
+      if(matched.length) opts = matched;
+    }
+    const lockedSubj = depth === 2 && xkbSubjectLocked() && opts.length <= 1;
+    const disabled = (depth > 0 && !xkbPicker.sel[depth - 1]) || lockedSubj;
+    const options = `<option value="">${disabled && !lockedSubj ? '请先选上一级' : (lockedSubj ? '' : '请选择')}</option>` +
       opts.map(n => {
         const code = String(n.code ?? n.id);
         const sel = xkbPicker.sel[depth] === code ? ' selected' : '';
         return `<option value="${escapeAttr(code)}"${sel}>${escapeAttr(n.name || code)}</option>`;
       }).join('');
-    return `<label><span>${label}</span><select ${disabled?'disabled':''} onchange="xkbSetLevel(${depth}, this.value)">${options}</select></label>`;
+    const tip = lockedSubj ? ` <span style="color:#8e9691;font-weight:400">（与卷子一致）</span>` : '';
+    return `<label><span>${label}${tip}</span><select ${disabled?'disabled':''} onchange="xkbSetLevel(${depth}, this.value)">${options}</select></label>`;
   }).join('');
   const list = xkbFilteredKnowledge();
   const kps = list.length ? list.map(k => `
     <button type="button" class="xkb-kp-item ${xkbPicker.picked===k.id?'on':''}" onclick='xkbPickKnowledge(${JSON.stringify(k.id)})'>
       <span>${escapeAttr(k.name)}</span>
       <span class="xkb-kp-path">${escapeAttr(k.path)}</span>
-    </button>`).join('') : `<div style="padding:16px;color:#8e9691;font-size:13px">${xkbPicker.chapters ? '该教材下未解析到知识点' : '选好教材后自动加载章节'}</div>`;
+    </button>`).join('') : `<div style="padding:16px;color:#8e9691;font-size:13px">${xkbPicker.chapters ? '该学科下未解析到知识点' : '选好学科后自动加载知识点'}</div>`;
   const picked = xkbPicker.knowledge.find(k => k.id === xkbPicker.picked);
   el.innerHTML = `<div class="xkb-panel" role="dialog">
     <div class="hd">
       <h4>从学库宝按知识点拉题</h4>
-      <p>先选学段与教材，再点选知识点（无需手工填 ID）</p>
+      <p>${bankSubj ? `当前卷子学科「${escapeAttr(bankSubj)}」，知识点将按该学科加载` : '先选学段与学科，再点选知识点'}</p>
     </div>
     <div class="bd">
       ${xkbPicker.error ? `<div style="color:#c05b4a;font-size:13px;margin-bottom:10px">${escapeAttr(xkbPicker.error)}</div>` : ''}
@@ -1208,6 +1329,12 @@ function paintXkbModal(){
 }
 async function loadXuekubaoPreview(){
   if(!bankSelectedId || !xkbPicker.picked) return;
+  const mis = xkbAssertSubjectAligned();
+  if(mis){
+    xkbPicker.error = mis;
+    paintXkbModal();
+    return;
+  }
   xkbPicker.previewLoading = true;
   xkbPicker.error = '';
   paintXkbModal();
@@ -1729,9 +1856,9 @@ async function rejectFamilyRequest(id){
 function renderFamilyBindPanel(){
   const reqRows = familyRequests.map(r=>`
     <div class="pdf-row">
-      <div><div class="nm">${escapeAttr(r.child_name || r.child_login_name || '孩子')}</div>
+      <div class="pdf-info"><div class="nm">${escapeAttr(r.child_name || r.child_login_name || '孩子')}</div>
         <div class="meta">登录名：${escapeAttr(r.child_login_name || '—')}</div></div>
-      <div style="display:flex;gap:6px;margin-left:auto">
+      <div class="pdf-actions">
         <button class="btn-primary" style="padding:8px 14px" onclick="approveFamilyRequest(${r.id})">通过</button>
         <button class="btn-ghost" style="color:#c05b4a" onclick="rejectFamilyRequest(${r.id})">拒绝</button>
       </div>
@@ -1779,8 +1906,8 @@ function renderParent(){
   }
   return `<div class="parent-banner">
     <div class="l"><div class="ic">${icon('star',20)}</div><div><div class="t">家长端 · 管理学习目标与规则</div><div class="s">在这里录入教材、设定目标、查看薄弱报告</div></div></div>
-    <div class="parent-tabs-narrow" style="gap:8px;background:#f2f4f1;border-radius:12px;padding:4px">${tabs}</div>
     <div id="child-select-host">${childSelectHtml()}</div>
+    <div class="parent-tabs-narrow">${tabs}</div>
   </div>${body}`;
 }
 
@@ -1818,10 +1945,11 @@ function renderPdfTab(){
   const rows = pdfDocs.map(d=>`
     <div class="pdf-row">
       <div class="ic">${icon('book',22)}</div>
-      <div><div class="nm">${d.filename}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''} · ${d.lesson_count} 课 · 已审核 ${d.audited_count} 课</div></div>
-      <div style="display:flex;gap:6px;margin-left:auto">
+      <div class="pdf-info"><div class="nm">${d.filename}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''} · ${d.lesson_count} 课 · 已审核 ${d.audited_count} 课</div></div>
+      <div class="pdf-actions">
         <button class="btn-ghost" onclick="openDocBind(${d.id})">绑定孩子</button>
         <button class="btn-ghost" onclick="openDoc(${d.id})">查看/审核</button>
+        <button class="btn-ghost" onclick="openAudioPanel(${d.id})">教材音频</button>
         <button class="btn-ghost" onclick="resplitDoc(${d.id})">重新拆分</button>
         <button class="btn-ghost" style="color:#c05b4a" onclick="removeDoc(${d.id})">移除</button>
       </div>
@@ -1829,6 +1957,7 @@ function renderPdfTab(){
   const empty = pdfDocs.length===0 ? `<div style="text-align:center;padding:32px 0;color:#8e9691">还没有上传教材，点击下方按钮开始</div>` : rows;
   return `<div class="parent-grid">
     ${renderDocBind()}
+    ${renderAudioPanel()}
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('book',20)}</div><div><h3>教材管理</h3><div class="sub">上传 PDF，自动拆课；审核通过的课程进入孩子词库</div></div></div>
       <div class="bd">
@@ -1839,9 +1968,379 @@ function renderPdfTab(){
   </div>`;
 }
 
+// ---- 教材音频 ----
+let audioDocId = null;
+let audioRows = [];
+let audioLessons = [];
+
+async function openAudioPanel(docId){
+  audioDocId = docId;
+  audioRows = await api(`/api/lesson-audio?document_id=${docId}`);
+  if(!Array.isArray(audioRows)) audioRows = [];
+  audioLessons = await api(`/api/pdf/documents/${docId}/lessons`);
+  if(!Array.isArray(audioLessons)) audioLessons = [];
+  render();
+}
+
+function lessonTitle(lessonId){
+  const l = (audioLessons||[]).find(x=>x.id===lessonId);
+  return l ? l.title : null;
+}
+
+function renderAudioPanel(){
+  if(audioDocId===null) return '';
+  const rows = (audioRows||[]).map(r=>{
+    const lt = lessonTitle(r.lesson_id);
+    const opts = ['<option value="">未绑定</option>'].concat(
+      (audioLessons||[]).map(l=>`<option value="${l.id}" ${l.id===r.lesson_id?'selected':''}>${escapeAttr(l.title)}</option>`)
+    ).join('');
+    return `<div class="pdf-row">
+      <div class="ic">${icon('headphones',22)}</div>
+      <div class="pdf-info">
+        <div class="nm">${escapeAttr(r.unit_label||'(未命名)')}</div>
+        <div class="meta">${lt?('自动匹配：'+escapeAttr(lt)):'未绑定课程'} · ${(r.marks||[]).length} 个标记</div>
+      </div>
+      <div class="pdf-actions">
+        <select onchange="setAudioLesson(${r.id}, this)">
+          ${opts}
+        </select>
+        <button class="btn-ghost" onclick="renderMarkTool(${r.id})">标记</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="parent-panel" style="grid-column:1/-1">
+    <div class="head"><div class="ic blue">${icon('headphones',20)}</div><div><h3>教材音频</h3><div class="sub">上传教材配套真人音频，标记每课起点</div></div>
+      <button class="btn-ghost" style="margin-left:auto" onclick="audioDocId=null;render()">关闭</button></div>
+    <div class="bd">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+        <input type="file" id="audioFile" accept="audio/mpeg,.mp3" style="font-size:13px">
+        <button class="btn-primary" onclick="uploadLessonAudio()">上传</button>
+      </div>
+      <div class="pdf-list">${rows || '<div style="color:#8e9691;padding:8px 0">尚未上传音频</div>'}</div>
+    </div>
+    ${renderMarkToolOverlay()}
+  </div>`;
+}
+
+async function uploadLessonAudio(){
+  const input = document.getElementById('audioFile');
+  if(!input || !input.files || !input.files.length){
+    toast('请先选择 MP3 文件');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  fd.append('document_id', String(audioDocId));
+  toast('正在上传…');
+  const r = await apiForm('/api/lesson-audio', fd);
+  if(r && r.id){
+    toast('上传成功');
+    audioRows = await api(`/api/lesson-audio?document_id=${audioDocId}`);
+    if(!Array.isArray(audioRows)) audioRows = [];
+    render();
+  } else {
+    toast('上传失败：' + (r && (r.error||r.detail) ? (r.error||r.detail) : '未知错误'));
+  }
+}
+
+async function setAudioLesson(audioId, select){
+  const val = select.value === '' ? null : Number(select.value);
+  await api(`/api/lesson-audio/${audioId}`, {method:'PATCH', body:{lesson_id: val}});
+  audioRows = await api(`/api/lesson-audio?document_id=${audioDocId}`);
+  if(!Array.isArray(audioRows)) audioRows = [];
+  render();
+}
+
+// ---- 波形标记工具 ----
+let markToolAudioId = null;
+let markCtx = null;         // { audio, ctx, canvas, peaks, marks, playing }
+let markWavePeaks = [];
+
+function renderMarkToolOverlay(){
+  if(markToolAudioId===null) return '';
+  return `<div class="xkb-modal" style="display:flex">
+    <div class="xkb-panel">
+      <div class="hd"><h4>标记课程起点</h4><p>拖动波形定位，为每课记录起点时间</p></div>
+      <div class="bd" id="markToolBody"></div>
+    </div>
+  </div>`;
+}
+
+function openMarkTool(audioId){
+  markToolAudioId = audioId;
+  markCtx = null;
+  markWavePeaks = [];
+  render();
+  // 渲染完成后挂载音频/波形
+  setTimeout(()=>mountMarkTool(audioId), 0);
+}
+
+function closeMarkTool(){
+  if(markCtx && markCtx._cleanup) markCtx._cleanup();
+  markToolAudioId = null;
+  markCtx = null;
+  markWavePeaks = [];
+  render();
+}
+
+function markRow(){
+  const r = (audioRows||[]).find(x=>x.id===markToolAudioId);
+  return r;
+}
+
+async function mountMarkTool(audioId){
+  const body = document.getElementById('markToolBody');
+  if(!body) return;
+  const r = markRow();
+  if(!r){
+    body.innerHTML = '<div style="color:#8e9691">音频数据未找到</div>';
+    return;
+  }
+  const src = API + '/' + r.audio_path;
+  body.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <button class="btn-ghost" onclick="closeMarkTool()">关闭</button>
+    </div>
+    <audio id="markAudio" src="${escapeAttr(src)}" controls style="width:100%"></audio>
+    <div id="markWaveWrap" style="margin:12px 0;position:relative">
+      <canvas id="markWave" style="width:100%;height:96px;display:block;border-radius:10px;background:var(--line3, #eef1ee);cursor:pointer"></canvas>
+      <div id="markCursor" style="position:absolute;top:0;bottom:0;width:2px;background:#c05b4a;pointer-events:none;display:none"></div>
+    </div>
+    <div id="markTime" style="font-size:13px;color:var(--gray2,#8e9691);margin-bottom:12px">0.00s</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="markLabel" placeholder="如：Unit 1" style="border:1px solid var(--line3,#d7ddd8);border-radius:10px;padding:8px 12px;font-size:13px;flex:1">
+      <button class="btn-primary" onclick="addMark()">设为起点</button>
+    </div>
+    <div id="markList"></div>`;
+  const audio = document.getElementById('markAudio');
+  const canvas = document.getElementById('markWave');
+  const cursor = document.getElementById('markCursor');
+  const timeEl = document.getElementById('markTime');
+  if(!audio || !canvas) return;
+
+  markCtx = { audio, canvas, cursor, timeEl, marks: (r.marks||[]).slice(), playing:false };
+
+  // 波形：decode 失败则回退进度条
+  let decoded = false;
+  try{
+    const buf = await fetch(src).then(res=>res.arrayBuffer());
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    const audioBuf = await ac.decodeAudioData(buf);
+    const peaks = computePeaks(audioBuf);
+    markWavePeaks = peaks;
+    drawWaveform(canvas, peaks);
+    ac.close && ac.close();
+    decoded = true;
+  }catch(e){
+    markWavePeaks = [];
+    drawProgressFallback(canvas);
+  }
+
+  // 播放进度 / 时间
+  audio.addEventListener('timeupdate', ()=>{
+    if(!markCtx) return;
+    if(markCtx.timeEl) markCtx.timeEl.textContent = audio.currentTime.toFixed(2)+'s';
+    if(decoded && markWavePeaks.length) drawWaveform(canvas, markWavePeaks, audio.currentTime/audio.duration);
+  });
+
+  // 拖拽 seek
+  const seekRatio = (clientX)=>{
+    const rect = canvas.getBoundingClientRect();
+    let ratio = (clientX - rect.left)/rect.width;
+    ratio = Math.max(0, Math.min(1, ratio));
+    return ratio;
+  };
+  let dragging = false;
+  canvas.addEventListener('mousedown', (e)=>{
+    dragging = true;
+    seek(e);
+  });
+  const onMove = (e)=>{
+    if(dragging && markCtx && markCtx.canvas) seek(e);
+  };
+  const onUp = ()=>{ dragging = false; };
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  markCtx._cleanup = ()=>{
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    markCtx._cleanup = null;
+  };
+  function seek(e){
+    if(!markCtx || !markCtx.audio) return;
+    const ratio = seekRatio(e.clientX);
+    if(markCtx.audio.duration && isFinite(markCtx.audio.duration)){
+      markCtx.audio.currentTime = ratio * markCtx.audio.duration;
+    }
+    if(markCtx.timeEl) markCtx.timeEl.textContent = markCtx.audio.currentTime.toFixed(2)+'s';
+    if(markCtx.cursor){
+      markCtx.cursor.style.display = 'block';
+      markCtx.cursor.style.left = (ratio*100)+'%';
+    }
+  }
+
+  renderMarkList();
+}
+
+function computePeaks(audioBuf){
+  const ch = audioBuf.getChannelData(0);
+  const step = Math.max(1, Math.floor(ch.length / 600));
+  const peaks = [];
+  for(let i=0;i<ch.length;i+=step){
+    let max = 0;
+    for(let j=i;j<i+step && j<ch.length;j++){
+      const v = Math.abs(ch[j]);
+      if(v>max) max = v;
+    }
+    peaks.push(max);
+  }
+  return peaks;
+}
+
+function drawWaveform(canvas, peaks, progress){
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.clientWidth || 600;
+  const h = canvas.height = canvas.clientHeight || 96;
+  ctx.clearRect(0,0,w,h);
+  const barW = w/peaks.length;
+  const played = progress===undefined ? 1 : progress;
+  for(let i=0;i<peaks.length;i++){
+    const bh = Math.max(1, peaks[i]*h*0.9);
+    const x = i*barW;
+    ctx.fillStyle = (progress===undefined || (i/peaks.length)<=played) ? '#4a8ef0' : '#c9d2c9';
+    ctx.fillRect(x, (h-bh)/2, Math.max(1,barW-1), bh);
+  }
+}
+
+function drawProgressFallback(canvas){
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.clientWidth || 600;
+  const h = canvas.height = canvas.clientHeight || 96;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = '#4a8ef0';
+  ctx.fillRect(0, h/2-3, w, 6);
+}
+
+function renderMarkList(){
+  const list = document.getElementById('markList');
+  if(!list || !markCtx) return;
+  const items = markCtx.marks.map((m,i)=>`
+    <div class="pdf-row">
+      <div class="ic">${icon('clock',18)}</div>
+      <div class="pdf-info"><div class="nm">${escapeAttr(m.label||('第'+(i+1)+'课'))}</div><div class="meta">${Number(m.start_sec).toFixed(2)}s</div></div>
+      <div class="pdf-actions">
+        <button class="btn-ghost" onclick="seekToMark(${m.start_sec})">跳转</button>
+        <button class="btn-ghost" style="color:#c05b4a" onclick="removeMark(${i})">删除</button>
+      </div>
+    </div>`).join('');
+  list.innerHTML = items || '<div style="color:#8e9691;padding:8px 0">尚无标记，播放到每课起点时点击「设为起点」</div>';
+}
+
+async function addMark(){
+  if(!markCtx || !markCtx.audio) return;
+  const labelInput = document.getElementById('markLabel');
+  const label = (labelInput && labelInput.value.trim()) ? labelInput.value.trim() : ('第'+(markCtx.marks.length+1)+'课');
+  markCtx.marks.push({label, start_sec: markCtx.audio.currentTime});
+  const r = await api(`/api/lesson-audio/${markToolAudioId}/marks`, {method:'PUT', body:{marks: markCtx.marks}});
+  if(r && r.marks) markCtx.marks = r.marks;
+  // 同步回 audioRows 供返回面板显示
+  const row = markRow();
+  if(row) row.marks = markCtx.marks;
+  if(labelInput) labelInput.value = '';
+  renderMarkList();
+}
+
+async function removeMark(idx){
+  if(!markCtx) return;
+  markCtx.marks.splice(idx,1);
+  const r = await api(`/api/lesson-audio/${markToolAudioId}/marks`, {method:'PUT', body:{marks: markCtx.marks}});
+  if(r && r.marks) markCtx.marks = r.marks;
+  const row = markRow();
+  if(row) row.marks = markCtx.marks;
+  renderMarkList();
+}
+
+function seekToMark(sec){
+  if(!markCtx || !markCtx.audio) return;
+  markCtx.audio.currentTime = Number(sec);
+  markCtx.audio.play && markCtx.audio.play();
+}
+
 let docLessons = [];
+let lessonEdit = null; // {id, title, subject, words:[{id,word,extra}], points:[{id,content,category}]}
+
+function snapshotLessonEdit(){
+  const root = document.getElementById('lesEdit');
+  if(!root || !lessonEdit || Number(root.dataset.id) !== lessonEdit.id) return;
+  const title = document.getElementById('lesTitle');
+  if(title) lessonEdit.title = title.value;
+  lessonEdit.words.forEach((w,i)=>{
+    const a = document.getElementById('lesWord'+i);
+    const b = document.getElementById('lesExtra'+i);
+    if(a) w.word = a.value;
+    if(b) w.extra = b.value;
+  });
+  lessonEdit.points.forEach((p,i)=>{
+    const a = document.getElementById('lesPoint'+i);
+    if(a) p.content = a.value;
+  });
+}
+function startLessonEdit(id){
+  snapshotLessonEdit();
+  const l = docLessons.find(x=>x.id===id);
+  if(!l) return;
+  lessonEdit = {
+    id: l.id,
+    subject: l.subject,
+    title: l.title || '',
+    words: (l.words||[]).map(w=>({id:w.id, word:w.word||'', extra:w.extra||''})),
+    points: (l.points||[]).map(p=>({id:p.id, content:p.content||'', category:p.category||'本课'})),
+  };
+  render();
+}
+function cancelLessonEdit(){ lessonEdit = null; render(); }
+function addLessonWord(){
+  snapshotLessonEdit();
+  lessonEdit.words.push({id:null, word:'', extra:''});
+  render();
+}
+function removeLessonWord(i){
+  snapshotLessonEdit();
+  lessonEdit.words.splice(i, 1);
+  render();
+}
+function addLessonPoint(){
+  snapshotLessonEdit();
+  lessonEdit.points.push({id:null, content:'', category:'本课'});
+  render();
+}
+function removeLessonPoint(i){
+  snapshotLessonEdit();
+  lessonEdit.points.splice(i, 1);
+  render();
+}
+async function saveLessonEdit(){
+  snapshotLessonEdit();
+  if(!lessonEdit) return;
+  const title = (lessonEdit.title||'').trim();
+  if(!title){ toast('课名不能为空'); return; }
+  const words = lessonEdit.words
+    .map(w=>({id:w.id, word:(w.word||'').trim(), extra:(w.extra||'').trim()}))
+    .filter(w=>w.word);
+  const points = lessonEdit.points
+    .map(p=>({id:p.id, content:(p.content||'').trim(), category:p.category||'本课'}))
+    .filter(p=>p.content);
+  const r = await api(`/api/pdf/lessons/${lessonEdit.id}/content`, {method:'PUT', body:{title, words, points}});
+  if(!r || r.error){ toast(apiErrorMsg(r, '保存失败')); return; }
+  lessonEdit = null;
+  docLessons = await api(`/api/pdf/documents/${confirmDocId}/lessons`);
+  toast('已保存');
+  render();
+}
 async function openDoc(id){
   confirmDocId = id;
+  lessonEdit = null;
   docLessons = await api(`/api/pdf/documents/${id}/lessons`);
   pdfTab='confirm'; render();
 }
@@ -1890,42 +2389,103 @@ async function pollExtract(){
   toast('提取仍在进行，稍后可重新进入教材查看');
 }
 async function auditLesson(id, action){
+  snapshotLessonEdit();
   const fd = new FormData();
   fd.append('action', action);
   await apiForm(`/api/pdf/lessons/${id}/audit`, fd);
   docLessons = await api(`/api/pdf/documents/${confirmDocId}/lessons`);
-  toast(action==='通过'?'已审核通过、入库':'已驳回');
+  toast(action==='通过'?'已审核通过、入库':action==='撤回'?'已撤回审核':'已驳回');
   render();
+}
+function isWordListTitle(title){
+  const t = String(title||'').trim().toLowerCase();
+  return t === 'word list' || t === '单词列表';
+}
+function renderWordList(words){
+  const groups = [];
+  for(const w of words||[]){
+    const m = /^(Unit\s*\d+)\s*·\s*([\s\S]*)$/.exec(w.extra||'');
+    const unit = m ? m[1] : '其他';
+    const gloss = m ? m[2] : (w.extra||'');
+    let g = groups.find(x=>x.unit===unit);
+    if(!g){ g = {unit, items:[]}; groups.push(g); }
+    g.items.push({word:w.word, gloss});
+  }
+  if(!groups.length) return '<span style="font-size:12px;color:var(--gray3)">（待提取）</span>';
+  return `<div class="wl-block">${groups.map(g=>`
+    <div class="wl-unit">${escapeAttr(g.unit)}</div>
+    <div class="wl-grid">${g.items.map(it=>`<div class="wl-item"><b>${escapeAttr(it.word)}</b><span>${escapeAttr(it.gloss)}</span></div>`).join('')}</div>
+  `).join('')}</div>`;
 }
 function renderLessonConfirm(){
   const auditBadge = a => a==='approved'?`<span class="st-badge" style="background:var(--green-soft);color:var(--green)">已通过</span>`
     : a==='rejected'?`<span class="st-badge" style="background:#fff3f0;color:#c05b4a">已驳回</span>`
     : `<span class="st-badge" style="background:var(--orange-soft);color:var(--orange2)">待审核</span>`;
-  const items = docLessons.map(l=>`
-    <div class="lc-item">
+  const extraPh = s => s==='英语'?'释义':(s==='数学'?'说明':'拼音 / 释义');
+  const viewBlock = l => `
       <div class="top">
-        <span class="ttl">${l.title}</span>
+        <span class="ttl">${escapeAttr(l.title)}</span>
         <span class="pg">第 ${l.start_page}–${l.end_page} 页</span>
         ${auditBadge(l.audit_status)}
       </div>
       <div class="extract">
-        <div class="ex-row"><span class="ex-lbl">生词表</span><div class="ex-chips">${l.words.map(w=>`<span class="kw-chip">${w.word}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>
-        <div class="ex-row"><span class="ex-lbl">知识点</span><div class="ex-chips">${l.points.map(p=>`<span class="kw-chip" style="background:var(--purple-soft);color:var(--purple)">${p.content}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>
+        ${isWordListTitle(l.title)
+          ? `<div class="ex-row"><span class="ex-lbl">单词</span><div class="ex-chips" style="display:block">${renderWordList(l.words)}</div></div>`
+          : `<div class="ex-row"><span class="ex-lbl">生词表</span><div class="ex-chips">${l.words.map(w=>`<span class="kw-chip">${escapeAttr(w.word)}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>
+             <div class="ex-row"><span class="ex-lbl">知识点</span><div class="ex-chips">${l.points.map(p=>`<span class="kw-chip" style="background:var(--purple-soft);color:var(--purple)">${escapeAttr(p.content)}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>`}
+      </div>`;
+  const editBlock = l => {
+    const e = lessonEdit;
+    const words = e.words.map((w,i)=>`
+      <div class="les-line">
+        <input class="w" id="lesWord${i}" value="${escapeAttr(w.word)}" placeholder="生词">
+        <input class="x" id="lesExtra${i}" value="${escapeAttr(w.extra)}" placeholder="${extraPh(e.subject)}">
+        <button type="button" class="del" onclick="removeLessonWord(${i})">删除</button>
+      </div>`).join('');
+    const points = e.points.map((p,i)=>`
+      <div class="les-line">
+        <input id="lesPoint${i}" value="${escapeAttr(p.content)}" placeholder="知识点">
+        <button type="button" class="del" onclick="removeLessonPoint(${i})">删除</button>
+      </div>`).join('');
+    return `
+      <div class="top">
+        <span class="pg">第 ${l.start_page}–${l.end_page} 页</span>
+        ${auditBadge(l.audit_status)}
       </div>
+      <div class="les-edit" id="lesEdit" data-id="${e.id}">
+        <input class="ttl-input" id="lesTitle" value="${escapeAttr(e.title)}" placeholder="课名">
+        <div class="ex-row"><span class="ex-lbl">生词表</span><div style="flex:1">
+          ${words || '<div style="font-size:12px;color:var(--gray3);margin-bottom:6px">还没有生词</div>'}
+          <button type="button" class="kw-chip-add les-add" onclick="addLessonWord()">添加生词</button>
+        </div></div>
+        <div class="ex-row"><span class="ex-lbl">知识点</span><div style="flex:1">
+          ${points || '<div style="font-size:12px;color:var(--gray3);margin-bottom:6px">还没有知识点</div>'}
+          <button type="button" class="kw-chip-add les-add" onclick="addLessonPoint()">添加知识点</button>
+        </div></div>
+      </div>`;
+  };
+  const items = docLessons.map(l=>{
+    const editing = lessonEdit && lessonEdit.id===l.id;
+    return `
+    <div class="lc-item">
+      ${editing ? editBlock(l) : viewBlock(l)}
       <div class="ex-actions">
-        <button class="btn-ghost" onclick="toast('可编辑生词与知识点')">编辑</button>
-        ${l.extract_status!=='done'?`<button class="btn-primary" onclick="doExtract()">提取生词/知识点</button>`:''}
+        ${editing
+          ? `<button class="btn-ghost" onclick="cancelLessonEdit()">取消</button><button class="btn-primary" onclick="saveLessonEdit()">保存</button>`
+          : `<button class="btn-ghost" onclick="startLessonEdit(${l.id})">编辑</button>`}
+        ${!editing && l.extract_status!=='done'?`<button class="btn-primary" onclick="doExtract()">提取生词/知识点</button>`:''}
         ${l.audit_status==='pending'?`<button class="btn-ghost" style="color:#c05b4a" onclick="auditLesson(${l.id},'驳回')">驳回</button><button class="btn-primary" onclick="auditLesson(${l.id},'通过')">审核通过</button>`
           : l.audit_status==='rejected'?`<button class="btn-primary" onclick="auditLesson(${l.id},'通过')">重新审核</button>`
-          : `<button class="btn-ghost" onclick="toast('已审核，可重新编辑后再次审核')">重新审核</button>`}
+          : `<button class="btn-ghost" onclick="auditLesson(${l.id},'撤回')">撤回审核</button>`}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return `<div class="parent-grid">
     <div class="parent-panel" style="grid-column:1/-1">
-      <div class="head"><div class="ic blue">${icon('brain',20)}</div><div><h3>拆课结果 · 逐课审核</h3><div class="sub">先提取，再审核；审核通过后课程生词进入孩子听写词库</div></div></div>
+      <div class="head"><div class="ic blue">${icon('brain',20)}</div><div><h3>拆课结果 · 逐课审核</h3><div class="sub">先提取，再审核；审核通过后课程生词进入孩子听写词库。编辑可改课名、生词释义和知识点</div></div></div>
       <div class="bd"><div class="lesson-confirm-list">${items}</div></div>
     </div>
-    <div style="grid-column:1/-1"><span class="pdf-back" onclick="pdfTab=null;render()">${icon('arrow',14)} 返回教材列表</span></div>
+    <div style="grid-column:1/-1"><span class="pdf-back" onclick="pdfTab=null;lessonEdit=null;render()">${icon('arrow',14)} 返回教材列表</span></div>
   </div>`;
 }
 async function uploadPdf(input){
@@ -2081,15 +2641,53 @@ function renderReportTab(){
           <span style="font-size:13px;color:var(--gray2)">已掌握 <b style="color:var(--green2)">${masteryReport?.mastered||0}</b> ·
           薄弱 <b style="color:var(--orange2)">${masteryReport?.weak||0}</b> · 共 ${masteryReport?.total||0}</span>
         </div>
-        ${(masteryReport?.rows||[]).map(r=>`
-          <div class="weak-row">
-            <span class="w-name">${escapeAttr(r.category)} · ${escapeAttr(r.title)}</span>
-            <div class="w-bar"><div class="w-fill" style="width:${Math.round(r.mastery*100)}%;background:${r.mastered?'var(--green2)':'var(--orange2)'}"></div></div>
-            <span class="w-val">${r.mastered?'✓ ':''}${Math.round(r.mastery*100)}%</span>
-          </div>`).join('') || '<p style="font-size:13px;color:var(--gray2)">暂无掌握度记录</p>'}
+        <div class="mastery-list">${(masteryReport?.rows||[]).map(r=>`
+          <div class="mastery-row">
+            <div class="m-head">
+              <span class="m-name" title="${escapeAttr(r.category)} · ${escapeAttr(r.title)}">${escapeAttr(r.category)} · ${escapeAttr(r.title)}</span>
+              <span class="m-val" style="color:${r.mastered?'var(--green2)':'var(--orange2)'}">${r.mastered?'✓ ':''}${Math.round(r.mastery*100)}%</span>
+            </div>
+            <div class="m-bar"><div class="m-fill" style="width:${Math.round(r.mastery*100)}%;background:${r.mastered?'var(--green2)':'var(--orange2)'}"></div></div>
+          </div>`).join('') || '<p style="font-size:13px;color:var(--gray2)">暂无掌握度记录</p>'}</div>
       </div>
     </div>
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('list',20)}</div>
+        <div><h3>当天做题明细</h3><div class="sub">按科目/模块分组，逐题查看题目、孩子答案与标准答案</div></div></div>
+      <div class="bd">${renderAnswerRecords()}</div>
+    </div>
   </div>`;
+}
+function renderAnswerRecords(){
+  if(!answerRecords.length) return '<p style="font-size:13px;color:var(--gray2)">今天还没有做题记录</p>';
+  const groups = {};
+  for(const r of answerRecords){
+    const s = r.subject || '其他';
+    const m = r.module || '其他';
+    (groups[s] ??= {})[m] ??= [];
+    groups[s][m].push(r);
+  }
+  const MODULE_LABEL = {dictation:'听写',reading:'阅读',listening:'听力',quiz:'边读边问',drill:'专项训练',practice:'题库练习',knowledge:'基础知识',math:'数学练习'};
+  return Object.entries(groups).map(([subject, modules])=>`
+    <div style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:700;color:var(--ink2);margin-bottom:10px">${escapeAttr(subject)}</div>
+      ${Object.entries(modules).map(([module, rs])=>`
+        <div style="margin-bottom:12px">
+          <div style="font-size:13px;font-weight:600;color:var(--gray2);margin-bottom:8px">${MODULE_LABEL[module]||module} · ${rs.length} 题</div>
+          ${rs.map((r)=>`
+            <div class="answer-rec">
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <span style="color:${r.is_correct?'var(--green2)':'var(--orange2)'};font-weight:700;flex-shrink:0">${r.is_correct?'✓':'✗'}</span>
+                <div class="ar-body">
+                  <div class="ar-q">${escapeAttr(r.question)}</div>
+                  ${r.student_answer?`<div class="ar-meta">你的答案：${escapeAttr(r.student_answer)}</div>`:''}
+                  <div class="ar-meta">标准答案：${escapeAttr(r.correct_answer)}</div>
+                  ${r.duration_ms?`<div class="ar-meta" style="color:#8e9691">${Math.round(r.duration_ms/1000)}s</div>`:''}
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>`).join('');
 }
 
 // ---- 规则 ----
@@ -2970,7 +3568,423 @@ async function loadDrillGroups(){
   if(!Array.isArray(drillGroups)) drillGroups = [];
 }
 
+// ===== 知识点库 + 训练方案（专项训练子视图） =====
+async function loadPool(){ poolPoints = await api('/api/knowledge-pool'); if(!Array.isArray(poolPoints)) poolPoints=[]; }
+
+async function loadPlans(){ plans = await api('/api/plans'); if(!Array.isArray(plans)) plans=[]; }
+
+async function loadFolders(){ poolFolders = await api('/api/knowledge-folders'); if(!Array.isArray(poolFolders)) poolFolders=[]; }
+
+function poolSubject(){ return '英语'; }
+
+function flattenFolders(folders, depth=0){
+  const out = [];
+  for(const f of (folders||[])){
+    out.push({id:f.id, name:f.name, depth});
+    if(f.children && f.children.length) out.push(...flattenFolders(f.children, depth+1));
+  }
+  return out;
+}
+
+function parseTags(t){ try{ const v = JSON.parse(t||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+
+function filteredPoolPoints(){
+  return poolPoints.filter(p =>
+    (!poolActiveFolder || p.folder_id === poolActiveFolder) &&
+    (!poolActiveTag || (parseTags(p.tags)||[]).includes(poolActiveTag)));
+}
+
+function renderFolderNode(f, depth){
+  const pad = depth * 16;
+  const active = poolActiveFolder === f.id;
+  return `<div style="padding-left:${pad}px;margin:2px 0">
+    <span style="cursor:pointer;${active?'font-weight:700;color:#2e6bd8':''}" onclick="setActiveFolder(${f.id})">
+      ${(f.children||[]).length ? '▸' : '·'} ${escapeHtml(f.name)} <span style="color:#9aa4a0;font-size:11px">(${f.point_count})</span>
+    </span>
+    <button class="btn-ghost" style="padding:0 6px;font-size:11px" onclick="openFolderForm('add',${f.id})">+子目录</button>
+    <button class="btn-ghost" style="padding:0 6px;font-size:11px" onclick="openFolderForm('rename',${f.id})">改</button>
+    <button class="btn-ghost" style="padding:0 6px;font-size:11px" onclick="delFolder(${f.id})">删</button>
+  </div>${(f.children||[]).map(c=>renderFolderNode(c, depth+1)).join('')}`;
+}
+
+function setActiveFolder(id){ poolActiveFolder = (poolActiveFolder===id) ? null : id; render(); }
+
+function setActiveTag(t){ poolActiveTag = (poolActiveTag===t) ? null : t; render(); }
+
+function openFolderForm(mode, id){ folderForm = {mode, id}; render(); }
+
+function renderFolderForm(){
+  if(!folderForm) return '';
+  const isRename = folderForm.mode==='rename';
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:10px;margin:8px 0;display:flex;gap:8px;align-items:center">
+    <input id="folderName" placeholder="${isRename?'新目录名':'目录名'}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:180px">
+    <button class="btn-primary" style="padding:6px 14px" onclick="submitFolder()">${isRename?'保存':'新建'}</button>
+    <button class="btn-ghost" style="padding:6px 14px" onclick="folderForm=null;render()">取消</button>
+  </div>`;
+}
+
+async function submitFolder(){
+  const name = document.getElementById('folderName').value.trim();
+  if(!name){ toast('请填写目录名'); return; }
+  let r;
+  if(folderForm.mode==='rename'){
+    r = await api(`/api/knowledge-folders/${folderForm.id}`, {method:'PUT', body:{name}});
+  } else {
+    r = await api('/api/knowledge-folders', {method:'POST', body:{name, subject: poolSubject(), parent_id: folderForm.id || null}});
+  }
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  folderForm = null; await loadFolders(); render();
+}
+
+async function delFolder(id){
+  if(!confirm('删除该目录？（需为空目录）')) return;
+  const r = await api(`/api/knowledge-folders/${id}`, {method:'DELETE'});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  if(poolActiveFolder === id) poolActiveFolder = null;
+  await loadFolders(); render();
+}
+
+function renderPoolTab(){
+  // 目录 + 标签筛选
+  const filtered = filteredPoolPoints();
+
+  const allTags = [...new Set(poolPoints.flatMap(p=>parseTags(p.tags)))];
+  const tagBar = allTags.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">
+        <span style="font-size:12px;color:#778079;line-height:24px">标签：</span>
+        ${allTags.map(t=>`<span onclick="setActiveTag('${escapeAttr(t)}')" style="cursor:pointer;padding:2px 10px;border-radius:12px;font-size:12px;border:1px solid var(--line3);${poolActiveTag===t?'background:#2e6bd8;color:#fff;border-color:#2e6bd8':''}">${escapeHtml(t)}</span>`).join('')}
+      </div>`
+    : '';
+
+  const folderTree = `<div style="font-size:12px;color:#5c6761;margin:6px 0 10px">
+    <div style="cursor:pointer;${!poolActiveFolder?'font-weight:700;color:#2e6bd8':''}" onclick="setActiveFolder(null)">全部（${poolPoints.length}）</div>
+    ${poolFolders.map(f=>renderFolderNode(f,0)).join('')}
+    ${renderFolderForm()}
+    <button class="btn-ghost" style="padding:0 6px;font-size:11px;margin-top:6px" onclick="openFolderForm('add',null)">+ 新建目录</button>
+  </div>`;
+
+  const rows = filtered.map(p=>{
+    let extra = {}; try{ extra = JSON.parse(p.extra||'{}'); }catch(e){}
+    const isEditing = poolForm && poolForm.mode==='edit' && poolForm.id===p.id;
+    const original = extra['原句'] || '';
+    return `<div class="row" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line3)">
+      <input type="checkbox" ${poolSelected.has(p.id)?'checked':''} onchange="togglePoolSel(${p.id})">
+      <div style="flex:1">
+        <div style="font-weight:600">${escapeHtml(p.content||'')}</div>
+        <div style="font-size:12px;color:#778079">${escapeHtml(p.subject)} · ${escapeHtml(p.category)} · ${escapeHtml(extra['释义']||extra['例句']||extra['作者']||'')}</div>
+        ${original ? `<div style="font-size:12px;color:#9aa4a0;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">原句：${escapeHtml(original)}</div>` : ''}
+        ${isEditing ? renderPoolEditForm(p, extra) : ''}
+      </div>
+      <button class="btn-ghost" onclick="editPoolPoint(${p.id})">编辑</button>
+      <button class="btn-ghost" onclick="delPoolPoint(${p.id})">删除</button>
+    </div>`;
+  }).join('');
+
+  // 新增表单
+  const addForm = poolForm && poolForm.mode==='add' ? renderPoolAddForm() : '';
+
+  return `<div class="parent-grid">
+    <div class="parent-panel">
+      <div class="head"><div class="ic blue">${icon('folder',20)}</div><div><h3>目录</h3><div class="sub">按目录归类知识点</div></div></div>
+      <div class="bd">${folderTree}</div>
+    </div>
+    <div class="parent-panel">
+      <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>知识点库</h3><div class="sub">上传讲义 PDF 解析成可复用知识点，勾选组合成训练方案</div></div></div>
+      <div class="bd">
+        <div style="display:flex;gap:8px;margin:12px 0">
+          <button class="btn-primary" onclick="togglePdfForm()">上传讲义 PDF</button>
+          <button class="btn-ghost" onclick="openPoolAddForm()">手动新增</button>
+          <button class="btn-primary" onclick="createPlanFromSel()">组合成方案(${poolSelected.size})</button>
+          <button class="btn-ghost" onclick="selectAllPool()">全选</button>
+          <button class="btn-ghost" onclick="clearPoolSel()">清空</button>
+          <button class="btn-ghost" onclick="poolTab=null;render()">返回</button>
+        </div>
+        ${poolSelected.size ? renderBatchBar() : ''}
+        ${poolPdfForm ? renderPdfForm() : ''}
+        ${addForm}
+        ${planForm ? renderPlanCreateForm() : ''}
+        ${tagBar}
+        ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无知识点，点击「上传讲义 PDF」开始</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+const SUBJECTS = ['语文','英语','数学'];
+
+function renderPdfForm(){
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:12px;margin:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <span style="font-size:13px;color:#5c6761">学科</span>
+    <select id="poolPdfSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option ${poolPdfForm.subject===s?'selected':''}>${s}</option>`).join('')}</select>
+    <span style="font-size:13px;color:#5c6761">讲义类型</span>
+    <select id="poolPdfKind" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">
+      <option value="phrase" ${poolPdfForm.kind==='phrase'?'selected':''}>短语（英语固定搭配）</option>
+      <option value="outline" ${poolPdfForm.kind==='outline'?'selected':''}>归纳（古诗/生字/知识点）</option>
+    </select>
+    <button class="btn-primary" style="padding:6px 14px" onclick="pickPoolPdfFile()">选择 PDF 文件</button>
+    <button class="btn-ghost" style="padding:6px 14px" onclick="poolPdfForm=null;render()">取消</button>
+  </div>`;
+}
+
+function renderPoolAddForm(){
+  const folderOpts = `<option value="">未分类</option>` +
+    flattenFolders(poolFolders).map(f=>`<option value="${f.id}">${'　'.repeat(f.depth)}${escapeHtml(f.name)}</option>`).join('');
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:12px;margin:8px 0">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <span style="font-size:13px;color:#5c6761;min-width:36px">内容</span>
+      <input id="poolAddContent" placeholder="如 look after / 比喻的定义" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+      <span style="font-size:13px;color:#5c6761">学科</span>
+      <select id="poolAddSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option>${s}</option>`).join('')}</select>
+      <span style="font-size:13px;color:#5c6761">分类</span>
+      <input id="poolAddCategory" placeholder="短语/句型/语法/生字…" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:140px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+      <span style="font-size:13px;color:#5c6761;min-width:36px">释义</span>
+      <input id="poolAddMeaning" placeholder="中文释义（可留空）" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+      <span style="font-size:13px;color:#5c6761;min-width:36px">原句</span>
+      <input id="poolAddOriginal" placeholder="教材原句（可留空）" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+      <span style="font-size:13px;color:#5c6761;min-width:36px">目录</span>
+      <select id="poolAddFolder" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${folderOpts}</select>
+      <span style="font-size:13px;color:#5c6761">标签</span>
+      <input id="poolAddTags" placeholder="逗号分隔，如 易错,重点" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:180px">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-primary" style="padding:6px 16px" onclick="submitPoolAdd()">保存</button>
+      <button class="btn-ghost" style="padding:6px 16px" onclick="poolForm=null;render()">取消</button>
+    </div>
+  </div>`;
+}
+
+function renderPoolEditForm(p, extra){
+  const folderOpts = `<option value="">未分类</option>` +
+    flattenFolders(poolFolders).map(f=>`<option value="${f.id}" ${p.folder_id===f.id?'selected':''}>${'　'.repeat(f.depth)}${escapeHtml(f.name)}</option>`).join('');
+  const curTags = parseTags(p.tags).join(', ');
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:10px;margin-top:8px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+      <span style="font-size:13px;color:#5c6761">内容</span>
+      <input id="poolEditContent" value="${escapeAttr(p.content||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+      <span style="font-size:13px;color:#5c6761">学科</span>
+      <select id="poolEditSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option ${p.subject===s?'selected':''}>${s}</option>`).join('')}</select>
+      <span style="font-size:13px;color:#5c6761">分类</span>
+      <input id="poolEditCategory" value="${escapeAttr(p.category||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:140px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+      <span style="font-size:13px;color:#5c6761">释义</span>
+      <input id="poolEditMeaning" value="${escapeAttr(extra['释义']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+      <span style="font-size:13px;color:#5c6761">原句</span>
+      <input id="poolEditOriginal" value="${escapeAttr(extra['原句']||'')}" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:220px">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+      <span style="font-size:13px;color:#5c6761">目录</span>
+      <select id="poolEditFolder" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${folderOpts}</select>
+      <span style="font-size:13px;color:#5c6761">标签</span>
+      <input id="poolEditTags" value="${escapeAttr(curTags)}" placeholder="逗号分隔" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:180px">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-primary" style="padding:6px 16px" onclick="submitPoolEdit(${p.id})">保存</button>
+      <button class="btn-ghost" style="padding:6px 16px" onclick="poolForm=null;render()">取消</button>
+    </div>
+  </div>`;
+}
+
+function togglePoolSel(id){ if(poolSelected.has(id)) poolSelected.delete(id); else poolSelected.add(id); render(); }
+
+function selectAllPool(){
+  filteredPoolPoints().forEach(p=>poolSelected.add(p.id));
+  render();
+}
+
+function clearPoolSel(){ poolSelected.clear(); render(); }
+
+function renderBatchBar(){
+  const folderOpts = `<option value="">未分类</option>` +
+    flattenFolders(poolFolders).map(f=>`<option value="${f.id}">${'　'.repeat(f.depth)}${escapeHtml(f.name)}</option>`).join('');
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#eef4ff;border:1px solid #d6e4ff;border-radius:10px;padding:8px 10px;margin:8px 0">
+    <span style="font-size:13px;color:#2e6bd8">已选 ${poolSelected.size} 项</span>
+    <button class="btn-ghost" style="color:#c05b4a" onclick="batchDeletePool()">批量删除(${poolSelected.size})</button>
+    <span style="font-size:13px;color:#5c6761">打标签</span>
+    <input id="batchTagsInput" placeholder="逗号分隔，如 易错,重点" style="border:1px solid var(--line3);border-radius:8px;padding:5px 8px;width:180px">
+    <button class="btn-ghost" onclick="batchTagPool()">打标签</button>
+    <span style="font-size:13px;color:#5c6761">移动到</span>
+    <select id="batchMoveFolder" style="border:1px solid var(--line3);border-radius:8px;padding:5px 8px">${folderOpts}</select>
+    <button class="btn-ghost" onclick="batchMovePool()">移动</button>
+  </div>`;
+}
+
+async function batchDeletePool(){
+  if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
+  if(!confirm(`删除选中的 ${poolSelected.size} 条知识点？`)) return;
+  const r = await api('/api/knowledge-pool/batch-delete', {method:'POST', body:{point_ids:[...poolSelected]}});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  const skipped = r.skipped || 0;
+  toast(skipped ? `已删 ${r.deleted} 条，跳过 ${skipped} 条已发布` : `已删 ${r.deleted} 条`);
+  poolSelected.clear(); await Promise.all([loadPool(), loadFolders()]); render();
+}
+
+async function batchTagPool(){
+  if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
+  const raw = document.getElementById('batchTagsInput').value;
+  const tags = raw.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!tags.length){ toast('未输入有效标签'); return; }
+  const r = await api('/api/knowledge-pool/batch-tags', {method:'POST', body:{point_ids:[...poolSelected], tags}});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  toast(`已为 ${r.updated} 条知识点打标签`);
+  poolSelected.clear(); await loadPool(); render();
+}
+
+async function batchMovePool(){
+  if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
+  const v = document.getElementById('batchMoveFolder').value;
+  const folderId = v ? parseInt(v,10) : null;
+  const r = await api('/api/knowledge-pool/batch-move', {method:'POST', body:{point_ids:[...poolSelected], folder_id: folderId}});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  toast(`已移动 ${r.updated} 条知识点`);
+  poolSelected.clear(); await Promise.all([loadPool(), loadFolders()]); render();
+}
+
+function togglePdfForm(){
+  poolPdfForm = poolPdfForm ? null : {subject:'英语', kind:'phrase'};
+  render();
+}
+
+function openPoolAddForm(){ poolForm = {mode:'add'}; render(); }
+function editPoolPoint(id){
+  const p = poolPoints.find(x=>x.id===id); if(!p) return;
+  poolForm = {mode:'edit', id};
+  render();
+}
+
+function pickPoolPdfFile(){
+  const subject = document.getElementById('poolPdfSubject').value;
+  const kind = document.getElementById('poolPdfKind').value;
+  const inp = document.createElement('input'); inp.type='file'; inp.accept='application/pdf';
+  inp.onchange = async ()=>{
+    const file = inp.files[0]; if(!file) return;
+    const fd = new FormData(); fd.append('subject', subject); fd.append('handout_kind', kind); fd.append('file', file);
+    toast('正在识别讲义…（OCR 逐页提取，需一点时间）');
+    const r = await apiForm('/api/knowledge-pool/from-pdf', fd);
+    if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+    if(!r || !r.count){ toast(apiErrorMsg(r, '识别失败，请换清晰 PDF 或手动录入')); return; }
+    toast(`已提取 ${r.count} 条知识点`);
+    poolPdfForm = null; await Promise.all([loadPool(), loadFolders()]); render();
+  };
+  inp.click();
+}
+
+async function submitPoolAdd(){
+  const content = document.getElementById('poolAddContent').value.trim();
+  if(!content){ toast('请填写知识点内容'); return; }
+  const subject = document.getElementById('poolAddSubject').value;
+  const category = document.getElementById('poolAddCategory').value.trim();
+  const meaning = document.getElementById('poolAddMeaning').value.trim();
+  const original = document.getElementById('poolAddOriginal').value.trim();
+  const folderId = document.getElementById('poolAddFolder').value;
+  const tags = document.getElementById('poolAddTags').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const extra = {};
+  if(meaning) extra['释义'] = meaning;
+  if(original) extra['原句'] = original;
+  const extraJson = Object.keys(extra).length ? JSON.stringify(extra) : '{}';
+  const body = {subject, category, content, extra: extraJson, tags,
+                folder_id: folderId ? parseInt(folderId,10) : null};
+  const r = await api('/api/knowledge-pool', {method:'POST', body});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  poolForm = null; await loadPool(); render();
+}
+
+async function submitPoolEdit(id){
+  const content = document.getElementById('poolEditContent').value.trim();
+  if(!content){ toast('请填写知识点内容'); return; }
+  const subject = document.getElementById('poolEditSubject').value;
+  const category = document.getElementById('poolEditCategory').value.trim();
+  const meaning = document.getElementById('poolEditMeaning').value.trim();
+  const original = document.getElementById('poolEditOriginal').value.trim();
+  const folderId = document.getElementById('poolEditFolder').value;
+  const tags = document.getElementById('poolEditTags').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const extra = {};
+  if(meaning) extra['释义'] = meaning;
+  if(original) extra['原句'] = original;
+  const extraJson = Object.keys(extra).length ? JSON.stringify(extra) : '{}';
+  const body = {subject, category, content, extra: extraJson, tags,
+                folder_id: folderId ? parseInt(folderId,10) : null};
+  const r = await api(`/api/knowledge-pool/${id}`, {method:'PUT', body});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  poolForm = null; await loadPool(); render();
+}
+
+async function delPoolPoint(id){
+  if(!confirm('删除该知识点？')) return;
+  const r = await api(`/api/knowledge-pool/${id}`, {method:'DELETE'});
+  if(r && r.error){ toast(apiErrorMsg(r, r.error)); return; }
+  poolSelected.delete(id); await loadPool(); render();
+}
+
+function renderPlansTab(){
+  const rows = plans.map(p=>`<div class="row" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line3)">
+    <div style="flex:1">
+      <div style="font-weight:600">${escapeHtml(p.title||'未命名')}</div>
+      <div style="font-size:12px;color:#778079">${escapeHtml(p.subject)} · ${(p.point_ids||[]).length} 个知识点 · ${p.status==='published'?'已发布':'草稿'}</div>
+    </div>
+    ${p.status==='published'
+      ? `<button class="btn-ghost" onclick="publishPlan(${p.id})">重新发布</button>`
+      : `<button class="btn-primary" onclick="publishPlan(${p.id})">发布</button>`}
+  </div>`).join('');
+  return `<div class="parent-grid">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>训练方案</h3><div class="sub">把知识点组合成可保存的方案，发布后生成专项训练</div></div></div>
+      <div class="bd">
+        <div style="display:flex;gap:8px;margin:12px 0">
+          <button class="btn-ghost" onclick="poolTab='pool';loadPool().then(loadFolders).then(()=>render())">去勾选知识点</button>
+          <button class="btn-ghost" onclick="poolTab=null;render()">返回</button>
+        </div>
+        ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无方案，先在知识点库勾选组合</div>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+function createPlanFromSel(){
+  if(poolSelected.size===0){ toast('请先勾选知识点'); return; }
+  if(planForm){ planForm = null; render(); return; }  // 再次点击收起
+  planForm = {subject:'英语'};
+  render();
+}
+
+function renderPlanCreateForm(){
+  return `<div style="background:#f6f8f7;border-radius:10px;padding:12px;margin:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <span style="font-size:13px;color:#5c6761">方案名称</span>
+    <input id="planTitle" placeholder="如 look 短语专项" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;width:200px">
+    <span style="font-size:13px;color:#5c6761">学科</span>
+    <select id="planSubject" style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px">${SUBJECTS.map(s=>`<option>${s}</option>`).join('')}</select>
+    <button class="btn-primary" style="padding:6px 16px" onclick="submitPlanCreate()">保存方案</button>
+    <button class="btn-ghost" style="padding:6px 16px" onclick="planForm=null;render()">取消</button>
+  </div>`;
+}
+
+async function submitPlanCreate(){
+  const title = document.getElementById('planTitle').value.trim();
+  if(!title){ toast('请填写方案名称'); return; }
+  const subject = document.getElementById('planSubject').value;
+  const r = await api('/api/plans', {method:'POST', body:{subject, title, point_ids:[...poolSelected]}});
+  if(r && (r.error || r.detail)){ toast(apiErrorMsg(r, '创建方案失败')); return; }
+  planForm = null; poolSelected.clear(); poolTab='plans'; await loadPlans(); render();
+}
+
+async function publishPlan(id){
+  const r = await api(`/api/plans/${id}/publish`, {method:'POST'});
+  if(r && r.error){ toast(r.error); return; }
+  toast(`已生成专项训练（组 ${r.group_id}），请到专项训练列表审核`);
+  poolTab=null; await loadDrillGroups(); render();
+}
+
 function renderDrillTab(){
+  if(poolTab==='pool') return renderPoolTab();
+  if(poolTab==='plans') return renderPlansTab();
   if(drillTab==='create') return renderDrillCreate();
   const rows = drillGroups.map(g=>{
     const kind = DRILL_KIND_LABEL[g.kind] || g.kind || '-';
@@ -3000,7 +4014,11 @@ function renderDrillTab(){
   return `<div class="parent-grid">
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('sparkles',20)}</div><div><h3>专项训练</h3><div class="sub">识记型内容（短语/古诗/概念）闯关 + 间隔复习，练到真掌握</div></div>
-        <button class="btn-primary" style="margin-left:auto;padding:8px 16px" onclick="drillTab='create';render()">新建专项</button>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn-ghost" style="padding:8px 16px" onclick="poolTab='pool';loadPool().then(loadFolders).then(()=>render())">知识点库</button>
+          <button class="btn-ghost" style="padding:8px 16px" onclick="poolTab='plans';loadPlans().then(()=>render())">训练方案</button>
+          <button class="btn-primary" style="padding:8px 16px" onclick="drillTab='create';render()">新建专项</button>
+        </div>
       </div>
       <div class="bd">
         ${rows || '<div style="text-align:center;padding:32px 0;color:#8e9691">暂无专项，点击「新建专项」录入识记内容</div>'}

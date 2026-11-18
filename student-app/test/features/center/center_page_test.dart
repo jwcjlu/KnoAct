@@ -42,9 +42,13 @@ class FakeCenterRepository implements CenterRepository {
   Future<CenterMaterial> reading(int userId) async => CenterMaterial.empty;
 
   @override
-  Future<void> submitWrong({required int userId, required String question, required String yourAnswer, required String correctAnswer, required String sourceType}) async {
+  Future<void> submitAnswer({required int userId, required String question, required String yourAnswer, required String correctAnswer, required String sourceType}) async {
     wrong.add('$sourceType:$question:$yourAnswer');
   }
+
+  @override
+  Future<void> submitWrong({required int userId, required String question, required String yourAnswer, required String correctAnswer, required String sourceType}) =>
+      submitAnswer(userId: userId, question: question, yourAnswer: yourAnswer, correctAnswer: correctAnswer, sourceType: sourceType);
 }
 
 class FakeHomeRepository implements HomeRepository {

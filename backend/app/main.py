@@ -5,7 +5,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, passages, xuekubao, drill
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, passages, xuekubao, drill, lesson_audio, knowledge_pool, answer_records
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -55,6 +55,49 @@ def _ensure_db_tables() -> None:
         except Exception as exc:
             db.rollback()
             _log.warning("questions.passage_id 迁移失败: %s", exc)
+        try:
+            from .migrate_grade_buckets import migrate as _migrate_grade_buckets
+
+            _migrate_grade_buckets(db)
+        except Exception as exc:
+            db.rollback()
+            _log.warning("child grade/桶回填失败: %s", exc)
+        try:
+            from sqlalchemy import inspect as _inspect, text as _text
+            _insp = _inspect(db.get_bind())
+            _names = set(_insp.get_table_names())
+
+            def _add_column(table: str, column: str, ddl: str) -> None:
+                """幂等补列；单表失败不连坐其它表的迁移。"""
+                if table not in _names:
+                    return
+                cols = {c["name"] for c in _insp.get_columns(table)}
+                if column in cols:
+                    return
+                with db.get_bind().begin() as _conn:
+                    _conn.execute(_text(ddl))
+
+            # knowledge_point_pool 老库补列（新表 create_all 已含这些列，此处仅兜底）
+            try:
+                _add_column("knowledge_point_pool", "folder_id", "ALTER TABLE knowledge_point_pool ADD COLUMN folder_id INTEGER")
+                _add_column("knowledge_point_pool", "tags", "ALTER TABLE knowledge_point_pool ADD COLUMN tags MEDIUMTEXT")
+            except Exception as exc:
+                db.rollback()
+                _log.warning("knowledge_point_pool 列迁移失败: %s", exc)
+            try:
+                _add_column("training_items", "point_pool_id", "ALTER TABLE training_items ADD COLUMN point_pool_id INTEGER")
+            except Exception as exc:
+                db.rollback()
+                _log.warning("training_items.point_pool_id 迁移失败: %s", exc)
+            try:
+                _add_column("pdf_documents", "content_kind", "ALTER TABLE pdf_documents ADD COLUMN content_kind VARCHAR(16) DEFAULT 'textbook'")
+                _add_column("pdf_documents", "handout_kind", "ALTER TABLE pdf_documents ADD COLUMN handout_kind VARCHAR(16)")
+            except Exception as exc:
+                db.rollback()
+                _log.warning("pdf_documents 列迁移失败: %s", exc)
+        except Exception as exc:
+            db.rollback()
+            _log.warning("列迁移整体失败: %s", exc)
     finally:
         db.close()
 
@@ -104,6 +147,9 @@ app.include_router(bank.router)
 app.include_router(passages.router)
 app.include_router(xuekubao.router)
 app.include_router(drill.router)
+app.include_router(lesson_audio.router)
+app.include_router(knowledge_pool.router)
+app.include_router(answer_records.router)
 
 _warn_insecure_auth_env()
 

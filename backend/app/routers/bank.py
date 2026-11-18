@@ -20,6 +20,7 @@ from ..services.source_config import tiku_cn_adapter, xuekubao_adapter
 from ..database import get_db
 from ..models import Mistake, Question, QuestionBank, ReadingPassage, User
 from ..services.ai import ocr_image
+from ..services.answer_record import record_answer
 from ..services.bucket_guard import resolve_bucket_id
 from ..services.grade_question import grade_question, grade_subjective_with_ai
 from ..services.ocr_import import structure_questions_from_text
@@ -192,7 +193,10 @@ def _assert_draft_subject(bank: QuestionBank, drafts: list[QuestionDraft]) -> No
         if q_subj and q_subj != bank_subj:
             raise HTTPException(
                 status_code=400,
-                detail=f"所选知识点属于「{q_subj}」，与当前卷子「{bank_subj}」不符，请先切换到对应学科的卷子再导入",
+                detail=(
+                    f"所选知识点属于「{q_subj}」，与当前卷子「{bank_subj}」不符；"
+                    f"请把拉题弹窗里的「学科」改成「{bank_subj}」，或换到对应学科的卷子"
+                ),
             )
 
 
@@ -215,8 +219,9 @@ def _fetch_xuekubao_drafts(db, bank: QuestionBank, req: XuekubaoSyncReq) -> tupl
     items = raw.get("data") if isinstance(raw.get("data"), list) else _extract_items_safe(raw)
     err = str(raw.get("errorCode") or "")
     if not items and err not in ("0", "200", ""):
+        status = 400 if err == "invalid" else 502
         raise HTTPException(
-            status_code=502,
+            status_code=status,
             detail=raw.get("message") or raw.get("errorCode") or "拉取失败",
         )
     drafts = adapter.normalize(raw)[: max(1, min(req.max_import, 50))]
@@ -373,6 +378,17 @@ def submit_bank(req: BankSubmitReq, user: User = Depends(require_learning_user),
             r = grade_question(qq.qtype_category, answer_json, student)
         results.append({"question_id": qq.id, "is_correct": r["is_correct"],
                         "correct_answer_text": r["correct_answer_text"], "detail": r["detail"]})
+        record_answer(
+            db, user_id=user.id, subject=qq.subject or "",
+            module="practice", lesson_id=qq.lesson_id,
+            question=qq.question,
+            student_answer=_format_student_answer(a, qq),
+            correct_answer=r.get("correct_answer_text") or qq.answer,
+            is_correct=r["is_correct"] is True,
+            difficulty=qq.difficulty or "",
+            duration_ms=a.get("duration_ms"),
+            source_type="question", source_id=qq.id,
+        )
         if r["is_correct"] is False:
             bid = resolve_bucket_id(db, user.id, None)
             db.add(Mistake(

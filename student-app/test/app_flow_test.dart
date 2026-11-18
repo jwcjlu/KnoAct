@@ -90,6 +90,9 @@ class FlowCenterRepository implements CenterRepository {
   Future<CenterMaterial> reading(int userId) async => CenterMaterial.empty;
 
   @override
+  Future<void> submitAnswer({required int userId, required String question, required String yourAnswer, required String correctAnswer, required String sourceType}) async {}
+
+  @override
   Future<void> submitWrong({required int userId, required String question, required String yourAnswer, required String correctAnswer, required String sourceType}) async {}
 }
 

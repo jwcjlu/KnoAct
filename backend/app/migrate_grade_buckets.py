@@ -19,15 +19,15 @@ def migrate(db: Session) -> None:
     for child in children:
         if child.grade is None:
             child.grade = 3  # 缺省三年级
-        # 已有 active 桶则跳过
+        # 已有 active 桶则复用它回填痕迹；否则新建默认 active 桶
         existing = db.query(SchoolYearBucket).filter_by(user_id=child.id, status="active").first()
-        if existing:
-            db.commit()
-            continue
-        bucket = SchoolYearBucket(user_id=child.id, grade=child.grade,
-                                  school_year=current_school_year(), status="active")
-        db.add(bucket)
-        db.flush()
+        bucket = existing or SchoolYearBucket(
+            user_id=child.id, grade=child.grade,
+            school_year=current_school_year(), status="active",
+        )
+        if existing is None:
+            db.add(bucket)
+            db.flush()
         for model in _TRACE_MODELS:
             rows = db.query(model).filter_by(user_id=child.id, bucket_id=None).all()
             for r in rows:

@@ -154,8 +154,9 @@ def _extract_one_batch(db, provider, kind_desc: str, batch: list[dict]) -> list[
     prompt = (
         f"下面是一份讲义 PDF 的逐页 OCR 文字。请提取其中的识记条目。\n"
         f"条目类型：{kind_desc}。\n"
-        '只返回 JSON：{"items":[{"primary":"原文","secondary":"释义/作者/解释","source_page":页码}]}。'
+        '只返回 JSON：{"items":[{"primary":"原文","secondary":"释义/作者/解释","example":"该知识点在讲义中的原句原文","source_page":页码}]}。'
         "source_page 用该条目所在页码（数字）。每页可有多个条目；无关的页眉页脚/标题不要提取。\n"
+        "example 是知识点在讲义里的原句原文（照抄，不要自己编例句）。\n"
         f"OCR 文字：\n{page_texts}"
     )
     raw = provider.generate(prompt=prompt, system="你是小学老师，善于从讲义提炼识记条目。", json_mode=True)
@@ -172,7 +173,8 @@ def _extract_one_batch(db, provider, kind_desc: str, batch: list[dict]) -> list[
             sp = int(it.get("source_page") or 0)
         except (TypeError, ValueError):
             sp = 0
-        out.append({"primary": primary, "secondary": (it.get("secondary") or "").strip(), "source_page": sp})
+        out.append({"primary": primary, "secondary": (it.get("secondary") or "").strip(),
+                    "example": (it.get("example") or "").strip(), "source_page": sp})
     return out
 
 

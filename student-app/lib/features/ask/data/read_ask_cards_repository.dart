@@ -34,12 +34,14 @@ class ReadAskCardsRepository {
     required int quizId,
     required List<ReaderQuizQuestion> questions,
     required Map<String, int> answers,
+    required int durationMs,
   }) async {
     final payload = [
       for (final q in questions)
         {
           'question_id': q.id,
           'selected_index': answers[q.id],
+          'duration_ms': durationMs,
         },
     ];
     final raw = await _api.post('/api/quiz/submit', body: {'quiz_id': quizId, 'answers': payload});

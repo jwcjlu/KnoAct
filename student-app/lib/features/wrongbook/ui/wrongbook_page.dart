@@ -115,7 +115,12 @@ class _MistakeCard extends ConsumerWidget {
         const SizedBox(height: 10),
         QuestionHtmlView(
           html: item.question,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, height: 1.5),
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            height: 1.75,
+            letterSpacing: 0.15,
+          ),
         ),
         const SizedBox(height: 10),
         _AnswerRow(label: '你的答案', value: item.yourAnswer, isWrong: true),

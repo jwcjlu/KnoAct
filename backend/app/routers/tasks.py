@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 from ..core.access import ensure_user_access, require_learning_user, resolve_target_user_id
 from ..core.deps import require_role
 from ..database import get_db
-from ..models import Task, Point, User
+from ..models import Task, Point, User, TrainingItem
 from ..services.task_gen import generate_tasks_for_user
+from ..services.answer_record import record_answer
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -245,6 +246,15 @@ def knowledge_review(task_id: int, req: KnowledgeReviewReq,
         if p.get("id"):
             record_attempt(db, req.user_id, "knowledge", p["id"], is_correct,
                            bucket_id=bid)
+        record_answer(
+            db, user_id=req.user_id, subject=t.subject, module="knowledge",
+            question=p.get("question") or "",
+            student_answer=user_answer,
+            correct_answer=p.get("answer") or "",
+            is_correct=is_correct,
+            source_type="knowledge_point", source_id=p.get("id"),
+            duration_ms=a.get("duration_ms"), bucket_id=bid,
+        )
         p["last_correct"] = is_correct
         results.append({"id": p.get("id"), "is_correct": is_correct, "answer": p.get("answer") or ""})
     t.content = json.dumps(points, ensure_ascii=False)
@@ -493,6 +503,17 @@ def drill_complete(task_id: int, req: DrillCompleteReq, user: User = Depends(req
         m.interval = ni; m.lapse += nl; m.last_hinted = nh
         m.attempts = json.dumps(json.loads(m.attempts or "[]") + [bool(is_correct)], ensure_ascii=False)
         m.next_review_at = now + timedelta(days=ni)
+        item = db.get(TrainingItem, int(item_id))
+        if item is not None:
+            record_answer(
+                db, user_id=user.id, subject=t.subject, module="drill",
+                question=item.primary,
+                student_answer="",  # 回忆式作答，无文本答案
+                correct_answer=item.primary,
+                is_correct=bool(is_correct),
+                difficulty="", source_type="training_item",
+                source_id=int(item_id), bucket_id=t.bucket_id,
+            )
         if nh:
             hinted_any = True
     t.content = json.dumps(content, ensure_ascii=False)

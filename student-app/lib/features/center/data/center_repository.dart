@@ -24,7 +24,8 @@ class CenterRepository {
     );
   }
 
-  Future<void> submitWrong({
+  /// 上报作答（对错都记）；错题时后端顺带进错题本。
+  Future<void> submitAnswer({
     required int userId,
     required String question,
     required String yourAnswer,
@@ -39,6 +40,22 @@ class CenterRepository {
       'source_type': sourceType,
     });
   }
+
+  @Deprecated('Use submitAnswer')
+  Future<void> submitWrong({
+    required int userId,
+    required String question,
+    required String yourAnswer,
+    required String correctAnswer,
+    required String sourceType,
+  }) =>
+      submitAnswer(
+        userId: userId,
+        question: question,
+        yourAnswer: yourAnswer,
+        correctAnswer: correctAnswer,
+        sourceType: sourceType,
+      );
 }
 
 final centerRepositoryProvider = Provider<CenterRepository>((ref) => CenterRepository(ref.watch(apiClientProvider)));

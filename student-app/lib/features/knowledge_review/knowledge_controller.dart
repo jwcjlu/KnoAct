@@ -44,6 +44,7 @@ class KnowledgeState {
 
 class KnowledgeController extends Notifier<KnowledgeState> {
   int? get _uid => ref.read(currentChildIdProvider);
+  DateTime _startedAt = DateTime.now();
 
   @override
   KnowledgeState build() {
@@ -60,6 +61,7 @@ class KnowledgeController extends Notifier<KnowledgeState> {
       inputs: List.filled(points.length, ''),
       results: List<bool?>.filled(points.length, null),
     );
+    _startedAt = DateTime.now();
   }
 
   void setInput(int index, String value) {
@@ -78,12 +80,13 @@ class KnowledgeController extends Notifier<KnowledgeState> {
     state = state.copyWith(busy: true);
     KnowledgeGradeResult? result;
     try {
+      final durationMs = DateTime.now().difference(_startedAt).inMilliseconds;
       result = await ref.read(knowledgeRepositoryProvider).grade(
             userId: uid,
             taskId: taskId,
             answers: [
               for (var i = 0; i < state.points.length; i++)
-                {'id': state.points[i].id, 'user_answer': state.inputs[i].trim()},
+                {'id': state.points[i].id, 'user_answer': state.inputs[i].trim(), 'duration_ms': durationMs},
             ],
           );
       // 判分后提交任务（待家长确认）
