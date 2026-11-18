@@ -12,9 +12,9 @@ from ..core.deps import get_current_user, require_role
 from ..database import get_db, SessionLocal
 from ..models import User
 from ..models import PdfDocument, PdfPage, Lesson, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
-from ..services.cleanup import purge_lesson_content, purge_lessons
+from ..services.cleanup import detach_points, detach_words, purge_lesson_content, purge_lessons
 from ..services.pdf_split import render_pages, detect_lessons_from_pdf
-from ..services.lesson_extract import extract_lesson_content
+from ..services.lesson_extract import apply_word_list, extract_lesson_content
 from ..services.question_gen import generate_reading_questions
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf"])
@@ -128,6 +128,24 @@ class BindReq(BaseModel):
     user_id: int
 
 
+class LessonWordIn(BaseModel):
+    id: int | None = None
+    word: str = ""
+    extra: str = ""
+
+
+class LessonPointIn(BaseModel):
+    id: int | None = None
+    content: str = ""
+    category: str = "本课"
+
+
+class LessonContentIn(BaseModel):
+    title: str
+    words: list[LessonWordIn] = []
+    points: list[LessonPointIn] = []
+
+
 @router.post("/documents/{document_id}/bind")
 def bind_document(document_id: int, req: BindReq, user: User = Depends(require_role("parent", "admin")),
                   db: Session = Depends(get_db)):
@@ -173,6 +191,14 @@ def extract_document(document_id: int, background_tasks: BackgroundTasks,
     pending = db.query(Lesson).filter_by(document_id=document_id).all()
     pending = [l for l in pending if l.extract_status != "done"]
     if not pending:
+        # 课已经提过，但扫描版单词表此前没解析进各课。英语教材再走一遍书末 Word list。
+        if doc.subject == "英语":
+            _EXTRACT_PROGRESS[document_id] = {
+                "total": 1, "done": 0, "current": "Word list",
+                "finished": False, "error": "",
+            }
+            background_tasks.add_task(_run_word_list_sync, document_id, doc.storage_path)
+            return {"started": True, "total": 1, "word_list": True}
         return {"extracted": 0, "message": "无可提取课程"}
 
     _EXTRACT_PROGRESS[document_id] = {
@@ -216,10 +242,33 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
                 raise
             finally:
                 db.close()
+        if any(t.get("subject") == "英语" for t in tasks):
+            prog["current"] = "Word list"
+            _sync_word_list(document_id, storage_path, prog)
         prog["done"] = len(tasks)
         prog["finished"] = True
     except Exception as e:
         prog["error"] = str(e)[:300]
+        prog["finished"] = True
+
+
+def _sync_word_list(document_id: int, storage_path: str, prog: dict) -> None:
+    db = SessionLocal()
+    try:
+        apply_word_list(db, document_id, storage_path)
+    except Exception as e:
+        prog["error"] = str(e)[:300]
+    finally:
+        db.close()
+
+
+def _run_word_list_sync(document_id: int, storage_path: str):
+    """各课已提取完成时，只重解析书末 Word list 并写回生词表。"""
+    prog = _EXTRACT_PROGRESS.get(document_id, {})
+    try:
+        _sync_word_list(document_id, storage_path, prog)
+        prog["done"] = 1
+    finally:
         prog["finished"] = True
 
 
@@ -238,9 +287,83 @@ def audit_lesson(lesson_id: int, action: str = Form(...),
     lesson = db.get(Lesson, lesson_id)
     if not lesson:
         return {"error": "not found"}
-    lesson.audit_status = "approved" if action == "通过" else "rejected"
+    if action == "通过":
+        lesson.audit_status = "approved"
+    elif action == "撤回":
+        lesson.audit_status = "pending"
+    else:
+        lesson.audit_status = "rejected"
     db.commit()
     return {"id": lesson.id, "audit_status": lesson.audit_status}
+
+
+@router.put("/lessons/{lesson_id}/content")
+def update_lesson_content(lesson_id: int, req: LessonContentIn,
+                           _auth: User = Depends(require_role("parent", "admin")),
+                           db: Session = Depends(get_db)):
+    """家长改一课的课名、生词（含释义）和知识点。已有词按 id 原地更新，听写记录跟着走；删掉的词清掉掌握记录。"""
+    lesson = db.get(Lesson, lesson_id)
+    if not lesson:
+        return {"error": "not found"}
+    title = (req.title or "").strip()
+    if not title:
+        return {"error": "课名不能为空"}
+    if len(title) > 255:
+        return {"error": "课名过长"}
+
+    words = []
+    for w in req.words:
+        word = (w.word or "").strip()
+        if not word:
+            continue
+        if len(word) > 64:
+            return {"error": "生词不能超过 64 个字符"}
+        words.append((w.id, word, (w.extra or "").strip()))
+    points = []
+    for p in req.points:
+        content = (p.content or "").strip()
+        if not content:
+            continue
+        category = ((p.category or "本课").strip() or "本课")[:32]
+        points.append((p.id, content, category))
+
+    lesson.title = title
+    existing_words = {w.id: w for w in db.query(WordBank).filter_by(lesson_id=lesson.id).all()}
+    kept_words: set[int] = set()
+    for wid, word, extra in words:
+        row = existing_words.get(wid) if wid else None
+        if row is None:
+            db.add(WordBank(lesson_id=lesson.id, subject=lesson.subject, word=word, extra=extra))
+        else:
+            row.word = word
+            row.extra = extra
+            kept_words.add(row.id)
+    drop_words = [i for i in existing_words if i not in kept_words]
+    for i in drop_words:
+        db.expunge(existing_words[i])
+    detach_words(db, drop_words)
+    if drop_words:
+        db.query(WordBank).filter(WordBank.id.in_(drop_words)).delete(synchronize_session=False)
+
+    existing_points = {p.id: p for p in db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).all()}
+    kept_points: set[int] = set()
+    for pid, content, category in points:
+        row = existing_points.get(pid) if pid else None
+        if row is None:
+            db.add(KnowledgePoint(lesson_id=lesson.id, subject=lesson.subject, category=category, content=content))
+        else:
+            row.content = content
+            row.category = category
+            kept_points.add(row.id)
+    drop_points = [i for i in existing_points if i not in kept_points]
+    for i in drop_points:
+        db.expunge(existing_points[i])
+    detach_points(db, drop_points)
+    if drop_points:
+        db.query(KnowledgePoint).filter(KnowledgePoint.id.in_(drop_points)).delete(synchronize_session=False)
+
+    db.commit()
+    return {"ok": True, "id": lesson.id, "title": lesson.title}
 
 
 @router.post("/documents/{document_id}/resplit")

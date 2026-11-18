@@ -77,7 +77,7 @@ def test_detect_word_list_text_keyword():
     # 文本型：书末页含 "Word List" 关键字
     texts = ["目录", "Unit 1", "Unit 2"] + ["Word List apple banana"] + ["cat dog"]
     result = _detect_word_list("x.pdf", "英语", texts, len(texts), db=None)
-    assert result == {"title": "Word list", "start_page": 4, "end_page": 5}
+    assert result == {"title": "单词列表", "start_page": 4, "end_page": 4}
 
 
 def test_detect_word_list_ocr_scanned(monkeypatch):
@@ -93,7 +93,7 @@ def test_detect_word_list_ocr_scanned(monkeypatch):
 
     monkeypatch.setattr(split, "_ocr_page", fake_ocr)
     result = _detect_word_list("x.pdf", "英语", texts, len(texts), db=object())
-    assert result == {"title": "Word list", "start_page": 9, "end_page": 10}
+    assert result == {"title": "单词列表", "start_page": 9, "end_page": 9}
     assert 8 in calls  # 确实 OCR 了书末页
 
 
@@ -108,7 +108,7 @@ def test_detect_word_list_ocr_takes_earliest(monkeypatch):
 
     monkeypatch.setattr(split, "_ocr_page", fake_ocr)
     result = _detect_word_list("x.pdf", "英语", texts, len(texts), db=object())
-    assert result == {"title": "Word list", "start_page": 7, "end_page": 10}
+    assert result == {"title": "单词列表", "start_page": 7, "end_page": 9}
 
 
 def test_detect_word_list_not_found(monkeypatch):
@@ -117,6 +117,46 @@ def test_detect_word_list_not_found(monkeypatch):
     texts = ["3A00012026 AU"] * 10
     monkeypatch.setattr(split, "_ocr_page", lambda *a, **k: "no")
     assert _detect_word_list("x.pdf", "英语", texts, len(texts), db=object()) is None
+
+
+def test_detect_word_list_text_takes_earliest_keyword():
+    # 书末连续两页都带关键字时，起始页取最早的那一页
+    texts = ["Unit 1"] + ["body"] * 3 + ["Word List\napple 苹果"] + ["vocabulary\ncat 猫"]
+    result = _detect_word_list("x.pdf", "英语", texts, len(texts), db=None)
+    assert result["start_page"] == 5
+    assert result["end_page"] == 6
+
+
+def test_detect_word_list_ocr_unit_gloss_without_title(monkeypatch):
+    # 扫描版视觉模型不回 yes，也不转写标题 Word list，只吐出 Unit + 中英词条
+    import app.services.pdf_split as split
+
+    texts = ["5A00012026 AU"] * 10
+
+    def fake_ocr(pdf_path, page_index, db, instruction):
+        if page_index == 6:
+            return "Unit 1\n" + "\n".join(f"word{i} 词{i}" for i in range(8))
+        if page_index == 7:
+            return "Unit 5\n" + "\n".join(f"w{i} 义{i}" for i in range(8)) + "\nProper nouns\nChina 中国"
+        return "no"
+
+    monkeypatch.setattr(split, "_ocr_page", fake_ocr)
+    result = _detect_word_list("x.pdf", "英语", texts, len(texts), db=object())
+    assert result == {"title": "单词列表", "start_page": 7, "end_page": 8}
+
+
+def test_detect_lessons_cuts_word_list_off_last_unit(monkeypatch):
+    import app.services.pdf_split as split
+
+    glosses = "\n".join(f"word{i} 词{i}" for i in range(8))
+    texts = ["Unit 1 Hello world"] + ["story"] * 4 + [f"Word list\nUnit 1\n{glosses}"]
+    monkeypatch.setattr(split, "_page_text", lambda p: texts)
+    lessons = split.detect_lessons_from_pdf("x.pdf", "英语")
+    assert [l["title"] for l in lessons] == ["Unit 1 Hello world", "单词列表"]
+    assert lessons[0]["start_page"] == 1
+    assert lessons[0]["end_page"] == 5
+    assert lessons[1]["start_page"] == 6
+    assert lessons[1]["end_page"] == 6
 
 
 def test_detect_word_list_non_english():

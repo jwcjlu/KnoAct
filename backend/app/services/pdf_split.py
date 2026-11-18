@@ -418,22 +418,25 @@ def detect_lessons_from_pdf(pdf_path: str, subject: str, db=None) -> list[dict]:
     if not hits and _is_scanned(texts) and db is not None:
         hits = _detect_lessons_scanned(pdf_path, subject, texts, db)
 
+    # 英语书末 Word list 不单独成课：词条按 Unit 回填到各课。这里只把它从最后一课的页码里切掉，
+    # 避免单词表、专有名词和后记被算进最后一课的正文。
+    word_list = _detect_word_list(pdf_path, subject, texts, len(texts), db)
+    if word_list is not None:
+        hits = [(p, t) for p, t in hits if p < word_list["start_page"]]
+
     lessons = []
+    last_end = word_list["start_page"] - 1 if word_list is not None else len(texts)
     for j, (page_no, title) in enumerate(hits):
-        end = hits[j + 1][0] - 1 if j + 1 < len(hits) else len(texts)
+        end = hits[j + 1][0] - 1 if j + 1 < len(hits) else last_end
         if end < page_no:
             end = page_no
         lessons.append({"title": title, "start_page": page_no, "end_page": end})
-
-    # 英语教材：书末 Word list / Vocabulary 拆成独立一课，并从最后一课里截掉重叠页段
-    word_list = _detect_word_list(pdf_path, subject, texts, len(texts), db)
     if word_list is not None:
-        wl_start = word_list["start_page"]
-        if lessons and lessons[-1]["end_page"] >= wl_start:
-            # Word list 页落在最后一课页范围内：截断最后一课，让单词表独立成课
-            lessons[-1]["end_page"] = wl_start - 1
-        if wl_start <= len(texts):
-            lessons.append(word_list)
+        lessons.append({
+            "title": "单词列表",
+            "start_page": word_list["start_page"],
+            "end_page": word_list["end_page"],
+        })
     return lessons
 
 
@@ -482,39 +485,137 @@ def _detect_lessons_scanned(pdf_path: str, subject: str, texts: list[str], db) -
     return hits
 
 
-_WORD_LIST_KEYWORDS = ("word list", "wordlist", "vocabulary", "word bank", "new words", "words and")
+def is_word_list_title(title: str) -> bool:
+    return (title or "").strip().lower() in {"word list", "单词列表"}
+_WORD_LIST_TAIL = 16
+_WORD_LIST_KEYWORDS = ("word list", "vocabulary", "glossary", "单词表", "词汇表", "单词列表")
+WORD_LIST_OCR_PROMPT = (
+    "如果这一页是英语教材的单词表（Word list / Vocabulary，含 Unit 编号和中文释义）"
+    "或专有名词表（Proper nouns），请按先左栏、后右栏逐行转写，保留行首星号 * 和 Unit 标题，不要解释。"
+    "如果都不是，只回复 no。"
+)
+_GLOSS_SPLIT = re.compile(r"[\u4e00-\u9fff（(]")
+
+
+def split_gloss_line(line: str) -> tuple[str, str, bool] | None:
+    """一行「英文词/短语 + 中文释义」。返回 (word, gloss, starred)，对不上则 None。"""
+    s = line.strip()
+    if not s or s.startswith("注"):
+        return None
+    star = s[0] in "*＊"
+    body = s[1:].strip() if star else s
+    m = _GLOSS_SPLIT.search(body)
+    if not m or m.start() == 0:
+        return None
+    word = re.sub(r"\s+", " ", body[:m.start()]).strip()
+    gloss = body[m.start():].strip()
+    if not word or not gloss or not re.search(r"[A-Za-z]", word):
+        return None
+    if len(word) > 60 or len(word.split()) > 10:
+        return None
+    return word, gloss, star
+
+
+def _page_is_word_list(text: str) -> bool:
+    """这一页是不是书末单词表。
+
+    扫描版视觉模型经常不回 yes，也不转写标题 Word list，只吐出「Unit N + 英文 + 中文」。
+    那种版式也要算命中。整页只有 no 才否掉。
+    """
+    if not text or not text.strip():
+        return False
+    first = text.strip().splitlines()[0].strip().lower()
+    if first in {"no", "no.", "否", "不是"}:
+        return False
+    if first in {"yes", "yes."} or (first.startswith("yes") and len(first) < 24):
+        return True
+    low = text.lower()
+    if any(k in low for k in _WORD_LIST_KEYWORDS):
+        return True
+    units = entries = 0
+    for line in text.splitlines():
+        s = line.strip()
+        if re.match(r"unit\s*\d+\b", s, re.I):
+            units += 1
+        elif split_gloss_line(s):
+            entries += 1
+    return units >= 1 and entries >= 8
+
+
+def _page_continues_word_list(text: str) -> bool:
+    """已经定位到单词表之后，后续页只要还在列 Unit 词条或专有名词就继续。"""
+    if _page_is_word_list(text or ""):
+        return True
+    if re.search(r"proper\s+nouns", text or "", re.I):
+        return True
+    if not text:
+        return False
+    units = entries = 0
+    for line in text.splitlines():
+        s = line.strip()
+        if re.match(r"unit\s*\d+\b", s, re.I):
+            units += 1
+        elif split_gloss_line(s):
+            entries += 1
+    return units >= 1 and entries >= 1
+
+
+def _page_is_glossary(text: str) -> bool:
+    """单词表、专有名词表，或一页里有足够多的「英文 + 中文」词条。"""
+    if _page_is_word_list(text or ""):
+        return True
+    if re.search(r"proper\s+nouns", text or "", re.I):
+        return True
+    entries = sum(1 for line in (text or "").splitlines() if split_gloss_line(line))
+    return entries >= 8
+
+
+def _glossary_end_index(pdf_path: str, texts: list[str], start: int, db) -> int:
+    """从单词表起始页往后，停在后记/空白页之前。"""
+    end = start
+    last = min(len(texts), start + 8)
+    for i in range(start, last):
+        raw = texts[i] or ""
+        if not _page_is_glossary(raw) and db is not None:
+            raw = _ocr_page(pdf_path, i, db, WORD_LIST_OCR_PROMPT)
+        if _page_is_glossary(raw or ""):
+            end = i
+        elif i > start:
+            break
+    return end
 
 
 def _detect_word_list(pdf_path: str, subject: str, texts: list[str], total_pages: int, db) -> dict | None:
-    """检测英语教材书末的 Word list / Vocabulary 页，返回独立一课 {title,start_page,end_page} 或 None。
+    """检测英语教材书末 Word list 的页码范围。返回 {title, start_page, end_page} 或 None。
 
-    文本型：在页文本里搜关键字（快）；扫描版（文本层只有水印）：OCR 书末最多 12 页，
-    用「是/否」二分类识别单词表标题页，取**最早**命中的那页作为起始页。仅英语学科启用。
+    文本型看关键字或「Unit + 中文释义」版式；扫描版 OCR 书末最多 16 页，取最早一页，
+    结束页停在后记之前。词条由 lesson_extract.apply_word_list 写入各课，并另建「单词列表」一课。
     """
     if subject != "英语" or not texts or total_pages <= 0:
         return None
 
-    lo = max(0, total_pages - 12)
-    # 1) 文本关键字：从书末往前扫，命中含关键字且内容像词汇表的页
-    for i in range(total_pages - 1, lo - 1, -1):
-        low = (texts[i] or "").lower()
-        if any(k in low for k in _WORD_LIST_KEYWORDS):
-            return {"title": "Word list", "start_page": i + 1, "end_page": total_pages}
+    lo = max(0, total_pages - _WORD_LIST_TAIL)
+    hit = None
+    for i in range(lo, total_pages):
+        if _page_is_word_list(texts[i] or ""):
+            hit = i
+            break
 
-    # 2) 扫描版 OCR 兜底：逐页问「是否单词表页」，取最早命中的页
-    if db is None:
+    if hit is None and db is not None:
+        misses = 0
+        for i in range(total_pages - 1, lo - 1, -1):
+            raw = _ocr_page(pdf_path, i, db, WORD_LIST_OCR_PROMPT)
+            if _page_is_word_list(raw or ""):
+                hit = i
+                misses = 0
+            elif hit is not None:
+                misses += 1
+                if misses >= 2:
+                    break
+    if hit is None:
         return None
-    first_hit = None
-    for i in range(total_pages - 1, lo - 1, -1):
-        raw = _ocr_page(
-            pdf_path, i, db,
-            "这一页是不是单词表（Word list / Vocabulary / New words）？是请只回复 yes，否则只回复 no。",
-        )
-        if raw and raw.strip().lower().startswith("yes"):
-            first_hit = i
-    if first_hit is not None:
-        return {"title": "Word list", "start_page": first_hit + 1, "end_page": total_pages}
-    return None
+    end = _glossary_end_index(pdf_path, texts, hit, db)
+    return {"title": "单词列表", "start_page": hit + 1, "end_page": end + 1}
 
 
 def render_pages(document_id: int, pdf_path: str, out_dir: str) -> list[dict]:
