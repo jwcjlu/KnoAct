@@ -11,7 +11,7 @@ from ..core.access import (
 from ..core.deps import get_current_user, require_role
 from ..database import get_db, SessionLocal
 from ..models import User
-from ..models import PdfDocument, PdfPage, Lesson, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
+from ..models import PdfDocument, PdfPage, Lesson, LessonAudio, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
 from ..services.cleanup import detach_points, detach_words, purge_lesson_content, purge_lessons
 from ..services.pdf_split import render_pages, detect_lessons_from_pdf
 from ..services.lesson_extract import apply_word_list, extract_lesson_content
@@ -403,8 +403,10 @@ def delete_document(document_id: int, _auth: User = Depends(require_role("parent
 
     lesson_ids = [r[0] for r in db.query(Lesson.id).filter_by(document_id=document_id).all()]
 
-    # 清理关联表
+    # 清理关联表。音频文件挂在教材上，移除教材时一并删掉
+    audio_paths = [r[0] for r in db.query(LessonAudio.audio_path).filter_by(document_id=document_id).all()]
     purge_lessons(db, lesson_ids)
+    db.query(LessonAudio).filter_by(document_id=document_id).delete(synchronize_session=False)
     db.query(PdfPage).filter_by(document_id=document_id).delete(synchronize_session=False)
     db.query(Textbook).filter_by(document_id=document_id).delete(synchronize_session=False)
     db.query(UserDocument).filter_by(document_id=document_id).delete(synchronize_session=False)
@@ -432,4 +434,10 @@ def delete_document(document_id: int, _auth: User = Depends(require_role("parent
             shutil.rmtree(page_dir, ignore_errors=True)
     except OSError:
         pass
+    for path in audio_paths:
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
     return {"ok": True, "deleted": document_id}
