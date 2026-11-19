@@ -31,17 +31,54 @@ class FakeHomeRepository implements HomeRepository {
     snapshotSubjects.add(subject);
     return HomeSnapshot(
       userName: '金同学',
-      lessonProgress: LessonProgress(current: subject == '数学' ? 2 : 3, total: 8, mastered: 1, currentLessonId: 46),
+      lessonProgress: LessonProgress(
+        current: subject == '数学' ? 2 : 3,
+        total: 8,
+        mastered: 1,
+        currentLessonId: 46,
+      ),
     );
   }
 
   @override
   Future<List<StudyTask>> tasks(int userId, String date) async => const [
-        StudyTask(id: 1, subject: '语文', taskType: 'dictation', title: '桂花雨 生词听写', detail: '', points: 20, submitStatus: 'approved'),
-        StudyTask(id: 2, subject: '语文', taskType: 'reading', title: '桂花雨 阅读理解', detail: '', points: 20, submitStatus: 'not_started'),
-        StudyTask(id: 3, subject: '语文', taskType: 'review', title: '到期复习', detail: '', points: 20, submitStatus: 'not_started'),
-        StudyTask(id: 4, subject: '英语', taskType: 'listening', title: '英语听力', detail: '', points: 20, submitStatus: 'submitted'),
-      ];
+    StudyTask(
+      id: 1,
+      subject: '语文',
+      taskType: 'dictation',
+      title: '桂花雨 生词听写',
+      detail: '',
+      points: 20,
+      submitStatus: 'approved',
+    ),
+    StudyTask(
+      id: 2,
+      subject: '语文',
+      taskType: 'reading',
+      title: '桂花雨 阅读理解',
+      detail: '',
+      points: 20,
+      submitStatus: 'not_started',
+    ),
+    StudyTask(
+      id: 3,
+      subject: '语文',
+      taskType: 'review',
+      title: '到期复习',
+      detail: '',
+      points: 20,
+      submitStatus: 'not_started',
+    ),
+    StudyTask(
+      id: 4,
+      subject: '英语',
+      taskType: 'listening',
+      title: '英语听力',
+      detail: '',
+      points: 20,
+      submitStatus: 'submitted',
+    ),
+  ];
 
   @override
   Future<int> balance(int userId, {int? bucketId}) async {
@@ -62,10 +99,18 @@ class FakeHomeRepository implements HomeRepository {
   Future<void> submitTask(int taskId) async {}
 
   @override
-  Future<void> uploadTaskPhoto(int taskId, List<int> bytes, {String filename = 'dictation.jpg'}) async {}
+  Future<void> uploadTaskPhoto(
+    int taskId,
+    List<int> bytes, {
+    String filename = 'dictation.jpg',
+  }) async {}
 }
 
-Future<void> pumpHome(WidgetTester tester, FakeHomeRepository repo, {Size size = const Size(420, 900)}) async {
+Future<void> pumpHome(
+  WidgetTester tester,
+  FakeHomeRepository repo, {
+  Size size = const Size(420, 900),
+}) async {
   SharedPreferences.setMockInitialValues({
     'knoact_child_id': 4,
     'knoact_child_name': '金同学',
@@ -78,16 +123,20 @@ Future<void> pumpHome(WidgetTester tester, FakeHomeRepository repo, {Size size =
   final container = ProviderContainer(
     overrides: [
       homeRepositoryProvider.overrideWithValue(repo),
-      authRepositoryProvider.overrideWithValue(FakeAuthRepository(const Child(4, '金同学'))),
+      authRepositoryProvider.overrideWithValue(
+        FakeAuthRepository(const Child(4, '金同学')),
+      ),
     ],
     retry: (_, _) => null,
   );
   addTearDown(container.dispose);
   await container.read(sessionProvider.future);
-  await tester.pumpWidget(UncontrolledProviderScope(
-    container: container,
-    child: const MaterialApp(home: Scaffold(body: HomePage())),
-  ));
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: Scaffold(body: HomePage())),
+    ),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -101,7 +150,10 @@ void main() {
     expect(find.text('待完成 2'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('已完成 1'), 300);
     expect(find.text('已完成 1'), findsOneWidget);
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('task-action-1')), 300);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('task-action-1')),
+      300,
+    );
     expect(find.widgetWithText(FilledButton, '已完成'), findsOneWidget);
     expect(find.text('英语听力'), findsNothing);
   });
@@ -109,7 +161,10 @@ void main() {
   testWidgets('切换学科重新拉取该学科快照', (tester) async {
     final repo = FakeHomeRepository();
     await pumpHome(tester, repo);
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('subject-数学')), 300);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('subject-数学')),
+      300,
+    );
     await tester.tap(find.byKey(const ValueKey('subject-数学')));
     await tester.pumpAndSettle();
     expect(repo.snapshotSubjects.last, '数学');
@@ -143,13 +198,28 @@ void main() {
   });
 
   testWidgets('学科标签与任务列表计数一致：无学科任务计入每个学科，无任务不显示 ✓', (tester) async {
-    StudyTask t(int id, String subject, String status) =>
-        StudyTask(id: id, subject: subject, taskType: 'custom', title: 't$id', detail: '', points: 20, submitStatus: status);
-    Future<void> pumpTabs(List<StudyTask> tasks) => tester.pumpWidget(MaterialApp(
-          home: Scaffold(body: SubjectTabs(tasks: tasks, current: '语文', onSelect: (_) {})),
-        ));
+    StudyTask t(int id, String subject, String status) => StudyTask(
+      id: id,
+      subject: subject,
+      taskType: 'custom',
+      title: 't$id',
+      detail: '',
+      points: 20,
+      submitStatus: status,
+    );
+    Future<void> pumpTabs(List<StudyTask> tasks) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SubjectTabs(tasks: tasks, current: '语文', onSelect: (_) {}),
+        ),
+      ),
+    );
 
-    await pumpTabs([t(1, '语文', 'approved'), t(2, '英语', 'not_started'), t(3, '', 'not_started')]);
+    await pumpTabs([
+      t(1, '语文', 'approved'),
+      t(2, '英语', 'not_started'),
+      t(3, '', 'not_started'),
+    ]);
     expect(find.text('语文 1'), findsOneWidget);
     expect(find.text('英语 2'), findsOneWidget);
     expect(find.text('数学 1'), findsOneWidget);
@@ -167,18 +237,28 @@ void main() {
 
   testWidgets('只有一个桶时不显示学年选择器', (tester) async {
     final repo = FakeHomeRepository(
-      bucketList: const [BucketInfo(id: 9, grade: 4, schoolYear: '2026-2027', status: 'active')],
+      bucketList: const [
+        BucketInfo(id: 9, grade: 4, schoolYear: '2026-2027', status: 'active'),
+      ],
     );
     await pumpHome(tester, repo);
     expect(find.byKey(const ValueKey('home-bucket-9')), findsNothing);
-    expect(find.byKey(const ValueKey('home-bucket-readonly-banner')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('home-bucket-readonly-banner')),
+      findsNothing,
+    );
   });
 
   testWidgets('多个桶时显示学年选择器，切到历史桶更新积分查询', (tester) async {
     final repo = FakeHomeRepository(
       bucketList: const [
         BucketInfo(id: 9, grade: 4, schoolYear: '2026-2027', status: 'active'),
-        BucketInfo(id: 2, grade: 3, schoolYear: '2025-2026', status: 'archived'),
+        BucketInfo(
+          id: 2,
+          grade: 3,
+          schoolYear: '2025-2026',
+          status: 'archived',
+        ),
       ],
     );
     await pumpHome(tester, repo);
@@ -186,13 +266,28 @@ void main() {
     // 两个学年 chip 都在，默认选中 active 桶，不显示只读提示
     expect(find.text('2026-2027 · 4年级（当前）'), findsOneWidget);
     expect(find.text('2025-2026 · 3年级'), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-bucket-readonly-banner')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('home-bucket-readonly-banner')),
+      findsNothing,
+    );
 
     // 切到归档桶：显示历史学年提示，积分重新查询带 bucket_id
     await tester.tap(find.byKey(const ValueKey('home-bucket-2')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('home-bucket-readonly-banner')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('home-bucket-readonly-banner')),
+      findsOneWidget,
+    );
     expect(find.text('历史学年积分'), findsOneWidget);
     expect(repo.balanceQueries, contains(2));
+  });
+
+  testWidgets('首页显示思维训练入口', (tester) async {
+    await pumpHome(tester, FakeHomeRepository());
+
+    expect(find.text('思维训练 · 动动脑'), findsOneWidget);
+    expect(find.text('数独'), findsOneWidget);
+    expect(find.text('舒尔特'), findsOneWidget);
+    expect(find.text('扫雷'), findsOneWidget);
   });
 }

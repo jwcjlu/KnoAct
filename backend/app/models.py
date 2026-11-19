@@ -606,3 +606,26 @@ class AnswerRecord(Base):
     source_type: Mapped[str] = mapped_column(String(16), default="")
     source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BrainGameResult(Base):
+    """思维训练小游戏成绩：客户端本地出题，后端只记录结果用于统计最佳。
+
+    不写 AnswerRecord（游戏不是做题，避免污染家长端「当天做题明细」），
+    也不涉及积分。
+    """
+    __tablename__ = "brain_game_results"
+    __table_args__ = (
+        Index("ix_brain_game_results_user_bucket_game",
+              "user_id", "bucket_id", "game", "difficulty"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    bucket_id: Mapped[int | None] = mapped_column(
+        ForeignKey("school_year_buckets.id"), nullable=True)
+    game: Mapped[str] = mapped_column(String(24))        # sudoku | schulte | minesweeper
+    difficulty: Mapped[str] = mapped_column(String(12))  # easy | medium | hard
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    moves: Mapped[int] = mapped_column(Integer, default=0)
+    solved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

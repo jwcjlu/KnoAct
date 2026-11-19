@@ -9,6 +9,9 @@ import '../features/auth/ui/otp_login_page.dart';
 import '../features/auth/ui/register_page.dart';
 import '../features/assignment/ui/assignment_page.dart';
 import '../features/bank_exercise/ui/bank_exercise_page.dart';
+import '../features/brain_games/ui/minesweeper_page.dart';
+import '../features/brain_games/ui/schulte_page.dart';
+import '../features/brain_games/ui/sudoku_page.dart';
 import '../features/center/ui/center_page.dart';
 import '../features/dictation/ui/dictation_page.dart';
 import '../features/drill/ui/drill_page.dart';
@@ -60,7 +63,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           path == '/reader/view' ||
           path == '/reader/spike' ||
           path == '/bank-exercise' ||
-          path == '/listening') {
+          path == '/listening' ||
+          path == '/brain-games/sudoku' ||
+          path == '/brain-games/schulte' ||
+          path == '/brain-games/minesweeper') {
         return null;
       }
       return '/home';
@@ -79,7 +85,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/reader/view',
         builder: (_, state) => ReaderViewPage(
-          initialLessonId: int.tryParse(state.uri.queryParameters['lesson'] ?? ''),
+          initialLessonId: int.tryParse(
+            state.uri.queryParameters['lesson'] ?? '',
+          ),
         ),
       ),
       GoRoute(
@@ -89,16 +97,25 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/listening',
         builder: (_, state) {
-          final raw = int.tryParse(state.uri.queryParameters['document_id'] ?? '');
-          return ListeningPage(initialDocumentId: (raw != null && raw > 0) ? raw : null);
+          final raw = int.tryParse(
+            state.uri.queryParameters['document_id'] ?? '',
+          );
+          return ListeningPage(
+            initialDocumentId: (raw != null && raw > 0) ? raw : null,
+          );
         },
       ),
       GoRoute(
         path: '/bank-exercise',
         builder: (_, state) {
           final qp = state.uri.queryParameters;
-          final idsRaw = (qp['ids'] ?? '').split(',').where((s) => s.trim().isNotEmpty);
-          final ids = idsRaw.map((s) => int.tryParse(s.trim())).whereType<int>().toList();
+          final idsRaw = (qp['ids'] ?? '')
+              .split(',')
+              .where((s) => s.trim().isNotEmpty);
+          final ids = idsRaw
+              .map((s) => int.tryParse(s.trim()))
+              .whereType<int>()
+              .toList();
           return BankExercisePage(
             bankId: int.tryParse(qp['bank_id'] ?? '') ?? 0,
             questionIds: ids,
@@ -106,13 +123,44 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
+      GoRoute(
+        path: '/brain-games/sudoku',
+        builder: (_, _) => const SudokuPage(),
+      ),
+      GoRoute(
+        path: '/brain-games/schulte',
+        builder: (_, _) => const SchultePage(),
+      ),
+      GoRoute(
+        path: '/brain-games/minesweeper',
+        builder: (_, _) => const MinesweeperPage(),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => AppShell(navigationShell: shell),
         branches: [
-          StatefulShellBranch(routes: [GoRoute(path: '/home', builder: (_, _) => const HomePage())]),
-          StatefulShellBranch(routes: [GoRoute(path: '/center', builder: (_, _) => const CenterPage())]),
-          StatefulShellBranch(routes: [GoRoute(path: '/wrongbook', builder: (_, _) => const WrongbookPage())]),
-          StatefulShellBranch(routes: [GoRoute(path: '/profile', builder: (_, _) => const ProfilePage())]),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/home', builder: (_, _) => const HomePage()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/center', builder: (_, _) => const CenterPage()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/wrongbook',
+                builder: (_, _) => const WrongbookPage(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/profile', builder: (_, _) => const ProfilePage()),
+            ],
+          ),
         ],
       ),
     ],
