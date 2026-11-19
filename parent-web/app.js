@@ -3523,10 +3523,19 @@ async function testVoice(){
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = new Audio(url); a.onended=()=>URL.revokeObjectURL(url); a.play();
-      toast('已播放中转站合成语音');
+      toast('已播放合成语音');
     } else {
       const d = await r.json().catch(()=>({}));
-      if(d && d.use_browser_tts){ browserSpeak(sample); toast('当前为浏览器合成（未配置真实 TTS）'); }
+      if(d && d.use_browser_tts){
+        browserSpeak(sample);
+        if(d.configured){
+          const why = (d.reason || '').includes('insufficient balance') ? '中转站余额不足'
+            : (d.reason ? String(d.reason).slice(0,80) : '上游合成失败');
+          toast('已配置 TTS，但合成失败（' + why + '），已回退浏览器朗读');
+        } else {
+          toast('当前为浏览器合成（未配置真实 TTS）');
+        }
+      }
       else { toast('语音合成失败：' + (d.detail || d.error || r.statusText || '未知错误')); }
     }
   }catch(e){ toast('语音合成失败：' + e.message); }

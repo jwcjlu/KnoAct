@@ -113,6 +113,109 @@ class FakeTTS(TTSProvider):
         return text.encode("utf-8")
 
 
+def tts_lang_for_text(text: str) -> str:
+    """听写短词语言：含汉字 → zh，否则 en。"""
+    for ch in text or "":
+        if "\u4e00" <= ch <= "\u9fff":
+            return "zh"
+    return "en"
+
+
+def _public_tts_chunks(text: str) -> list[str]:
+    """有道中文接口基本只吃 1～2 字；英文可稍长。按标点切开再按长度切段。"""
+    import re
+
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    if not text:
+        return []
+    lang = tts_lang_for_text(text)
+    max_len = 2 if lang == "zh" else 40
+    parts = [p.strip() for p in re.split(r"[，。！？、；：,.!?;:\s]+", text) if p.strip()]
+    if not parts:
+        parts = [text]
+    out: list[str] = []
+    for part in parts:
+        if len(part) <= max_len:
+            out.append(part)
+            continue
+        for i in range(0, len(part), max_len):
+            out.append(part[i : i + max_len])
+    return out[:12]  # 试听/听写足够；避免一次打太多请求
+
+
+def _looks_like_mp3(data: bytes, ctype: str = "") -> bool:
+    if not data or len(data) < 200:
+        return False
+    ctype = (ctype or "").lower()
+    if "json" in ctype or data[:1] == b"{":
+        return False
+    return True
+
+
+def _fetch_youdao_mp3(piece: str, lang: str) -> bytes:
+    import requests
+    from urllib.parse import quote
+
+    if lang == "zh":
+        url = f"https://dict.youdao.com/dictvoice?le=zh&audio={quote(piece)}"
+    else:
+        url = f"https://dict.youdao.com/dictvoice?audio={quote(piece)}"
+    resp = requests.get(
+        url,
+        timeout=12,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; KnoAct/1.0)"},
+    )
+    data = resp.content or b""
+    if resp.status_code != 200 or not _looks_like_mp3(data, resp.headers.get("Content-Type") or ""):
+        raise RuntimeError(f"public_tts_http_{resp.status_code}")
+    return data
+
+
+def _fetch_google_mp3(piece: str, lang: str) -> bytes:
+    import requests
+    from urllib.parse import quote
+
+    tl = "zh-CN" if lang == "zh" else "en"
+    url = (
+        "https://translate.google.com/translate_tts"
+        f"?ie=UTF-8&client=tw-ob&tl={tl}&q={quote(piece)}"
+    )
+    resp = requests.get(
+        url,
+        timeout=12,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; KnoAct/1.0)"},
+    )
+    data = resp.content or b""
+    if resp.status_code != 200 or not _looks_like_mp3(data, resp.headers.get("Content-Type") or ""):
+        raise RuntimeError(f"public_tts_google_{resp.status_code}")
+    return data
+
+
+def _fetch_public_mp3(piece: str, lang: str) -> bytes:
+    try:
+        return _fetch_youdao_mp3(piece, lang)
+    except Exception:
+        return _fetch_google_mp3(piece, lang)
+
+
+def synthesize_public_mp3(text: str) -> bytes:
+    """商用 TTS 不可用时的朗读兜底（有道 → Google）。
+
+    安卓多数机型预装英文 TTS、未装中文语音包：英语听写能播、语文听写静音。
+    此兜底对中英文都返回可播放的 audio/mpeg，供 Flutter AudioPlayer 播放。
+    """
+    text = (text or "").strip()
+    if not text or len(text) > 120:
+        raise RuntimeError("public_tts_unsupported_text")
+    lang = tts_lang_for_text(text)
+    chunks = _public_tts_chunks(text)
+    if not chunks:
+        raise RuntimeError("public_tts_empty")
+    # 单段直接返回；多段简单拼接 MPEG 帧（听写/试听足够）
+    parts = [_fetch_public_mp3(c, lang) for c in chunks]
+    return b"".join(parts)
+
+
 PROVIDERS = {"minimax": MiniMaxTTS, "xunfei": XunfeiTTS, "openai": OpenAITTS, "fake": FakeTTS}
 
 
