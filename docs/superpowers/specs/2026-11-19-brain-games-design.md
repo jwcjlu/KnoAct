@@ -55,11 +55,14 @@
 
 流程：
 1. 孩子点卡片进游戏 → 默认「简单」难度，顶部可切换。
-2. 切换难度或点「重新开始」→ 本地生成新题面，计时归零开始。
-3. 通关或失败 → 本地算出 `duration_ms` / `moves` / `solved`。
-4. `solved=true` 时 `POST /api/brain-games/result` 存一条成绩；
-   结束弹层展示本次用时与「新纪录！」（若优于历史最佳）。
-5. 返回首页。
+2. 进入游戏页时拉一次 `GET /api/brain-games/stats`，顶部显示当前难度的历史最佳；
+   切换难度时不重复请求，直接用已拉到的 `stats` 里对应难度数据。
+3. 切换难度或点「重新开始」→ 本地生成新题面，计时归零开始。
+4. 通关或失败 → 本地算出 `duration_ms` / `moves` / `solved`。
+5. **每次结束都** `POST /api/brain-games/result`（`solved` 如实传 true/false），
+   让 `played` 反映真实游玩次数、`solved` 反映通关次数。
+6. 结束弹层展示本次用时；仅当 `is_best=true` 时才显示「新纪录！」。
+7. 返回首页。
 
 > 首页直接进游戏（不设中间列表页），减少一层点击。历史最佳在
 > 游戏内顶部与结束弹层展示。
@@ -76,10 +79,11 @@
 
 - 生成：回溯随机填一个完整解（每步候选值随机打乱），再随机挖洞到提示数上限；
   挖洞后不校验唯一解（小学生场景，唯一解非必需，避免引入求解器复杂度）。
-- 交互：点格子选中 → 底部数字条（1–N）落子；与解不符立即标红；
+- 交互：点格子选中 → 底部数字条（1–N）落子；与解不符立即标红并**自动清空该格**
+  （不保留非法数字，避免「填满但未通关且无提示」的静默态）；
   同行/同列/同宫浅蓝高亮；已给定格子不可改。
 - 通关：所有格子填满且与解一致。
-- `moves` = 落子次数。无「提示」按钮（保持思考过程）。
+- `moves` = 落子次数（含被判错后清空的次数）。无「提示」按钮（保持思考过程）。
 
 #### 舒尔特方格 Schulte Table
 
@@ -104,7 +108,7 @@
 
 - 首次点击后才布雷，保证首点不是雷。
 - 交互：点击开格；长按插旗；数字表示相邻雷数；空白格（0）自动扩散。
-- 失败：踩雷即结束（`solved=false`，仍写一条成绩用于统计「玩过」）。
+- 失败：踩雷即结束（`solved=false`，**仍写一条成绩**，用于 `played` 统计）。
 - 通关：所有非雷格开完。
 - `moves` = 点开格子数。
 
@@ -118,9 +122,12 @@
 ```python
 class BrainGameResult(Base):
     __tablename__ = "brain_game_results"
+    __table_args__ = (
+        Index("ix_brain_game_results_user_bucket_game", "user_id", "bucket_id", "game", "difficulty"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    bucket_id: Mapped[int | None] = mapped_column(ForeignKey("buckets.id"), nullable=True)
+    bucket_id: Mapped[int | None] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     game: Mapped[str] = mapped_column(String(24))        # sudoku | schulte | minesweeper
     difficulty: Mapped[str] = mapped_column(String(12))  # easy | medium | hard
     duration_ms: Mapped[int] = mapped_column(Integer)
@@ -129,15 +136,29 @@ class BrainGameResult(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 ```
 
+> 学年桶表名是 `school_year_buckets`（`models.py:356`），与其余 10 个带桶模型一致。
+> 写错成 `buckets.id` 会让 SQLAlchemy 在 metadata 解析阶段抛
+> `NoReferencedTableError`，后端无法启动、全部 pytest 失败。
+
 接口（新 router `backend/app/routers/brain_games.py`，`prefix="/api/brain-games"`）：
 
 - `POST /api/brain-games/result`
   body：`{user_id, game, difficulty, duration_ms, moves, solved}`
-  - `ensure_user_access` 校验；服务端补 `bucket_id = resolve_bucket_id(...)`
-  - 校验 `game`/`difficulty` 白名单，非法返回 400 `{"error": "invalid_game"}`
-  - 返回 `{"ok": true, "is_best": bool}`（`is_best` 供前端显示「新纪录！」）
-- `GET /api/brain-games/stats?user_id=`
-  返回：
+  - `require_learning_user` + `ensure_user_access(user, user_id, db)`（与 `points.py` 一致）
+  - 服务端补 `bucket_id = resolve_bucket_id(db, user_id, None)`
+  - 校验 `game` ∈ {sudoku, schulte, minesweeper}、`difficulty` ∈ {easy, medium, hard}，
+    非法返回 400 `{"error": "invalid_game"}`
+  - 返回 `{"ok": true, "is_best": bool}`
+  - `is_best` 判定（明确口径）：
+    - 同一 `user_id` + `bucket_id` + `game` + `difficulty` 维度内比较
+    - `solved=false` 的记录**恒返回 `false`**（踩雷不算新纪录）
+    - `solved=true` 时，若没有更早的 `solved=true` 记录，返回 `true`；
+      否则当 `duration_ms` **严格小于**历史最佳时返回 `true`，平手返回 `false`
+- `GET /api/brain-games/stats?user_id=&bucket_id=`（`bucket_id` 可选，
+  与 `points.py` / `goals.py` 口径一致）
+  - 无 active 桶且未传 `bucket_id` 时，`bucket_id` 为 `None`：
+    **只聚合 `bucket_id IS NULL` 的记录**，不会串到别的学年
+  - 返回：
 
   ```json
   {
@@ -149,9 +170,9 @@ class BrainGameResult(Base):
   }
   ```
 
-  - `played` = 该难度总记录数；`solved` = `solved=true` 数量；
+  - `played` = 该难度总记录数（含失败）；`solved` = `solved=true` 数量；
     `best_ms` = `solved=true` 中的最小 `duration_ms`（无通关则为 `null`）
-  - 只返回当前 `bucket_id` 下的数据（与积分口径一致）
+  - 返回结构固定包含三个 `game` key，无数据时为空对象 `{}`
 
 **不写 AnswerRecord、不动 `Point`。**
 
@@ -164,9 +185,10 @@ class BrainGameResult(Base):
 - 样式沿用现有 `SectionCard` / `AppColors`，不引入新主题。
 
 **游戏内**
-- 顶部：返回、游戏名、难度分段控件（简单/中等/困难）、计时器 `mm:ss`。
+- 顶部：返回、游戏名、难度分段控件（简单/中等/困难）、计时器 `mm:ss`、
+  当前难度历史最佳（如「最佳 01:22」，无记录显示「—」）。
 - 数独：选中格主题蓝描边，同行/列/宫浅蓝底；数字条仅显示该盘面可用数字；
-  错格标红；填满立即判定。
+  落错立即标红并自动清空该格；填满立即判定。
 - 舒尔特：格子等宽正方形，点对变绿淡出，点错红色抖动。
 - 扫雷：未点格灰色凸起，点开浅色凹陷；数字 1–8 经典配色；雷红点。
 - 结束弹层：
@@ -182,8 +204,11 @@ class BrainGameResult(Base):
 
 后端 pytest（`backend/tests/test_brain_games.py`）：
 - 写两条成绩后 `stats` 的 `played` / `solved` / `best_ms` 聚合正确
-- `solved=false` 不参与 `best_ms`；全部未通关时 `best_ms` 为 `null`
-- 非法 `game` 值返回 400
+- 失败局（`solved=false`）写入后 `played` 加 1，但不参与 `solved` 与 `best_ms`
+- 全部未通关时 `best_ms` 为 `null`
+- 非法 `game` / `difficulty` 值返回 400
+- `is_best`：首通为 `true`；更慢为 `false`；更快为 `true`；平手为 `false`；
+  `solved=false` 恒为 `false`
 - 无权用户（别的家长的孩子）写入被拒
 
 Flutter 单测（`student-app/test/features/brain_games/`）：
