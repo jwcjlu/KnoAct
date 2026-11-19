@@ -1367,10 +1367,16 @@ git commit -m "feat(brain-games): 扫雷棋盘生成、扩散与判通逻辑"
 新建 `student-app/lib/features/brain_games/ui/brain_game_shell.dart`：
 
 ```dart
+import 'dart:ui' show FontFeature;
+
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
 import '../data/brain_game_models.dart';
+
+/// 游戏内用到的少量专用色（`AppColors` 只有 blue/green/orange/gold/ink/gray/line/bg）。
+const _gameRed = Color(0xFFC05B4A);
+const _gameRedSoft = Color(0xFFFDF0EE);
 
 /// 毫秒 → "mm:ss"（超过 99 分钟按分钟显示）。
 String formatGameMs(int ms) {
@@ -1499,8 +1505,11 @@ Future<void> showGameResultDialog(
 }
 ```
 
-> 若 `AppColors.orange` 不存在，改用 `AppColors.blue`（先看 `lib/core/theme.dart`
-> 里实际有哪些颜色常量，不要臆造）。
+> **颜色常量只允许用 `AppColors` 里实际存在的 11 个**：
+> `blue / blueSoft / green / greenSoft / orange / orangeSoft / gold / bg / ink / gray / line`。
+> 没有 `red` / `card` / `white` —— 需要红色/白色时在本文件顶部定义
+> `const _gameRed = Color(0xFFC05B4A);` 这样的私有常量（如上方示例），
+> **不要往 `theme.dart` 里加新颜色**。
 
 - [ ] **Step 2: 静态检查**
 
@@ -1625,6 +1634,9 @@ import '../data/brain_game_models.dart';
 import '../data/brain_game_repository.dart';
 import '../logic/sudoku.dart';
 import 'brain_game_shell.dart';
+
+/// 落错格的标红底色（`AppColors` 无 red，用局部常量）
+const _gameWrong = Color(0x1FC05B4A);
 
 class SudokuPage extends ConsumerStatefulWidget {
   const SudokuPage({super.key});
@@ -1777,7 +1789,7 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
   }
 
   Color _cellColor(int r, int c) {
-    if (r == _wrongRow && c == _wrongCol) return AppColors.red.withValues(alpha: .10);
+    if (r == _wrongRow && c == _wrongCol) return _gameWrong;
     if (r == _selectedRow && c == _selectedCol) {
       return AppColors.blue.withValues(alpha: .14);
     }
@@ -1898,10 +1910,10 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
 }
 ```
 
-> **实现前先核对 `lib/core/theme.dart` 里实际存在的颜色常量名**
-> （`AppColors.ink` / `line` / `blue` / `red` / `gray` 等），
-> 以及 `sessionProvider` 暴露的当前孩子类型（应有 `id`）。
-> 名称不一致就按实际改名，不要新增颜色。
+> **颜色常量只允许用 `AppColors` 里实际存在的 11 个**
+> （`blue / blueSoft / green / greenSoft / orange / orangeSoft / gold / bg / ink / gray / line`）。
+> 需要红色时用文件顶部定义的 `_gameWrong` 之类私有常量，**不要改 `theme.dart`**。
+> `sessionProvider` 的当前孩子类型需有 `id` 字段（`Child` 模型已有）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -2000,6 +2012,9 @@ import '../data/brain_game_models.dart';
 import '../data/brain_game_repository.dart';
 import '../logic/schulte.dart';
 import 'brain_game_shell.dart';
+
+/// 点错抖动 / 提示用的红色（`AppColors` 无 red）
+const _gameRed = Color(0xFFC05B4A);
 
 class SchultePage extends ConsumerStatefulWidget {
   const SchultePage({super.key});
@@ -2318,6 +2333,10 @@ import '../data/brain_game_repository.dart';
 import '../logic/minesweeper.dart';
 import 'brain_game_shell.dart';
 
+/// 扫雷红色标记 / 棋盘底色（`AppColors` 无 red / card）
+const _gameRed = Color(0xFFC05B4A);
+const _gameCellClosed = Color(0xFFDCE1DA);
+
 class MinesweeperPage extends ConsumerStatefulWidget {
   const MinesweeperPage({super.key});
 
@@ -2490,11 +2509,11 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     if (_boom && board.isMine(index)) {
       return Container(
         decoration: BoxDecoration(
-          color: AppColors.red.withValues(alpha: .18),
+          color: _gameRed.withValues(alpha: .18),
           border: Border.all(color: AppColors.line),
         ),
         alignment: Alignment.center,
-        child: Icon(Icons.dangerous, size: 16, color: AppColors.red),
+        child: Icon(Icons.dangerous, size: 16, color: _gameRed),
       );
     }
 
@@ -2507,7 +2526,7 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     final adj = board.adjacentAt(r, c);
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: Colors.white,
         border: Border.all(color: AppColors.line),
       ),
       alignment: Alignment.center,
@@ -2531,13 +2550,13 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
         onLongPress: () => _toggleFlag(index),
         child: Container(
           decoration: BoxDecoration(
-            color: const Color(0xFFDCE1DA),
+            color: _gameCellClosed,
             border: Border.all(color: AppColors.line),
             borderRadius: BorderRadius.circular(3),
           ),
           alignment: Alignment.center,
           child: flag
-              ? Icon(Icons.flag, size: 14, color: AppColors.red)
+              ? Icon(Icons.flag, size: 14, color: _gameRed)
               : const SizedBox.shrink(),
         ),
       ),
@@ -2652,7 +2671,7 @@ import '../features/brain_games/ui/sudoku_page.dart';
 
 > 这四条 import 里的 `brain_game_shell.dart` 只有 `taskRoute` 风格跳转才需要；
 > 若本 Task 用不到（游戏页直接用 `Navigator.pop`），不要加这条 import，
-> 否则 `flutter analyze` 会报 unused import。
+> 否则 `flutter analyze` 会报 unused import。**实际只需 3 条页面 import。**
 
 - [ ] **Step 2: 写首页卡片（先看现有卡片写法保持一致）**
 
@@ -2743,8 +2762,7 @@ import '../../brain_games/data/brain_game_models.dart';
 
 ```dart
   testWidgets('首页显示思维训练入口', (tester) async {
-    // 复用同文件已有的 pumpHome 辅助；若没有，按同文件既有写法构造
-    await pumpHome(tester);
+    await pumpHome(tester, FakeHomeRepository());
 
     expect(find.text('思维训练 · 动动脑'), findsOneWidget);
     expect(find.text('数独'), findsOneWidget);
@@ -2753,9 +2771,8 @@ import '../../brain_games/data/brain_game_models.dart';
   });
 ```
 
-> `pumpHome` 是本文件已有的辅助函数名；**执行前先 grep 该文件确认实际函数名**
-> （可能是 `_pumpHome` 或直接 `tester.pumpWidget(...)`）。
-> 若不存在，就照该文件第一个 `testWidgets` 的构造方式复制一份。
+> 本文件已有 `Future<void> pumpHome(WidgetTester tester, FakeHomeRepository repo, {Size size})`
+> （约在 `home_page_test.dart:68`），**必须传 repo 参数**，不要写成 `pumpHome(tester)`。
 
 - [ ] **Step 4: 跑测试**
 
