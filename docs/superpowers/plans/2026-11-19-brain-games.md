@@ -383,7 +383,7 @@ app.include_router(brain_games.router)
 cd backend && python -m pytest tests/test_brain_games.py -v
 ```
 
-Expected: PASS（8 passed）
+Expected: PASS（9 passed：Task 1 模型测试 1 + 本任务 8 条）
 
 - [ ] **Step 5: 提交**
 
@@ -522,7 +522,7 @@ def stats(user_id: int = Depends(resolve_target_user_id),
 cd backend && python -m pytest tests/test_brain_games.py -v
 ```
 
-Expected: PASS（13 passed）
+Expected: PASS（14 passed：9 + 本任务 5 条 stats）
 
 - [ ] **Step 5: 提交**
 
@@ -1549,8 +1549,6 @@ import 'package:student_app/features/auth/data/session_store.dart';
 import 'package:student_app/features/auth/session.dart';
 import 'package:student_app/features/brain_games/data/brain_game_models.dart';
 import 'package:student_app/features/brain_games/data/brain_game_repository.dart';
-import 'package:student_app/features/brain_games/ui/minesweeper_page.dart';
-import 'package:student_app/features/brain_games/ui/schulte_page.dart';
 import 'package:student_app/features/brain_games/ui/sudoku_page.dart';
 
 import '../auth/session_test.dart' show FakeAuthRepository;
@@ -1637,9 +1635,12 @@ Future<FakeBrainGameRepo> pumpBrainGame(
 }
 
 Widget sudokuPageForTest() => const SudokuPage();
-Widget schultePageForTest() => const SchultePage();
-Widget minesweeperPageForTest() => const MinesweeperPage();
 ```
+
+> **本 Task 只建 helper 的通用部分 + 数独工厂函数。**
+> `schultePageForTest()` / `minesweeperPageForTest()` 及对应 import
+> 分别在 Task 10 / Task 11 的 Step 1 补上 —— 否则此处会引用尚不存在的页面文件，
+> `flutter test` 直接编译失败。
 
 新建 `student-app/test/features/brain_games/sudoku_page_test.dart`：
 
@@ -1903,20 +1904,23 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
                       child: Container(
                         decoration: BoxDecoration(
                           color: _cellColor(r, c),
-                          border: Border(
-                            right: BorderSide(
-                              color: (c + 1) % spec.boxCols == 0 && c != n - 1
-                                  ? AppColors.ink
-                                  : AppColors.line,
-                              width: (c + 1) % spec.boxCols == 0 && c != n - 1 ? 2 : .5,
-                            ),
-                            bottom: BorderSide(
-                              color: (r + 1) % spec.boxRows == 0 && r != n - 1
-                                  ? AppColors.ink
-                                  : AppColors.line,
-                              width: (r + 1) % spec.boxRows == 0 && r != n - 1 ? 2 : .5,
-                            ),
-                          ),
+                          // 选中格加主题蓝描边（规格要求）
+                          border: r == _selectedRow && c == _selectedCol
+                              ? Border.all(color: AppColors.blue, width: 2)
+                              : Border(
+                                  right: BorderSide(
+                                    color: (c + 1) % spec.boxCols == 0 && c != n - 1
+                                        ? AppColors.ink
+                                        : AppColors.line,
+                                    width: (c + 1) % spec.boxCols == 0 && c != n - 1 ? 2 : .5,
+                                  ),
+                                  bottom: BorderSide(
+                                    color: (r + 1) % spec.boxRows == 0 && r != n - 1
+                                        ? AppColors.ink
+                                        : AppColors.line,
+                                    width: (r + 1) % spec.boxRows == 0 && r != n - 1 ? 2 : .5,
+                                  ),
+                                ),
                         ),
                         alignment: Alignment.center,
                         child: Text(
@@ -2043,7 +2047,9 @@ git commit -m "feat(brain-games): 数独游戏页"
 
 - [ ] **Step 1: 写失败测试**
 
-新建 `student-app/test/features/brain_games/schulte_page_test.dart`：
+新建 `student-app/test/features/brain_games/schulte_page_test.dart`（并在
+`brain_game_test_helpers.dart` 顶部加 `import 'package:student_app/features/brain_games/ui/schulte_page.dart';`，
+文件末尾加 `Widget schultePageForTest() => const SchultePage();`）：
 
 ```dart
 import 'package:flutter/material.dart';
@@ -2272,7 +2278,7 @@ class _SchultePageState extends ConsumerState<SchultePage> {
               color: cleared
                   ? AppColors.green.withValues(alpha: .25)
                   : AppColors.blue.withValues(alpha: .08),
-              borderRadius: BorderRadius.circular(10),
+              // 注意：Material 不能同时传 borderRadius 与 shape（框架断言会抛异常）
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
                 side: wrong
@@ -2298,7 +2304,6 @@ class _SchultePageState extends ConsumerState<SchultePage> {
       ),
     );
   }
-
   Widget _boardWidget(SchulteBoard b) {
     final size = b.size;
     return Column(children: [
@@ -2356,11 +2361,16 @@ class _SchultePageState extends ConsumerState<SchultePage> {
                 Text('错误 $_errors', style: const TextStyle(color: AppColors.gray)),
               ]),
               const SizedBox(height: 12),
-              AnimatedSlide(
-                // 点错时轻微抖动
+              // 点错时左右轻微抖动：key 变化触发一次从 -6px 到 0 的位移
+              TweenAnimationBuilder<double>(
                 key: ValueKey('schulte-shake-$_shake'),
-                offset: Offset.zero,
-                duration: const Duration(milliseconds: 120),
+                tween: Tween(begin: _shake == 0 ? 0 : -6, end: 0),
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                builder: (context, dx, child) => Transform.translate(
+                  offset: Offset(dx, 0),
+                  child: child,
+                ),
                 child: Container(
                   key: const ValueKey('schulte-board'),
                   child: _boardWidget(b),
@@ -2401,7 +2411,9 @@ git commit -m "feat(brain-games): 舒尔特方格页"
 
 - [ ] **Step 1: 写失败测试**
 
-新建 `student-app/test/features/brain_games/minesweeper_page_test.dart`：
+新建 `student-app/test/features/brain_games/minesweeper_page_test.dart`（并在
+`brain_game_test_helpers.dart` 顶部加 `import 'package:student_app/features/brain_games/ui/minesweeper_page.dart';`，
+文件末尾加 `Widget minesweeperPageForTest() => const MinesweeperPage();`）：
 
 ```dart
 import 'package:flutter/material.dart';
@@ -2942,7 +2954,7 @@ git commit -m "feat(brain-games): 路由与首页思维训练入口"
 cd backend && python -m pytest -q
 ```
 
-Expected: 全绿（含新增 13 个 brain-games 用例）。若出现其它模块失败，
+Expected: 全绿（含新增 14 个 brain-games 用例；全量约 617 passed）。若出现其它模块失败，
 先确认是否与本功能无关（`git stash` 后复跑对比）。
 
 - [ ] **Step 2: 前端全量测试**
