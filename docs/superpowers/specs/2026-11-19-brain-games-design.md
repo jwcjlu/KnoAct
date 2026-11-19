@@ -97,7 +97,8 @@
 | hard | 5×5 | 数字 1–25 |
 
 - 数字随机打乱铺满，按 1→N 顺序依次点击。
-- 点对：格子变绿并淡出；点错：红色抖动，计入 `errors`。
+- 点对：格子变绿并淡出，**淡出后该格不可再点**；点错：红色抖动，计入 `errors`。
+  点在已清除格上不响应、不计错。
 - 通关：点完全部数字。成绩 = 用时；`moves` = 总点击数（含点错），
   `errors` 不入库（只在本次弹层展示，避免表字段膨胀）。
 
@@ -148,7 +149,9 @@ class BrainGameResult(Base):
 - `POST /api/brain-games/result`
   body：`{user_id, game, difficulty, duration_ms, moves, solved}`
   - `require_learning_user` + `ensure_user_access(user, user_id, db)`（与 `points.py` 一致）
-  - 服务端补 `bucket_id = resolve_bucket_id(db, user_id, None)`
+  - 服务端补 `bucket_id`：**先 `ensure_bucket(db, user_id)` 确保有 active 桶**，
+    再 `resolve_bucket_id(db, user_id, None)`
+    （否则无桶时成绩写进 NULL 桶，后续补出桶后 `/stats` 再也读不到）
   - 校验 `game` ∈ {sudoku, schulte, minesweeper} → 非法返回 400 `{"error": "invalid_game"}`
   - 校验 `difficulty` ∈ {easy, medium, hard} → 非法返回 400 `{"error": "invalid_difficulty"}`
   - 返回 `{"ok": true, "is_best": bool}`
@@ -161,11 +164,12 @@ class BrainGameResult(Base):
       否则当 `duration_ms` **严格小于**历史最佳时返回 `true`，平手返回 `false`
 - `GET /api/brain-games/stats?user_id=&bucket_id=`（`bucket_id` 可选）
   - **鉴权与 `POST` 一致**：`user_id: int = Depends(resolve_target_user_id)` +
-    `Depends(require_learning_user)` + `ensure_user_access(user, user_id, db)`，
-    禁止跨家庭读取（写法对齐 `points.py:19-26`）
+    `Depends(require_learning_user)`（`resolve_target_user_id` 内部已调
+    `ensure_user_access`，无需重复），禁止跨家庭读取
   - `bucket_id` 解析用 `resolve_bucket_id(db, user_id, bucket_id)`；
     解析结果为 `None` 时**只聚合 `bucket_id IS NULL`** 的记录
     （本设计自有规则；**不**照抄 `goals.py` 的「不加桶过滤」写法）
+  - **游戏固定读写当前 active 学年桶**，与首页「历史学年桶」选择器无关
   - 返回：
 
   ```json
@@ -205,7 +209,9 @@ class BrainGameResult(Base):
   - 数独/舒尔特只有通关，无失败态。
 
 **容错**
-- 成绩提交失败（网络/服务端）：静默忽略，不影响本次游玩与本地用时展示。
+- 成绩提交失败（网络/服务端）：静默忽略，不影响本次游玩与本地用时展示；
+  **此时不显示「新纪录！」**（无 `is_best` 可依）。
+- 计时器在通关/踩雷那一刻停止；后续提交请求期间不再变动。
 - 题面生成异常（极小概率）：显示「重新生成」按钮重试，不白屏。
 
 ### 五、测试
@@ -235,9 +241,10 @@ Flutter 单测（`student-app/test/features/brain_games/`）：
 | `backend/app/main.py` | include_router |
 | `backend/tests/test_brain_games.py` | 新增 |
 | `student-app/lib/features/brain_games/` | 新增：三个游戏页 + 生成器 + repository |
-| `student-app/lib/core/router.dart` | 新增 3 条路由并加入白名单 |
+| `student-app/lib/core/router.dart` | 新增 3 条路由，且 **`/brain-games/sudoku`、`/brain-games/schulte`、`/brain-games/minesweeper` 三条都要加入 redirect 白名单**（该处是精确路径集合匹配，漏一条就会被弹回 `/home`） |
 | `student-app/lib/features/home/ui/home_page.dart` | 卡片入口 |
 | `student-app/test/features/brain_games/` | 新增生成器与判定测试 |
+| `student-app/test/features/home/` | 卡片入口 smoke test（必要时同步既有版面断言） |
 
 ## 后续可扩展（不在本次范围）
 
