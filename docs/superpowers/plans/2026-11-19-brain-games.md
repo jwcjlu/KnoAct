@@ -737,7 +737,7 @@ class BrainGameRepository {
     try {
       final raw = asMap(await _api.get('/api/brain-games/stats', query: {
         'user_id': userId,
-        if (bucketId != null) 'bucket_id': bucketId,
+        'bucket_id': ?bucketId,
       }));
       final out = <BrainGameKind, Map<BrainGameDifficulty, DifficultyStat>>{};
       for (final kind in BrainGameKind.values) {
@@ -1553,7 +1553,7 @@ import 'package:student_app/features/brain_games/ui/minesweeper_page.dart';
 import 'package:student_app/features/brain_games/ui/schulte_page.dart';
 import 'package:student_app/features/brain_games/ui/sudoku_page.dart';
 
-import '../../auth/session_test.dart' show FakeAuthRepository;
+import '../auth/session_test.dart' show FakeAuthRepository;
 
 /// 假仓库：返回值类型必须与真实 `BrainGameRepository` 完全一致，
 /// 否则 `implements` 直接编译失败（`noSuchMethod` 救不了返回类型不兼容）。
@@ -1644,6 +1644,7 @@ Widget minesweeperPageForTest() => const MinesweeperPage();
 新建 `student-app/test/features/brain_games/sudoku_page_test.dart`：
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'brain_game_test_helpers.dart';
@@ -1793,7 +1794,8 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
   }
 
   void _select(int r, int c) {
-    if (_finished || _puzzle.isGiven(r, c)) return;
+    final p = _puzzle;
+    if (p == null || _finished || p.isGiven(r, c)) return;
     setState(() {
       _selectedRow = r;
       _selectedCol = c;
@@ -1801,22 +1803,23 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
   }
 
   Future<void> _place(int value) async {
+    final p = _puzzle;
     final r = _selectedRow;
     final c = _selectedCol;
-    if (r == null || c == null || _finished) return;
+    if (p == null || r == null || c == null || _finished) return;
 
-    if (value == _puzzle.solution[r][c]) {
+    if (value == p.solution[r][c]) {
       setState(() {
-        _grid[r][c] = value;
+        _cells[r][c] = value;
         _moves++;
         _wrongRow = null;
         _wrongCol = null;
       });
-      if (_puzzle.isSolved(_grid)) await _finish();
+      if (p.isSolved(_cells)) await _finish();
     } else {
       // 落错：标红后自动清空该格，避免「填满但未通关且无提示」的静默态
       setState(() {
-        _grid[r][c] = 0;
+        _cells[r][c] = 0;
         _moves++;
         _wrongRow = r;
         _wrongCol = c;
@@ -1867,10 +1870,16 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
     if (r == _selectedRow && c == _selectedCol) {
       return AppColors.blue.withValues(alpha: .14);
     }
-    if (_selectedRow != null &&
-        _selectedCol != null &&
-        (r == _selectedRow || c == _selectedCol)) {
-      return AppColors.blue.withValues(alpha: .05);
+    final p = _puzzle;
+    if (_selectedRow != null && _selectedCol != null && p != null) {
+      final spec = p.spec;
+      final sameBox =
+          r ~/ spec.boxRows == _selectedRow! ~/ spec.boxRows &&
+              c ~/ spec.boxCols == _selectedCol! ~/ spec.boxCols;
+      // 同行 / 同列 / 同宫都浅蓝底（规格要求）
+      if (r == _selectedRow || c == _selectedCol || sameBox) {
+        return AppColors.blue.withValues(alpha: .05);
+      }
     }
     return Colors.transparent;
   }
@@ -1929,6 +1938,7 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
     );
   }
 
+```dart
   Widget _pad(SudokuSpec spec) {
     return Wrap(
       spacing: 8,
@@ -2036,6 +2046,7 @@ git commit -m "feat(brain-games): 数独游戏页"
 新建 `student-app/test/features/brain_games/schulte_page_test.dart`：
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'brain_game_test_helpers.dart';
@@ -2095,7 +2106,7 @@ import '../data/brain_game_repository.dart';
 import '../logic/schulte.dart';
 import 'brain_game_shell.dart';
 
-/// 点错抖动 / 提示用的红色（`AppColors` 无 red）
+/// 点错抖动用的边框红（`AppColors` 无 red）
 const _gameRed = Color(0xFFC05B4A);
 
 class SchultePage extends ConsumerStatefulWidget {
@@ -2117,6 +2128,9 @@ class _SchultePageState extends ConsumerState<SchultePage> {
   int _errors = 0;
   int _moves = 0;
   int _shake = 0;
+
+  /// 最近一次点错的数字，用于给它加红色边框。
+  int? _wrongValue;
 
   final _sw = Stopwatch();
   Timer? _ticker;
@@ -2161,6 +2175,7 @@ class _SchultePageState extends ConsumerState<SchultePage> {
       _errors = 0;
       _moves = 0;
       _shake = 0;
+      _wrongValue = null;
       _finished = false;
       _elapsedMs = 0;
       _sw
@@ -2187,16 +2202,19 @@ class _SchultePageState extends ConsumerState<SchultePage> {
   Future<void> _tap(int value) async {
     final b = _board;
     if (b == null || _finished || _cleared.contains(value)) return;
-    _moves++;
     if (value == _next) {
       setState(() {
+        _moves++;
         _cleared.add(value);
         _next++;
+        _wrongValue = null;
       });
       if (b.isComplete(_cleared)) await _finish();
     } else {
       setState(() {
+        _moves++;
         _errors++;
+        _wrongValue = value;
         _shake++;
       });
     }
@@ -2239,6 +2257,8 @@ class _SchultePageState extends ConsumerState<SchultePage> {
 
   Widget _cell(int value, int size) {
     final cleared = _cleared.contains(value);
+    // 点错时给该格加红色边框（规格要求「点错红色抖动」的可见反馈）
+    final wrong = _wrongValue == value;
     return AnimatedOpacity(
       opacity: cleared ? 0 : 1,
       duration: const Duration(milliseconds: 220),
@@ -2253,6 +2273,12 @@ class _SchultePageState extends ConsumerState<SchultePage> {
                   ? AppColors.green.withValues(alpha: .25)
                   : AppColors.blue.withValues(alpha: .08),
               borderRadius: BorderRadius.circular(10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: wrong
+                    ? const BorderSide(color: _gameRed, width: 2)
+                    : BorderSide.none,
+              ),
               child: InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: () => _tap(value),
@@ -2378,6 +2404,7 @@ git commit -m "feat(brain-games): 舒尔特方格页"
 新建 `student-app/test/features/brain_games/minesweeper_page_test.dart`：
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'brain_game_test_helpers.dart';
@@ -2954,15 +2981,23 @@ Expected: 除 `home_page.dart` 既有的 `use_build_context_synchronously`（1 �
 5. 切「中等」→ 盘面变 6×6、数字条出现 6
 6. 返回首页 → 点「舒尔特」→ 按 1、2、3… 点击，格子淡出；点错「错误」+1
 7. 返回首页 → 点「扫雷」→ 首点安全（不炸）；长按能插旗；「剩余 N 雷」随插旗变化
-8. 用家长账号调接口确认成绩入库：
+8. 用孩子账号调接口确认成绩入库（**先查真实孩子 id，别硬编码**）：
 
 ```bash
 cd backend && python -c "
+import json, urllib.request, urllib.parse
+from app.database import SessionLocal
+from app.models import User
 from app.services.security import create_access_token
-import urllib.request, json
-tok = create_access_token({'sub':'11','role':'child'})
-r = urllib.request.Request('http://127.0.0.1:8010/api/brain-games/stats?user_id=11',
-                           headers={'Authorization':'Bearer '+tok})
+
+db = SessionLocal()
+child = db.query(User).filter(User.role == 'child', User.login_name == 'jinyuxuan').first()
+uid = child.id
+db.close()
+tok = create_access_token({'sub': str(uid), 'role': 'child'})
+q = urllib.parse.urlencode({'user_id': uid})
+r = urllib.request.Request(f'http://127.0.0.1:8010/api/brain-games/stats?{q}',
+                           headers={'Authorization': 'Bearer ' + tok})
 print(json.dumps(json.load(urllib.request.urlopen(r)), ensure_ascii=False, indent=2))
 "
 ```
