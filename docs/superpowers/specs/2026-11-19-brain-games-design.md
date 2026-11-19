@@ -64,6 +64,9 @@
 6. 结束弹层展示本次用时；仅当 `is_best=true` 时才显示「新纪录！」。
 7. 返回首页。
 
+> **「结束」的定义**：仅指「通关」或「扫雷踩雷」。中途切难度、重新开始、
+> 按返回离开 = 放弃，**不写成绩**，不计入 `played`。
+
 > 首页直接进游戏（不设中间列表页），减少一层点击。历史最佳在
 > 游戏内顶部与结束弹层展示。
 
@@ -146,18 +149,23 @@ class BrainGameResult(Base):
   body：`{user_id, game, difficulty, duration_ms, moves, solved}`
   - `require_learning_user` + `ensure_user_access(user, user_id, db)`（与 `points.py` 一致）
   - 服务端补 `bucket_id = resolve_bucket_id(db, user_id, None)`
-  - 校验 `game` ∈ {sudoku, schulte, minesweeper}、`difficulty` ∈ {easy, medium, hard}，
-    非法返回 400 `{"error": "invalid_game"}`
+  - 校验 `game` ∈ {sudoku, schulte, minesweeper} → 非法返回 400 `{"error": "invalid_game"}`
+  - 校验 `difficulty` ∈ {easy, medium, hard} → 非法返回 400 `{"error": "invalid_difficulty"}`
   - 返回 `{"ok": true, "is_best": bool}`
   - `is_best` 判定（明确口径）：
+    - **必须在插入新记录之前查询历史最佳**（先查后插；否则新记录会成为自己的对照，
+      「严格小于」恒为 false）
     - 同一 `user_id` + `bucket_id` + `game` + `difficulty` 维度内比较
     - `solved=false` 的记录**恒返回 `false`**（踩雷不算新纪录）
     - `solved=true` 时，若没有更早的 `solved=true` 记录，返回 `true`；
       否则当 `duration_ms` **严格小于**历史最佳时返回 `true`，平手返回 `false`
-- `GET /api/brain-games/stats?user_id=&bucket_id=`（`bucket_id` 可选，
-  与 `points.py` / `goals.py` 口径一致）
-  - 无 active 桶且未传 `bucket_id` 时，`bucket_id` 为 `None`：
-    **只聚合 `bucket_id IS NULL` 的记录**，不会串到别的学年
+- `GET /api/brain-games/stats?user_id=&bucket_id=`（`bucket_id` 可选）
+  - **鉴权与 `POST` 一致**：`user_id: int = Depends(resolve_target_user_id)` +
+    `Depends(require_learning_user)` + `ensure_user_access(user, user_id, db)`，
+    禁止跨家庭读取（写法对齐 `points.py:19-26`）
+  - `bucket_id` 解析用 `resolve_bucket_id(db, user_id, bucket_id)`；
+    解析结果为 `None` 时**只聚合 `bucket_id IS NULL`** 的记录
+    （本设计自有规则；**不**照抄 `goals.py` 的「不加桶过滤」写法）
   - 返回：
 
   ```json
@@ -209,7 +217,8 @@ class BrainGameResult(Base):
 - 非法 `game` / `difficulty` 值返回 400
 - `is_best`：首通为 `true`；更慢为 `false`；更快为 `true`；平手为 `false`；
   `solved=false` 恒为 `false`
-- 无权用户（别的家长的孩子）写入被拒
+- 无权用户（别的家长的孩子）**写入**被拒
+- 无权用户**读取 `stats`** 被拒（403/404）
 
 Flutter 单测（`student-app/test/features/brain_games/`）：
 - 数独生成器：盘面尺寸/宫格正确、给定数不超过上限、解合法（行/列/宫无重复）
