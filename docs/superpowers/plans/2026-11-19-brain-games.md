@@ -54,6 +54,7 @@
 | `student-app/lib/features/brain_games/ui/minesweeper_page.dart` | 扫雷页 |
 | `student-app/lib/core/router.dart` | 3 条路由 + 3 条白名单 |
 | `student-app/lib/features/home/ui/home_page.dart` | 「思维训练」卡片 |
+| `student-app/test/features/brain_games/brain_game_test_helpers.dart` | 注入会话的 `pumpBrainGame` + 类型正确的假仓库（三个页面测试共用） |
 | `student-app/test/features/brain_games/sudoku_logic_test.dart` | 生成器测试 |
 | `student-app/test/features/brain_games/schulte_logic_test.dart` | 生成器测试 |
 | `student-app/test/features/brain_games/minesweeper_logic_test.dart` | 棋盘测试 |
@@ -180,8 +181,8 @@ def _client_with_router():
     return TestClient(app)
 
 
-def _bound_child(setup_db=None):
-    """建一个已绑定家长的孩子，返回 (child, headers)。"""
+def _bound_child():
+    """建一个已绑定家长的孩子，返回 (child, child_headers)。"""
     from app.database import SessionLocal
     from conftest import parent_child
 
@@ -1367,16 +1368,10 @@ git commit -m "feat(brain-games): 扫雷棋盘生成、扩散与判通逻辑"
 新建 `student-app/lib/features/brain_games/ui/brain_game_shell.dart`：
 
 ```dart
-import 'dart:ui' show FontFeature;
-
 import 'package:flutter/material.dart';
 
 import '../../../core/theme.dart';
 import '../data/brain_game_models.dart';
-
-/// 游戏内用到的少量专用色（`AppColors` 只有 blue/green/orange/gold/ink/gray/line/bg）。
-const _gameRed = Color(0xFFC05B4A);
-const _gameRedSoft = Color(0xFFFDF0EE);
 
 /// 毫秒 → "mm:ss"（超过 99 分钟按分钟显示）。
 String formatGameMs(int ms) {
@@ -1519,6 +1514,11 @@ cd student-app && flutter analyze lib/features/brain_games
 
 Expected: `No issues found!`
 
+> 本文件只放**被引用**的东西（`formatGameMs` / `GameTopBar` / `showGameResultDialog`）。
+> 不要在这里定义未被使用的颜色常量，否则 `flutter analyze` 会报
+> `The declaration '...' isn't referenced`（warning 也会让命令非零退出）。
+> `FontFeature` 已由 `material.dart` 导出，**不要**再 `import 'dart:ui'`。
+
 - [ ] **Step 3: 提交**
 
 ```bash
@@ -1536,54 +1536,121 @@ git commit -m "feat(brain-games): 共用顶栏/计时器/结束弹层"
 
 - [ ] **Step 1: 写失败测试**
 
-新建 `student-app/test/features/brain_games/sudoku_page_test.dart`：
+新建 `student-app/test/features/brain_games/brain_game_test_helpers.dart`（**必须**先建这个文件，
+它提供注入登录会话的 `pumpBrainGame` 与类型正确的假仓库，三个页面测试共用）：
 
 ```dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:student_app/core/api_client.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:student_app/features/auth/data/auth_repository.dart';
+import 'package:student_app/features/auth/data/session_store.dart';
+import 'package:student_app/features/auth/session.dart';
+import 'package:student_app/features/brain_games/data/brain_game_models.dart';
 import 'package:student_app/features/brain_games/data/brain_game_repository.dart';
+import 'package:student_app/features/brain_games/ui/minesweeper_page.dart';
+import 'package:student_app/features/brain_games/ui/schulte_page.dart';
 import 'package:student_app/features/brain_games/ui/sudoku_page.dart';
 
-class FakeRepo implements BrainGameRepository {
+import '../../auth/session_test.dart' show FakeAuthRepository;
+
+/// 假仓库：返回值类型必须与真实 `BrainGameRepository` 完全一致，
+/// 否则 `implements` 直接编译失败（`noSuchMethod` 救不了返回类型不兼容）。
+class FakeBrainGameRepo implements BrainGameRepository {
+  FakeBrainGameRepo({this.statsResult = const {}, this.best = false});
+
+  final BrainGameStats statsResult;
+  final bool best;
   int statsCalls = 0;
-  final results = <({String game, String difficulty, int durationMs, bool solved})>[];
+  final results = <({
+    BrainGameKind kind,
+    BrainGameDifficulty difficulty,
+    int durationMs,
+    int moves,
+    bool solved,
+  })>[];
 
   @override
-  Future<dynamic> stats({required int userId, int? bucketId}) async {
+  Future<BrainGameStats> stats({required int userId, int? bucketId}) async {
     statsCalls++;
-    return const {};
+    return statsResult;
   }
 
   @override
   Future<({bool ok, bool isBest})> postResult({
     required int userId,
-    required dynamic kind,
-    required dynamic difficulty,
+    required BrainGameKind kind,
+    required BrainGameDifficulty difficulty,
     required int durationMs,
     required int moves,
     required bool solved,
   }) async {
-    results.add((game: '${kind.id}', difficulty: '${difficulty.id}',
-        durationMs: durationMs, solved: solved));
-    return (ok: true, isBest: false);
+    results.add((
+      kind: kind,
+      difficulty: difficulty,
+      durationMs: durationMs,
+      moves: moves,
+      solved: solved,
+    ));
+    return (ok: true, isBest: best);
   }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-Widget _wrap(Widget child) => MaterialApp(home: child);
+/// 灌好登录会话后渲染任意游戏页。
+///
+/// 必须注入会话：页面 `initState` 里读 `currentChildIdProvider` 拿用户 id，
+/// 裸 `ProviderScope` 会让 `sessionProvider` 走真实存储（测试里抛异常 + 留 pending Timer）。
+Future<FakeBrainGameRepo> pumpBrainGame(
+  WidgetTester tester,
+  Widget page, {
+  FakeBrainGameRepo? repo,
+  Size size = const Size(420, 900),
+}) async {
+  final r = repo ?? FakeBrainGameRepo();
+  SharedPreferences.setMockInitialValues({
+    'knoact_child_id': 4,
+    'knoact_child_name': '金同学',
+    SessionStore.accessTokenKey: 'tok',
+    SessionStore.refreshTokenKey: 'ref',
+  });
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+
+  final container = ProviderContainer(
+    overrides: [
+      brainGameRepositoryProvider.overrideWithValue(r),
+      authRepositoryProvider
+          .overrideWithValue(FakeAuthRepository(const Child(4, '金同学'))),
+    ],
+    retry: (_, _) => null,
+  );
+  addTearDown(container.dispose);
+  await container.read(sessionProvider.future);
+  await tester.pumpWidget(UncontrolledProviderScope(
+    container: container,
+    child: MaterialApp(home: page),
+  ));
+  await tester.pumpAndSettle();
+  return r;
+}
+
+Widget sudokuPageForTest() => const SudokuPage();
+Widget schultePageForTest() => const SchultePage();
+Widget minesweeperPageForTest() => const MinesweeperPage();
+```
+
+新建 `student-app/test/features/brain_games/sudoku_page_test.dart`：
+
+```dart
+import 'package:flutter_test/flutter_test.dart';
+
+import 'brain_game_test_helpers.dart';
 
 void main() {
   testWidgets('数独页显示棋盘与数字条', (tester) async {
-    final repo = FakeRepo();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [brainGameRepositoryProvider.overrideWithValue(repo)],
-      child: _wrap(const SudokuPage()),
-    ));
-    await tester.pumpAndSettle();
+    final repo = await pumpBrainGame(tester, sudokuPageForTest());
 
     expect(find.text('数独'), findsOneWidget);
     expect(find.text('简单'), findsOneWidget);
@@ -1592,19 +1659,14 @@ void main() {
     expect(repo.statsCalls, 1);
   });
 
-  testWidgets('切难度会重新生成棋盘', (tester) async {
-    final repo = FakeRepo();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [brainGameRepositoryProvider.overrideWithValue(repo)],
-      child: _wrap(const SudokuPage()),
-    ));
-    await tester.pumpAndSettle();
+  testWidgets('切难度会重新生成棋盘（出现 6 的数字键）', (tester) async {
+    await pumpBrainGame(tester, sudokuPageForTest());
 
     await tester.tap(find.text('中等'));
     await tester.pumpAndSettle();
 
-    // 6×6 才有数字 6 的按钮
     expect(find.byKey(const ValueKey('sudoku-pad-6')), findsOneWidget);
+    expect(find.byKey(const ValueKey('sudoku-pad-7')), findsNothing);
   });
 }
 ```
@@ -1650,8 +1712,11 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
 
   BrainGameDifficulty _difficulty = BrainGameDifficulty.easy;
   BrainGameStats _stats = const {};
-  late SudokuPuzzle _puzzle;
-  late List<List<int>> _grid;
+
+  /// 当前题面（null = 生成失败或未就绪）。字段名勿与 build 用方法重名。
+  SudokuPuzzle? _puzzle;
+  List<List<int>> _cells = const [];
+  String? _generateError;
   int? _selectedRow;
   int? _selectedCol;
   int? _wrongRow;
@@ -1680,10 +1745,7 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
     super.dispose();
   }
 
-  int? get _userId {
-    final child = ref.read(sessionProvider).value;
-    return child?.id;
-  }
+  int? get _userId => ref.read(currentChildIdProvider);
 
   Future<void> _loadStats() async {
     final uid = _userId;
@@ -1693,19 +1755,31 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
     setState(() => _stats = s);
   }
 
+  /// 生成题面；异常时进入错误态，由 UI 提供「重新生成」。
   void _newGame() {
-    _puzzle = generateSudoku(_difficulty.id, random: Random());
-    _grid = [for (final row in _puzzle.givens) List<int>.from(row)];
-    _selectedRow = null;
-    _selectedCol = null;
-    _wrongRow = null;
-    _wrongCol = null;
-    _moves = 0;
-    _finished = false;
-    _elapsedMs = 0;
-    _sw
-      ..reset()
-      ..start();
+    try {
+      final p = generateSudoku(_difficulty.id, random: Random());
+      _puzzle = p;
+      _cells = [for (final row in p.givens) List<int>.from(row)];
+      _generateError = null;
+      _selectedRow = null;
+      _selectedCol = null;
+      _wrongRow = null;
+      _wrongCol = null;
+      _moves = 0;
+      _finished = false;
+      _elapsedMs = 0;
+      _sw
+        ..reset()
+        ..start();
+    } catch (e) {
+      // 生成异常不白屏：显示「重新生成」按钮（规格容错节要求）
+      _puzzle = null;
+      _cells = const [];
+      _generateError = '$e';
+      _finished = true;
+      _sw.stop();
+    }
   }
 
   void _restart() => setState(_newGame);
@@ -1801,7 +1875,8 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
     return Colors.transparent;
   }
 
-  Widget _grid(SudokuSpec spec) {
+  Widget _buildBoard(SudokuSpec spec) {
+    final p = _puzzle!;
     final n = spec.size;
     return AspectRatio(
       aspectRatio: 1,
@@ -1836,12 +1911,12 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
                         ),
                         alignment: Alignment.center,
                         child: Text(
-                          _grid[r][c] == 0 ? '' : '${_grid[r][c]}',
+                          _cells[r][c] == 0 ? '' : '${_cells[r][c]}',
                           style: TextStyle(
                             fontSize: n >= 9 ? 18 : 22,
                             fontWeight:
-                                _puzzle.isGiven(r, c) ? FontWeight.w700 : FontWeight.w500,
-                            color: _puzzle.isGiven(r, c) ? AppColors.ink : AppColors.blue,
+                                p.isGiven(r, c) ? FontWeight.w700 : FontWeight.w500,
+                            color: p.isGiven(r, c) ? AppColors.ink : AppColors.blue,
                           ),
                         ),
                       ),
@@ -1877,7 +1952,7 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
 
   @override
   Widget build(BuildContext context) {
-    final spec = _puzzle.spec;
+    final p = _puzzle;
     final best = _stats[_kind]?[_difficulty]?.bestMs;
     return Scaffold(
       appBar: PreferredSize(
@@ -1896,15 +1971,32 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
           ),
         ),
       ),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        _grid(spec),
-        const SizedBox(height: 20),
-        _pad(spec),
-        const SizedBox(height: 16),
-        const Text('点格子后在下方选数字；填错会标红并清空',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: AppColors.gray)),
-      ]),
+      body: p == null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('题面生成失败，请点下方重新生成'),
+                  if (_generateError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(_generateError!,
+                          style: const TextStyle(fontSize: 11, color: AppColors.gray)),
+                    ),
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: _restart, child: const Text('重新生成')),
+                ]),
+              ),
+            )
+          : ListView(padding: const EdgeInsets.all(16), children: [
+              _buildBoard(p.spec),
+              const SizedBox(height: 20),
+              _pad(p.spec),
+              const SizedBox(height: 16),
+              const Text('点格子后在下方选数字；填错会标红并清空',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: AppColors.gray)),
+            ]),
     );
   }
 }
@@ -1913,7 +2005,8 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
 > **颜色常量只允许用 `AppColors` 里实际存在的 11 个**
 > （`blue / blueSoft / green / greenSoft / orange / orangeSoft / gold / bg / ink / gray / line`）。
 > 需要红色时用文件顶部定义的 `_gameWrong` 之类私有常量，**不要改 `theme.dart`**。
-> `sessionProvider` 的当前孩子类型需有 `id` 字段（`Child` 模型已有）。
+> 当前孩子 id 用 `currentChildIdProvider`（`features/auth/session.dart:111` 已提供），
+> 不要直接 `ref.read(sessionProvider).value?.id`。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1943,46 +2036,35 @@ git commit -m "feat(brain-games): 数独游戏页"
 新建 `student-app/test/features/brain_games/schulte_page_test.dart`：
 
 ```dart
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:student_app/features/brain_games/data/brain_game_repository.dart';
-import 'package:student_app/features/brain_games/ui/schulte_page.dart';
 
-import 'sudoku_page_test.dart' show FakeRepo;
-
-Widget _wrap(Widget child) => MaterialApp(home: child);
+import 'brain_game_test_helpers.dart';
 
 void main() {
   testWidgets('舒尔特页显示方格与下一个目标', (tester) async {
-    final repo = FakeRepo();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [brainGameRepositoryProvider.overrideWithValue(repo)],
-      child: _wrap(const SchultePage()),
-    ));
-    await tester.pumpAndSettle();
+    final repo = await pumpBrainGame(tester, schultePageForTest());
 
     expect(find.text('舒尔特方格'), findsOneWidget);
     expect(find.byKey(const ValueKey('schulte-board')), findsOneWidget);
     expect(find.textContaining('下一个：1'), findsOneWidget);
+    expect(repo.statsCalls, 1);
   });
 
-  testWidgets('点错会累加错误数', (tester) async {
-    final repo = FakeRepo();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [brainGameRepositoryProvider.overrideWithValue(repo)],
-      child: _wrap(const SchultePage()),
-    ));
-    await tester.pumpAndSettle();
+  testWidgets('点错会累加错误数，点对推进目标', (tester) async {
+    await pumpBrainGame(tester, schultePageForTest());
 
-    // 点一个不是 1 的格子
+    // 点一个不是 1 的格子 → 错误 +1
     final notOne = find.byWidgetPredicate(
       (w) => w is Text && w.data != null && w.data != '1' && int.tryParse(w.data!) != null,
     );
     await tester.tap(notOne.first);
     await tester.pump();
-
     expect(find.textContaining('错误 1'), findsOneWidget);
+
+    // 点 1 → 目标推进到 2
+    await tester.tap(find.text('1').first);
+    await tester.pump();
+    expect(find.textContaining('下一个：2'), findsOneWidget);
   });
 }
 ```
@@ -2028,7 +2110,8 @@ class _SchultePageState extends ConsumerState<SchultePage> {
 
   BrainGameDifficulty _difficulty = BrainGameDifficulty.easy;
   BrainGameStats _stats = const {};
-  late SchulteBoard _board;
+  SchulteBoard? _board;
+  String? _generateError;
   final _cleared = <int>{};
   int _next = 1;
   int _errors = 0;
@@ -2057,7 +2140,7 @@ class _SchultePageState extends ConsumerState<SchultePage> {
     super.dispose();
   }
 
-  int? get _userId => ref.read(sessionProvider).value?.id;
+  int? get _userId => ref.read(currentChildIdProvider);
 
   Future<void> _loadStats() async {
     final uid = _userId;
@@ -2067,18 +2150,28 @@ class _SchultePageState extends ConsumerState<SchultePage> {
     setState(() => _stats = s);
   }
 
+  /// 生成题面；异常时进入错误态（不白屏）。
   void _newGame() {
-    _board = generateSchulte(_difficulty.id, random: Random());
-    _cleared.clear();
-    _next = 1;
-    _errors = 0;
-    _moves = 0;
-    _shake = 0;
-    _finished = false;
-    _elapsedMs = 0;
-    _sw
-      ..reset()
-      ..start();
+    try {
+      final b = generateSchulte(_difficulty.id, random: Random());
+      _board = b;
+      _generateError = null;
+      _cleared.clear();
+      _next = 1;
+      _errors = 0;
+      _moves = 0;
+      _shake = 0;
+      _finished = false;
+      _elapsedMs = 0;
+      _sw
+        ..reset()
+        ..start();
+    } catch (e) {
+      _board = null;
+      _generateError = '$e';
+      _finished = true;
+      _sw.stop();
+    }
   }
 
   void _restart() => setState(_newGame);
@@ -2092,14 +2185,15 @@ class _SchultePageState extends ConsumerState<SchultePage> {
   }
 
   Future<void> _tap(int value) async {
-    if (_finished || _cleared.contains(value)) return;
+    final b = _board;
+    if (b == null || _finished || _cleared.contains(value)) return;
     _moves++;
     if (value == _next) {
       setState(() {
         _cleared.add(value);
         _next++;
       });
-      if (_board.isComplete(_cleared)) await _finish();
+      if (b.isComplete(_cleared)) await _finish();
     } else {
       setState(() {
         _errors++;
@@ -2143,7 +2237,7 @@ class _SchultePageState extends ConsumerState<SchultePage> {
     );
   }
 
-  Widget _cell(int value) {
+  Widget _cell(int value, int size) {
     final cleared = _cleared.contains(value);
     return AnimatedOpacity(
       opacity: cleared ? 0 : 1,
@@ -2166,7 +2260,7 @@ class _SchultePageState extends ConsumerState<SchultePage> {
                   child: Text(
                     '$value',
                     style: TextStyle(
-                      fontSize: _board.size >= 5 ? 22 : 26,
+                      fontSize: size >= 5 ? 22 : 26,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -2179,19 +2273,20 @@ class _SchultePageState extends ConsumerState<SchultePage> {
     );
   }
 
-  Widget _boardWidget() {
-    final size = _board.size;
+  Widget _boardWidget(SchulteBoard b) {
+    final size = b.size;
     return Column(children: [
       for (var r = 0; r < size; r++)
         Row(children: [
           for (var c = 0; c < size; c++)
-            Expanded(child: _cell(_board.numbers[r * size + c])),
+            Expanded(child: _cell(b.numbers[r * size + c], size)),
         ]),
     ]);
   }
 
   @override
   Widget build(BuildContext context) {
+    final b = _board;
     final best = _stats[_kind]?[_difficulty]?.bestMs;
     return Scaffold(
       appBar: PreferredSize(
@@ -2210,29 +2305,46 @@ class _SchultePageState extends ConsumerState<SchultePage> {
           ),
         ),
       ),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        Row(children: [
-          Text('下一个：$_next',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          const Spacer(),
-          Text('错误 $_errors', style: const TextStyle(color: AppColors.gray)),
-        ]),
-        const SizedBox(height: 12),
-        AnimatedSlide(
-          // 点错时轻微抖动
-          key: ValueKey('schulte-shake-$_shake'),
-          offset: Offset.zero,
-          duration: const Duration(milliseconds: 120),
-          child: Container(
-            key: const ValueKey('schulte-board'),
-            child: _boardWidget(),
-          ),
-        ),
-        const SizedBox(height: 16),
-        const Text('按 1 → N 的顺序依次点击数字',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: AppColors.gray)),
-      ]),
+      body: b == null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('题面生成失败，请点下方重新生成'),
+                  if (_generateError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(_generateError!,
+                          style: const TextStyle(fontSize: 11, color: AppColors.gray)),
+                    ),
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: _restart, child: const Text('重新生成')),
+                ]),
+              ),
+            )
+          : ListView(padding: const EdgeInsets.all(16), children: [
+              Row(children: [
+                Text('下一个：$_next',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                const Spacer(),
+                Text('错误 $_errors', style: const TextStyle(color: AppColors.gray)),
+              ]),
+              const SizedBox(height: 12),
+              AnimatedSlide(
+                // 点错时轻微抖动
+                key: ValueKey('schulte-shake-$_shake'),
+                offset: Offset.zero,
+                duration: const Duration(milliseconds: 120),
+                child: Container(
+                  key: const ValueKey('schulte-board'),
+                  child: _boardWidget(b),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('按 1 → N 的顺序依次点击数字',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: AppColors.gray)),
+            ]),
     );
   }
 }
@@ -2266,38 +2378,22 @@ git commit -m "feat(brain-games): 舒尔特方格页"
 新建 `student-app/test/features/brain_games/minesweeper_page_test.dart`：
 
 ```dart
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:student_app/features/brain_games/data/brain_game_repository.dart';
-import 'package:student_app/features/brain_games/ui/minesweeper_page.dart';
 
-import 'sudoku_page_test.dart' show FakeRepo;
-
-Widget _wrap(Widget child) => MaterialApp(home: child);
+import 'brain_game_test_helpers.dart';
 
 void main() {
-  testWidgets('扫雷页首点前不布雷，点击后出现棋盘内容', (tester) async {
-    final repo = FakeRepo();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [brainGameRepositoryProvider.overrideWithValue(repo)],
-      child: _wrap(const MinesweeperPage()),
-    ));
-    await tester.pumpAndSettle();
+  testWidgets('扫雷页首点前不布雷，显示开始提示', (tester) async {
+    final repo = await pumpBrainGame(tester, minesweeperPageForTest());
 
     expect(find.text('数字扫雷'), findsOneWidget);
     expect(find.byKey(const ValueKey('minesweeper-board')), findsOneWidget);
-    // 首次点击前提示先点一格
     expect(find.textContaining('点一格开始'), findsOneWidget);
+    expect(repo.statsCalls, 1);
   });
 
-  testWidgets('点一格后显示剩余雷数', (tester) async {
-    final repo = FakeRepo();
-    await tester.pumpWidget(ProviderScope(
-      overrides: [brainGameRepositoryProvider.overrideWithValue(repo)],
-      child: _wrap(const MinesweeperPage()),
-    ));
-    await tester.pumpAndSettle();
+  testWidgets('首点后显示剩余雷数（说明首点安全未踩雷）', (tester) async {
+    await pumpBrainGame(tester, minesweeperPageForTest());
 
     await tester.tap(find.byKey(const ValueKey('mine-cell-0')).first);
     await tester.pumpAndSettle();
@@ -2380,7 +2476,7 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     super.dispose();
   }
 
-  int? get _userId => ref.read(sessionProvider).value?.id;
+  int? get _userId => ref.read(currentChildIdProvider);
 
   Future<void> _loadStats() async {
     final uid = _userId;
@@ -2389,6 +2485,8 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     if (!mounted) return;
     setState(() => _stats = s);
   }
+
+  /// 重置一局（首点前不布雷，因此这里是同步的、不会抛）。
 
   void _newGame() {
     _spec = minesweeperSpecFor(_difficulty.id);
@@ -2501,6 +2599,14 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     final r = index ~/ _spec.cols;
     final c = index % _spec.cols;
 
+    // 统一外包 AspectRatio：已开格若只有 Container 会按内容收缩，导致整盘行高不一致
+    return AspectRatio(
+      aspectRatio: 1,
+      child: _cellBody(index, board, r, c),
+    );
+  }
+
+  Widget _cellBody(int index, MinesweeperBoard? board, int r, int c) {
     if (board == null) {
       // 首点前统一灰色凸起
       return _greyCell(index);
@@ -2518,9 +2624,7 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     }
 
     if (!_opened.contains(index)) {
-      return Stack(children: [
-        _greyCell(index, flag: _flags.contains(index)),
-      ]);
+      return _greyCell(index, flag: _flags.contains(index));
     }
 
     final adj = board.adjacentAt(r, c);
@@ -2542,23 +2646,20 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
   }
 
   Widget _greyCell(int index, {bool flag = false}) {
-    return AspectRatio(
-      aspectRatio: 1,
-      child: GestureDetector(
-        key: ValueKey('mine-cell-$index'),
-        onTap: () => _tap(index),
-        onLongPress: () => _toggleFlag(index),
-        child: Container(
-          decoration: BoxDecoration(
-            color: _gameCellClosed,
-            border: Border.all(color: AppColors.line),
-            borderRadius: BorderRadius.circular(3),
-          ),
-          alignment: Alignment.center,
-          child: flag
-              ? Icon(Icons.flag, size: 14, color: _gameRed)
-              : const SizedBox.shrink(),
+    return GestureDetector(
+      key: ValueKey('mine-cell-$index'),
+      onTap: () => _tap(index),
+      onLongPress: () => _toggleFlag(index),
+      child: Container(
+        decoration: BoxDecoration(
+          color: _gameCellClosed,
+          border: Border.all(color: AppColors.line),
+          borderRadius: BorderRadius.circular(3),
         ),
+        alignment: Alignment.center,
+        child: flag
+            ? Icon(Icons.flag, size: 14, color: _gameRed)
+            : const SizedBox.shrink(),
       ),
     );
   }
@@ -2641,10 +2742,10 @@ git commit -m "feat(brain-games): 数字扫雷页"
 
 - [ ] **Step 1: 加路由**
 
-在 `student-app/lib/core/router.dart` 顶部 import 区加：
+在 `student-app/lib/core/router.dart` 顶部 import 区加**这三条**（游戏页不用
+`taskRoute`，因此不需要 `brain_game_shell.dart`）：
 
 ```dart
-import '../features/brain_games/ui/brain_game_shell.dart';
 import '../features/brain_games/ui/minesweeper_page.dart';
 import '../features/brain_games/ui/schulte_page.dart';
 import '../features/brain_games/ui/sudoku_page.dart';
@@ -2669,15 +2770,15 @@ import '../features/brain_games/ui/sudoku_page.dart';
       GoRoute(path: '/brain-games/minesweeper', builder: (_, _) => const MinesweeperPage()),
 ```
 
-> 这四条 import 里的 `brain_game_shell.dart` 只有 `taskRoute` 风格跳转才需要；
-> 若本 Task 用不到（游戏页直接用 `Navigator.pop`），不要加这条 import，
-> 否则 `flutter analyze` 会报 unused import。**实际只需 3 条页面 import。**
+> 只加这 3 条 import 即可；`brain_game_shell.dart` 不需要被 router 引用。
 
 - [ ] **Step 2: 写首页卡片（先看现有卡片写法保持一致）**
 
 在 `student-app/lib/features/home/ui/home_page.dart`，
-「磨耳朵」卡片（`subtitle: const Text('听课文真人音频，跟读练习')`）之后，
-`const SizedBox(height: 16),` 之前，插入：
+**「磨耳朵」那张 `Card(...)` 的闭合 `),` 之后**（即 `// 磨耳朵入口` 注释所在 Card 结束处，
+`home_page.dart:168` 那个 `const SizedBox(height: 16),` **之前**）插入下面这段：
+（该区域有两个相邻的 `SizedBox(height:16)`，务必以「磨耳朵 Card 结束」为锚点，
+不要插到 `if (wide)` 分支之后。）
 
 ```dart
           // 思维训练：独立入口，孩子自由玩，不进每日任务
@@ -2782,13 +2883,18 @@ cd student-app && flutter test test/features/home/home_page_test.dart test/featu
 
 Expected: 全部 PASS
 
-- [ ] **Step 5: 静态检查**
+- [ ] **Step 5: 静态检查（只查本功能，不看基线）**
 
 ```bash
-cd student-app && flutter analyze
+cd student-app && flutter analyze lib/features/brain_games lib/core/router.dart
 ```
 
 Expected: `No issues found!`
+
+> **注意**：仓库基线本就有 14 个既存 analyzer 问题（`deprecated_member_use`、
+> `unused_import` 等，见 `home_page.dart`、`center_page.dart`、`bank_exercise_page.dart`），
+> 全量 `flutter analyze` 的退出码本来就是 1。**不要**顺手去修这些无关文件（scope creep）。
+> 判定标准是「brain_games 相关文件零 issue，且既有问题数量不增加」。
 
 - [ ] **Step 6: 提交**
 
@@ -2823,10 +2929,20 @@ Expected: 全绿。
 - [ ] **Step 3: 前端静态检查**
 
 ```bash
-cd student-app && flutter analyze
+cd student-app && flutter analyze lib/features/brain_games
 ```
 
 Expected: `No issues found!`
+
+全量 `flutter analyze` 基线为 14 个既存问题（与本功能无关），
+只需确认**没有新增**在 brain_games / router / home_page 相关文件上的问题：
+
+```bash
+cd student-app && flutter analyze 2>&1 | grep -E "brain_games|router\.dart|home_page\.dart"
+```
+
+Expected: 除 `home_page.dart` 既有的 `use_build_context_synchronously`（1 条，
+改动前就存在）外，无 brain_games / router 相关输出。
 
 - [ ] **Step 4: 手工冒烟（真实后端）**
 
@@ -2871,5 +2987,5 @@ git commit -m "test(brain-games): 端到端验证与收尾"
 - [ ] 扫雷首点不是雷、长按插旗、踩雷弹失败（不入 best，但入 played）
 - [ ] `POST /result` 的 `is_best` 口径正确（首通 true、更慢 false、更快 true、平手 false、失败恒 false）
 - [ ] `GET /stats` 禁止跨家庭读取（403）
-- [ ] `pytest` 与 `flutter test` 全绿，`flutter analyze` 零 issue
+- [ ] `pytest` 与 `flutter test` 全绿，`flutter analyze lib/features/brain_games` 零 issue（不要求全量零 issue，基线有 14 条既存）
 - [ ] 不写 `AnswerRecord`、不动积分、无家长端改动
