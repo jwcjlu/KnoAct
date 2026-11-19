@@ -31,3 +31,6 @@ pdfjs_files_tmp.json
 # 调试临时产物（数学拆课/OCR/清洗等中间输出）
 backend/_*.txt
 backend/*.db.bak_*
+
+# ���ع�������
+knoact-student-app-*.tar

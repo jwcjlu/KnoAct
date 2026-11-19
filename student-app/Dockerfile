@@ -52,19 +52,19 @@ ENV HOME=/home/${FLUTTER_USER} \
 
 COPY --chown=10001:10001 pubspec.yaml pubspec.lock ./
 RUN flutter --version \
-    && (flutter pub get --enforce-lockfile \
+    && (flutter pub get \
         || (echo "pub mirror miss, retry fallback..." \
             && PUB_HOSTED_URL=${PUB_FALLBACK_URL} FLUTTER_STORAGE_BASE_URL=${FLUTTER_FALLBACK_STORAGE} \
-               flutter pub get --enforce-lockfile))
+               flutter pub get))
 
 COPY --chown=10001:10001 . .
 # API_BASE=""：Web 编译期标记已定义、值为空，走 nginx 同源 /api
 # build 默认会再跑 pub get，仍用 ENV 里的国内镜像；pdfrx 等包可能不在 mirror 上 → 先 fallback，再 --no-pub
 RUN set -eux; \
-    flutter pub get --enforce-lockfile \
+    flutter pub get \
     || (echo "pub mirror miss, retry fallback..." \
         && PUB_HOSTED_URL=${PUB_FALLBACK_URL} FLUTTER_STORAGE_BASE_URL=${FLUTTER_FALLBACK_STORAGE} \
-           flutter pub get --enforce-lockfile); \
+           flutter pub get); \
     flutter build web --release --no-web-resources-cdn --no-wasm-dry-run --no-pub \
         --dart-define=API_BASE=""
 
