@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,9 +10,7 @@ import '../data/brain_game_models.dart';
 import '../data/brain_game_repository.dart';
 import '../logic/sudoku.dart';
 import 'brain_game_shell.dart';
-
-/// 落错格的标红底色（`AppColors` 无 red，用局部常量）
-const _gameWrong = Color(0x1FC05B4A);
+import 'brain_game_theme.dart';
 
 class SudokuPage extends ConsumerStatefulWidget {
   const SudokuPage({super.key});
@@ -72,7 +70,7 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
   /// 生成题面；异常时进入错误态，由 UI 提供「重新生成」。
   void _newGame() {
     try {
-      final p = generateSudoku(_difficulty.id, random: Random());
+      final p = generateSudoku(_difficulty.id, random: math.Random());
       _puzzle = p;
       _cells = [for (final row in p.givens) List<int>.from(row)];
       _generateError = null;
@@ -87,7 +85,6 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
         ..reset()
         ..start();
     } catch (e) {
-      // 生成异常不白屏：显示「重新生成」按钮（规格容错节要求）
       _puzzle = null;
       _cells = const [];
       _generateError = '$e';
@@ -180,10 +177,10 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
     );
   }
 
-  Color _cellColor(int r, int c) {
-    if (r == _wrongRow && c == _wrongCol) return _gameWrong;
+  Color? _cellColor(int r, int c) {
+    if (r == _wrongRow && c == _wrongCol) return BrainPalette.sudokuWrong;
     if (r == _selectedRow && c == _selectedCol) {
-      return AppColors.blue.withValues(alpha: .14);
+      return BrainPalette.sudokuSelected;
     }
     final p = _puzzle;
     if (_selectedRow != null && _selectedCol != null && p != null) {
@@ -191,108 +188,166 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
       final sameBox =
           r ~/ spec.boxRows == _selectedRow! ~/ spec.boxRows &&
           c ~/ spec.boxCols == _selectedCol! ~/ spec.boxCols;
-      // 同行 / 同列 / 同宫都浅蓝底（规格要求）
       if (r == _selectedRow || c == _selectedCol || sameBox) {
-        return AppColors.blue.withValues(alpha: .05);
+        return BrainPalette.sudokuPeer;
       }
     }
-    return Colors.transparent;
+    return null;
   }
 
+  /// 棋盘：外层画粗线分宫，内部用细线，格线不会挤压格子尺寸。
   Widget _buildBoard(SudokuSpec spec) {
     final p = _puzzle!;
     final n = spec.size;
+
     return AspectRatio(
       aspectRatio: 1,
       child: Container(
         key: const ValueKey('sudoku-grid'),
-        decoration: BoxDecoration(border: Border.all(color: AppColors.line)),
-        child: Column(
-          children: [
-            for (var r = 0; r < n; r++)
-              Expanded(
-                child: Row(
-                  children: [
-                    for (var c = 0; c < n; c++)
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _select(r, c),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: _cellColor(r, c),
-                              // 选中格加主题蓝描边（规格要求）
-                              border: r == _selectedRow && c == _selectedCol
-                                  ? Border.all(color: AppColors.blue, width: 2)
-                                  : Border(
-                                      right: BorderSide(
-                                        color:
-                                            (c + 1) % spec.boxCols == 0 &&
-                                                c != n - 1
-                                            ? AppColors.ink
-                                            : AppColors.line,
-                                        width:
-                                            (c + 1) % spec.boxCols == 0 &&
-                                                c != n - 1
-                                            ? 2
-                                            : .5,
-                                      ),
-                                      bottom: BorderSide(
-                                        color:
-                                            (r + 1) % spec.boxRows == 0 &&
-                                                r != n - 1
-                                            ? AppColors.ink
-                                            : AppColors.line,
-                                        width:
-                                            (r + 1) % spec.boxRows == 0 &&
-                                                r != n - 1
-                                            ? 2
-                                            : .5,
-                                      ),
-                                    ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              _cells[r][c] == 0 ? '' : '${_cells[r][c]}',
-                              style: TextStyle(
-                                fontSize: n >= 9 ? 18 : 22,
-                                fontWeight: p.isGiven(r, c)
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                color: p.isGiven(r, c)
-                                    ? AppColors.ink
-                                    : AppColors.blue,
+        decoration: BoxDecoration(
+          color: BrainPalette.sudokuBg,
+          border: Border.all(color: BrainPalette.sudokuBoxLine, width: 2),
+        ),
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final cellW = c.maxWidth / n;
+            final cellH = c.maxHeight / n;
+            return Stack(
+              children: [
+                // 细格线（每格右边/下边）
+                for (var r = 0; r < n; r++)
+                  for (var c2 = 0; c2 < n; c2++)
+                    if (_cellColor(r, c2) != null)
+                      Positioned(
+                        left: c2 * cellW,
+                        top: r * cellH,
+                        width: cellW,
+                        height: cellH,
+                        child: ColoredBox(color: _cellColor(r, c2)!),
+                      ),
+                // 宫线（粗）
+                for (var c2 = 1; c2 < n; c2++)
+                  if (c2 % spec.boxCols == 0)
+                    Positioned(
+                      left: c2 * cellW - 1,
+                      top: 0,
+                      bottom: 0,
+                      width: 2,
+                      child: const ColoredBox(
+                        color: BrainPalette.sudokuBoxLine,
+                      ),
+                    ),
+                for (var r = 1; r < n; r++)
+                  if (r % spec.boxRows == 0)
+                    Positioned(
+                      top: r * cellH - 1,
+                      left: 0,
+                      right: 0,
+                      height: 2,
+                      child: const ColoredBox(
+                        color: BrainPalette.sudokuBoxLine,
+                      ),
+                    ),
+                // 选中格描边
+                if (_selectedRow != null && _selectedCol != null)
+                  Positioned(
+                    left: _selectedCol! * cellW,
+                    top: _selectedRow! * cellH,
+                    width: cellW,
+                    height: cellH,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: BrainPalette.sudokuBoxLine,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                // 数字 + 点击区
+                for (var r = 0; r < n; r++)
+                  for (var c2 = 0; c2 < n; c2++)
+                    Positioned(
+                      left: c2 * cellW,
+                      top: r * cellH,
+                      width: cellW,
+                      height: cellH,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _select(r, c2),
+                        child: Center(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Padding(
+                              padding: const EdgeInsets.all(2),
+                              child: Text(
+                                _cells[r][c2] == 0 ? '' : '${_cells[r][c2]}',
+                                style: TextStyle(
+                                  fontSize: n >= 9 ? 22 : 28,
+                                  height: 1.1,
+                                  fontWeight: p.isGiven(r, c2)
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: p.isGiven(r, c2)
+                                      ? BrainPalette.sudokuGiven
+                                      : BrainPalette.sudokuInput,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                  ],
-                ),
-              ),
-          ],
+                    ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
+  /// 数字条：固定高度、按盘面大小自适应宽度，永不换行。
   Widget _pad(SudokuSpec spec) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      alignment: WrapAlignment.center,
-      children: [
-        for (var v = 1; v <= spec.size; v++)
-          SizedBox(
-            width: 44,
-            height: 44,
-            child: FilledButton(
-              key: ValueKey('sudoku-pad-$v'),
-              style: FilledButton.styleFrom(padding: EdgeInsets.zero),
-              onPressed: () => _place(v),
-              child: Text('$v'),
-            ),
-          ),
-      ],
+    return LayoutBuilder(
+      builder: (context, c) {
+        final n = spec.size;
+        const gap = 6.0;
+        final w = (c.maxWidth - gap * (n - 1)) / n;
+        final side = math.min(w, 46.0);
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var v = 1; v <= n; v++) ...[
+              if (v > 1) const SizedBox(width: gap),
+              SizedBox(
+                width: side,
+                height: side,
+                child: Material(
+                  color: BrainPalette.sudokuPadBg,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    key: ValueKey('sudoku-pad-$v'),
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => _place(v),
+                    child: Center(
+                      child: Text(
+                        '$v',
+                        style: TextStyle(
+                          fontSize: side * .45,
+                          fontWeight: FontWeight.w700,
+                          color: BrainPalette.sudokuInput,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 
@@ -300,64 +355,45 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
   Widget build(BuildContext context) {
     final p = _puzzle;
     final best = _stats[_kind]?[_difficulty]?.bestMs;
+
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(108),
+        preferredSize: const Size.fromHeight(80),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: GameTopBar(
-              title: _kind.label,
-              difficulty: _difficulty,
-              onDifficultyChanged: _changeDifficulty,
-              elapsedMs: _elapsedMs,
-              bestMs: best,
-              onRestart: _restart,
-            ),
+          bottom: false,
+          child: GameTopBar(
+            title: _kind.label,
+            difficulty: _difficulty,
+            onDifficultyChanged: _changeDifficulty,
+            elapsedMs: _elapsedMs,
+            bestMs: best,
+            onRestart: _restart,
+            accent: BrainPalette.sudokuInput,
           ),
         ),
       ),
       body: p == null
-          ? Center(
+          ? GameGenerateError(onRetry: _restart, detail: _generateError)
+          : SafeArea(
+              top: false,
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('题面生成失败，请点下方重新生成'),
-                    if (_generateError != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          _generateError!,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.gray,
-                          ),
-                        ),
-                      ),
+                    // 棋盘吃掉所有剩余高度（一屏内不滚动）
+                    Expanded(child: _buildBoard(p.spec)),
                     const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: _restart,
-                      child: const Text('重新生成'),
+                    _pad(p.spec),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '点格子后在下方选数字；填错会标红并清空',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 11, color: AppColors.gray),
                     ),
                   ],
                 ),
               ),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildBoard(p.spec),
-                const SizedBox(height: 20),
-                _pad(p.spec),
-                const SizedBox(height: 16),
-                const Text(
-                  '点格子后在下方选数字；填错会标红并清空',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: AppColors.gray),
-                ),
-              ],
             ),
     );
   }

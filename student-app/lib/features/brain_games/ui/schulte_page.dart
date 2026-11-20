@@ -10,9 +10,7 @@ import '../data/brain_game_models.dart';
 import '../data/brain_game_repository.dart';
 import '../logic/schulte.dart';
 import 'brain_game_shell.dart';
-
-/// 点错抖动用的边框红（`AppColors` 无 red）
-const _gameRed = Color(0xFFC05B4A);
+import 'brain_game_theme.dart';
 
 class SchultePage extends ConsumerStatefulWidget {
   const SchultePage({super.key});
@@ -47,7 +45,7 @@ class _SchultePageState extends ConsumerState<SchultePage> {
     super.initState();
     _newGame();
     _loadStats();
-    _ticker = Timer.periodic(const Duration(milliseconds: 200), (_) {
+    _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (!mounted || _finished) return;
       setState(() => _elapsedMs = _sw.elapsedMilliseconds);
     });
@@ -164,39 +162,46 @@ class _SchultePageState extends ConsumerState<SchultePage> {
 
   Widget _cell(int value, int size) {
     final cleared = _cleared.contains(value);
-    // 点错时给该格加红色边框（规格要求「点错红色抖动」的可见反馈）
     final wrong = _wrongValue == value;
-    return AnimatedOpacity(
-      opacity: cleared ? 0 : 1,
-      duration: const Duration(milliseconds: 220),
-      child: IgnorePointer(
-        ignoring: cleared,
-        child: AspectRatio(
-          aspectRatio: 1,
-          child: Padding(
-            padding: const EdgeInsets.all(3),
-            child: Material(
-              color: cleared
-                  ? AppColors.green.withValues(alpha: .25)
-                  : AppColors.blue.withValues(alpha: .08),
-              // 注意：Material 不能同时传 borderRadius 与 shape（框架断言会抛异常）
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: wrong
-                    ? const BorderSide(color: _gameRed, width: 2)
-                    : BorderSide.none,
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: () => _tap(value),
-                child: Center(
-                  child: Text(
-                    '$value',
-                    style: TextStyle(
-                      fontSize: size >= 5 ? 22 : 26,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+
+    if (cleared) {
+      // 已点掉的格子：留一块很淡的底，不显示数字，保持网格完整
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: BrainPalette.schulteCleared,
+          borderRadius: BorderRadius.circular(10),
+        ),
+      );
+    }
+
+    return Material(
+      key: ValueKey('schulte-cell-$value'),
+      color: BrainPalette.schulteTile,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(
+          color: wrong
+              ? BrainPalette.schulteAccent
+              : BrainPalette.schulteTileBorder,
+          width: wrong ? 2 : 1,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => _tap(value),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Text(
+                '$value',
+                style: TextStyle(
+                  fontSize: size >= 5 ? 24 : 30,
+                  fontWeight: FontWeight.w700,
+                  color: wrong
+                      ? BrainPalette.schulteAccent
+                      : BrainPalette.schulteTileText,
                 ),
               ),
             ),
@@ -208,15 +213,101 @@ class _SchultePageState extends ConsumerState<SchultePage> {
 
   Widget _boardWidget(SchulteBoard b) {
     final size = b.size;
-    return Column(
-      children: [
-        for (var r = 0; r < size; r++)
-          Row(
+    const gap = 6.0;
+    return AspectRatio(
+      aspectRatio: 1,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final side = (c.maxWidth - gap * (size - 1)) / size;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              for (var c = 0; c < size; c++)
-                Expanded(child: _cell(b.numbers[r * size + c], size)),
+              for (var r = 0; r < size; r++) ...[
+                if (r > 0) const SizedBox(height: gap),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var c2 = 0; c2 < size; c2++) ...[
+                      if (c2 > 0) const SizedBox(width: gap),
+                      SizedBox(
+                        width: side,
+                        height: side,
+                        child: _cell(b.numbers[r * size + c2], size),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 顶部三栏统计：用时 / 下一个 / 错误。
+  Widget _statBar(SchulteBoard b) {
+    Widget item(String label, String value, {Color? color, Key? key}) =>
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(fontSize: 11, color: AppColors.gray),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                key: key,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: color ?? BrainPalette.schulteTileText,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
             ],
           ),
+        );
+
+    final done = _cleared.length;
+    final pct = b.max == 0 ? 0.0 : done / b.max;
+    return Column(
+      children: [
+        Row(
+          children: [
+            item(
+              '用时',
+              formatGameMs(_elapsedMs),
+              key: const ValueKey('schulte-time'),
+            ),
+            item(
+              '下一个',
+              '$_next',
+              key: const ValueKey('schulte-next'),
+              color: BrainPalette.schulteAccent,
+            ),
+            item(
+              '错误',
+              '$_errors',
+              key: const ValueKey('schulte-errors'),
+              color: _errors > 0 ? BrainPalette.schulteAccent : null,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: LinearProgressIndicator(
+            value: pct,
+            minHeight: 4,
+            backgroundColor: BrainPalette.schulteTileBorder,
+            valueColor: const AlwaysStoppedAnimation(
+              BrainPalette.schulteAccent,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -226,90 +317,56 @@ class _SchultePageState extends ConsumerState<SchultePage> {
     final b = _board;
     final best = _stats[_kind]?[_difficulty]?.bestMs;
     return Scaffold(
+      backgroundColor: BrainPalette.schulteBg,
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(108),
+        preferredSize: const Size.fromHeight(80),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: GameTopBar(
-              title: _kind.label,
-              difficulty: _difficulty,
-              onDifficultyChanged: _changeDifficulty,
-              elapsedMs: _elapsedMs,
-              bestMs: best,
-              onRestart: _restart,
-            ),
+          bottom: false,
+          child: GameTopBar(
+            title: _kind.label,
+            difficulty: _difficulty,
+            onDifficultyChanged: _changeDifficulty,
+            elapsedMs: _elapsedMs,
+            bestMs: best,
+            onRestart: _restart,
+            accent: BrainPalette.schulteAccent,
           ),
         ),
       ),
       body: b == null
-          ? Center(
+          ? GameGenerateError(onRetry: _restart, detail: _generateError)
+          : SafeArea(
+              top: false,
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('题面生成失败，请点下方重新生成'),
-                    if (_generateError != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          _generateError!,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.gray,
-                          ),
+                    _statBar(b),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: TweenAnimationBuilder<double>(
+                        key: ValueKey('schulte-shake-$_shake'),
+                        tween: Tween(begin: _shake == 0 ? 0 : -7, end: 0),
+                        duration: const Duration(milliseconds: 170),
+                        curve: Curves.easeOut,
+                        builder: (context, dx, child) => Transform.translate(
+                          offset: Offset(dx, 0),
+                          child: child,
+                        ),
+                        child: Container(
+                          key: const ValueKey('schulte-board'),
+                          child: _boardWidget(b),
                         ),
                       ),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: _restart,
-                      child: const Text('重新生成'),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '按 1 → N 的顺序依次点击数字',
+                      style: TextStyle(fontSize: 11, color: AppColors.gray),
                     ),
                   ],
                 ),
               ),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      '下一个：$_next',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '错误 $_errors',
-                      style: const TextStyle(color: AppColors.gray),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // 点错时左右轻微抖动：key 变化触发一次从 -6px 到 0 的位移
-                TweenAnimationBuilder<double>(
-                  key: ValueKey('schulte-shake-$_shake'),
-                  tween: Tween(begin: _shake == 0 ? 0 : -6, end: 0),
-                  duration: const Duration(milliseconds: 160),
-                  curve: Curves.easeOut,
-                  builder: (context, dx, child) =>
-                      Transform.translate(offset: Offset(dx, 0), child: child),
-                  child: Container(
-                    key: const ValueKey('schulte-board'),
-                    child: _boardWidget(b),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  '按 1 → N 的顺序依次点击数字',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: AppColors.gray),
-                ),
-              ],
             ),
     );
   }
