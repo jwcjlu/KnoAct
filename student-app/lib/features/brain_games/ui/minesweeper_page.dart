@@ -224,7 +224,12 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     if (_boomIndex == index) {
       return _sunkenCell(
         color: const Color(0xFFE23B2E),
-        child: const Icon(Icons.close, size: 14, color: Colors.white),
+        child: Image.asset(
+          'assets/brain_games/mine.png',
+          width: 16,
+          height: 16,
+          filterQuality: FilterQuality.high,
+        ),
       );
     }
 
@@ -232,7 +237,12 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
       // 失败后把未点开的雷也显示出来
       if (_boom && board.isMine(index)) {
         return _sunkenCell(
-          child: Icon(Icons.circle, size: 9, color: BrainPalette.mineLcd),
+          child: Image.asset(
+            'assets/brain_games/mine.png',
+            width: 16,
+            height: 16,
+            filterQuality: FilterQuality.high,
+          ),
         );
       }
       return _greyCell(index, flag: _flags.contains(index));
@@ -263,7 +273,12 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
       onLongPress: () => _toggleFlag(index),
       child: _raisedCell(
         child: flag
-            ? const Icon(Icons.flag, size: 13, color: BrainPalette.mineDigits)
+            ? Image.asset(
+                'assets/brain_games/flag.png',
+                width: 14,
+                height: 14,
+                filterQuality: FilterQuality.high,
+              )
             : const SizedBox.shrink(),
       ),
     );
@@ -315,6 +330,12 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     );
   }
 
+  /// 表情：进行中 smile；踩雷 lose；通关 win（来自 zyrate/Minesweeper 图标集）。
+  String get _faceAsset {
+    if (!_finished) return 'assets/brain_games/smile.png';
+    return _boom ? 'assets/brain_games/lose.png' : 'assets/brain_games/win.png';
+  }
+
   @override
   Widget build(BuildContext context) {
     final best = _stats[_kind]?[_difficulty]?.bestMs;
@@ -363,16 +384,13 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
                       onTap: _restart,
                       child: _raisedCell(
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          child: Text(
-                            _finished ? (_boom ? '×_×' : '^_^') : ':)',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
+                          padding: const EdgeInsets.all(3),
+                          child: Image.asset(
+                            _faceAsset,
+                            key: const ValueKey('mine-face'),
+                            width: 26,
+                            height: 26,
+                            filterQuality: FilterQuality.high,
                           ),
                         ),
                       ),

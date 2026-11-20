@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'brain_game_test_helpers.dart';
+
+String _faceAssetOf(WidgetTester tester) {
+  final img = tester.widget<Image>(find.byKey(const ValueKey('mine-face')));
+  return (img.image as AssetImage).assetName;
+}
 
 void main() {
   testWidgets('扫雷页首点前不布雷，显示开始提示', (tester) async {
@@ -20,5 +26,23 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('剩余'), findsOneWidget);
+  });
+
+  testWidgets('进行中显示 smile 表情', (tester) async {
+    await pumpBrainGame(tester, minesweeperPageForTest());
+    expect(_faceAssetOf(tester), 'assets/brain_games/smile.png');
+  });
+
+  testWidgets('三张表情与雷/旗图标都已打包成资源', (tester) async {
+    for (final path in [
+      'assets/brain_games/smile.png',
+      'assets/brain_games/lose.png',
+      'assets/brain_games/win.png',
+      'assets/brain_games/flag.png',
+      'assets/brain_games/mine.png',
+    ]) {
+      final data = await rootBundle.load(path);
+      expect(data.lengthInBytes, greaterThan(500), reason: '$path 资源缺失');
+    }
   });
 }
