@@ -34,10 +34,16 @@ class BrainPalette {
   static const mineLcd = Color(0xFF1A1A1A);
   static const mineDigits = Color(0xFFFF3B30);
   static const mineClosed = Color(0xFFC0C0C0);
-  static const mineOpen = Color(0xFFC8C8C8);
+  static const mineOpen = Color(0xFFD6D6D6);
+
+  /// 已开格之间的分隔线：要比格子底色明显更深，否则一片灰看不出格
+  static const mineOpenLine = Color(0xFF8A8A8A);
   static const mineBevelLight = Colors.white;
   static const mineBevelDark = Color(0xFF7B7B7B);
   static const mineGridLine = Color(0xFF9A9A9A);
+
+  /// 踩中的那颗雷的红底
+  static const mineHit = Color(0xFFD93A2B);
 
   /// 扫雷数字 1–8 的经典配色。
   static const mineNumber = <int, Color>{

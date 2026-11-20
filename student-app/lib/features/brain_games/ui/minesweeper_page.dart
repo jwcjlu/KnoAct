@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -102,7 +102,7 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
       board = generateMinesweeper(
         _difficulty.id,
         safeIndex: index,
-        random: Random(),
+        random: math.Random(),
       );
       _board = board;
       _sw.start();
@@ -197,20 +197,36 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     );
   }
 
-  /// 已开格：平坦凹陷（右下白、左上深灰 + 细网格线）。
+  /// 已开格：平坦凹陷，四边用清晰细线分隔，避免「一片灰看不出格」。
   Widget _sunkenCell({required Widget child, Color? color}) {
     return Container(
       decoration: BoxDecoration(
         color: color ?? BrainPalette.mineOpen,
-        border: const Border(
-          top: BorderSide(color: BrainPalette.mineGridLine, width: 1),
-          left: BorderSide(color: BrainPalette.mineGridLine, width: 1),
-          bottom: BorderSide(color: BrainPalette.mineBevelLight, width: 1),
-          right: BorderSide(color: BrainPalette.mineBevelLight, width: 1),
-        ),
+        border: Border.all(color: BrainPalette.mineOpenLine),
       ),
       alignment: Alignment.center,
       child: child,
+    );
+  }
+
+  /// 格内图标：占格子 70%，随格子尺寸自适应（12×12 盘也不会挤成一坨）。
+  Widget _iconInCell(String asset, {Color? tint}) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final side = math.min(c.maxWidth, c.maxHeight) * 0.7;
+        final img = Image.asset(
+          asset,
+          width: side,
+          height: side,
+          filterQuality: FilterQuality.medium,
+        );
+        if (tint == null) return img;
+        // 红底上用白色剪影，避免黑色雷看不清
+        return ColorFiltered(
+          colorFilter: ColorFilter.mode(tint, BlendMode.srcIn),
+          child: img,
+        );
+      },
     );
   }
 
@@ -223,27 +239,15 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     // 踩中的那颗雷用红底标出来
     if (_boomIndex == index) {
       return _sunkenCell(
-        color: const Color(0xFFE23B2E),
-        child: Image.asset(
-          'assets/brain_games/mine.png',
-          width: 16,
-          height: 16,
-          filterQuality: FilterQuality.high,
-        ),
+        color: BrainPalette.mineHit,
+        child: _iconInCell('assets/brain_games/mine.png', tint: Colors.white),
       );
     }
 
     if (!_opened.contains(index)) {
       // 失败后把未点开的雷也显示出来
       if (_boom && board.isMine(index)) {
-        return _sunkenCell(
-          child: Image.asset(
-            'assets/brain_games/mine.png',
-            width: 16,
-            height: 16,
-            filterQuality: FilterQuality.high,
-          ),
-        );
+        return _sunkenCell(child: _iconInCell('assets/brain_games/mine.png'));
       }
       return _greyCell(index, flag: _flags.contains(index));
     }
@@ -273,12 +277,7 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
       onLongPress: () => _toggleFlag(index),
       child: _raisedCell(
         child: flag
-            ? Image.asset(
-                'assets/brain_games/flag.png',
-                width: 14,
-                height: 14,
-                filterQuality: FilterQuality.high,
-              )
+            ? _iconInCell('assets/brain_games/flag.png')
             : const SizedBox.shrink(),
       ),
     );
