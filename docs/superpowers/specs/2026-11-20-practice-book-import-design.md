@@ -100,14 +100,19 @@ __table_args__ = (Index("ix_questions_bank_lesson", "bank_id", "lesson_no"),)
 **索引必须靠迁移脚本建**：`schema_sync.py` 明写「不补索引」，存量库（dev SQLite /
 生产 MySQL）的 `questions` 表已存在，`create_all` 不会补索引。因此新增
 `backend/app/migrate_practice_import.py`（参照 `migrate_question_bank.py` 的写法），
-在 `main.py` 启动时执行：
+在 `main.py` 启动时执行，且**每一步都独立 try/except 保证幂等**：
+
 ```sql
-ALTER TABLE questions ADD COLUMN lesson_no INTEGER;
-ALTER TABLE questions ADD COLUMN lesson_title VARCHAR(64);
-ALTER TABLE questions ADD COLUMN question_no VARCHAR(16);
+ALTER TABLE questions ADD COLUMN lesson_no INTEGER;          -- 已存在则跳过
+ALTER TABLE questions ADD COLUMN lesson_title VARCHAR(64);   -- 已存在则跳过
+ALTER TABLE questions ADD COLUMN question_no VARCHAR(16);    -- 已存在则跳过
+-- source_document_id 由 schema_sync 自动补（模型里有该列），无需在此 ALTER
 CREATE INDEX ix_questions_bank_lesson ON questions (bank_id, lesson_no);
+-- 新库 create_all 已按 __table_args__ 建好同名索引 → CREATE 会报错，需 catch 后忽略
 ```
-（SQLite / MySQL 都支持以上语法；列已存在时捕获异常跳过，保持幂等。）
+
+**注意**：`CREATE INDEX` 的失败要单独 catch（不能与 ALTER 共用同一个 try），
+否则新库上「索引已存在」会让后续步骤被跳过。
 
 #### 2.1b `QuestionDraft` 加字段 + `_persist_drafts` 透传（**数据流关键**）
 
@@ -124,8 +129,10 @@ question_no: str = ""
 ```python
 lesson_no=d.lesson_no, lesson_title=d.lesson_title or None,
 question_no=d.question_no or None,
+source_document_id=d.source_document_id,   # 见 §2.10
+user_id=bank.user_id,                       # ★ 必须写，见下方警告
 ```
-（其余逻辑不变；`qtype_category` 仍由 `CATEGORY_OF_QTYPE.get(d.qtype)` 计算，
+（`qtype_category` 仍由 `CATEGORY_OF_QTYPE.get(d.qtype)` 计算，
 **不要**接受外部传入的 category。）
 
 #### 2.2 新表 `PracticeImportJob`
@@ -208,6 +215,26 @@ class PracticeAttempt(Base):
 > 注意 `calculation` 的 category 是 `blank`：题库练习页会对竖式渲染填空输入框。
 > 因此**练习册的卷必须从题库练习列表中排除**（见 §2.11），竖式只在「每日一练」的拍照流程里出现。
 
+#### 2.5b ⚠️ 致命：`_persist_drafts` 不写 `user_id`，题目会被启动迁移删光
+
+`_persist_drafts()`（`bank.py:134-150`）构造 `Question` 时**没有传 `user_id`**，
+落库为 `NULL`。而 `migrate_grade_buckets.migrate()` 最后一行是：
+
+```python
+db.query(Question).filter(Question.user_id.is_(None)).delete(synchronize_session=False)
+```
+
+`main.py:61-68` **每次启动**都跑这个迁移。结果：108 页导入成功、发布、孩子练完，
+**下次重启服务，整本练习册的题会被静默删除**。
+
+**必须在本次一并修掉**（二选一，推荐前者）：
+
+- **（推荐）** `_persist_drafts` 补 `user_id=bank.user_id`（`ReadingPassage` 已经这么做了，
+  见 `bank.py:122`）。这同时修好了既有拍照录题的同类隐患。
+- 或把迁移的删除条件收紧为 `user_id IS NULL AND bank_id IS NULL`。
+
+验收要求：**导入后重启服务，题数不变**（写进 §四 测试）。
+
 #### 2.6 答案对齐策略
 
 1. 题面页 OCR → 解析出「课时标题 + 题号 + 题干」。课时标题形如 `第3课时 小数乘小数`，
@@ -234,6 +261,17 @@ class PracticeAttempt(Base):
 本题材是扫描版（无文字层），不先 OCR 无法探测「参考答案」页。
 因此上传接口**必填** `answer_start_page` / `answer_end_page`；
 题面范围默认 `1` 到 `answer_start_page - 1`，也可由家长覆盖。
+
+**不得复用 `POST /api/pdf/upload`**：
+`upload_pdf`（`pdf.py:52-64`）只对 `content_kind == "handout"` 跳过拆课，
+其它值都会走 `detect_lessons_from_pdf` —— 对 108 页扫描书会**整本 OCR**
+并建出一堆假 Lesson。因此导入接口必须**自己**建 `PdfDocument(content_kind="practice")`
++ 调 `render_pages`，不经过 upload 路由。
+
+**OCR 不得走 `pdf_split._ocr_page`**：
+它把结果 memo 进模块级 `_OCR_CACHE`（key 只含 path/page/instruction），
+**失败时把空字符串也缓存住**，于是 `POST /retry` 永远拿到同一个失败结果。
+必须直接 `_render_page_png(pdf_path, i, dpi=150)` + `services.ai.ocr_image()`。
 
 #### 2.8 发布（原设计缺失）
 
@@ -266,8 +304,16 @@ db.query(Question).filter(Question.id.in_(ids)).update(
 
 ```python
 source_document_id: Mapped[int | None] = mapped_column(
-    ForeignKey("pdf_documents.id"), nullable=True)   # 练习册导入题才填
+    Integer, ForeignKey("pdf_documents.id", ondelete="SET NULL"), nullable=True)
 ```
+
+> **`ondelete="SET NULL"` 是必需的**：新库由 `create_all` 建出真外键，
+> 若家长删练习册（`DELETE /api/pdf/documents/{id}`，`pdf.py:396`）而未处理题目，
+> 会因外键约束报 500。`SET NULL` 让删文档时题目保留（仍可在题库里看到/手动清理）。
+> 存量库经 `schema_sync` 补的是**裸 INTEGER 列（无外键）**，行为一致，不会冲突。
+>
+> `DELETE /api/questions/{id}` 也要先删 `PracticeAttempt` 再删题（或把
+> `PracticeAttempt.question_id` 设为 `ondelete="CASCADE"`），否则新库会 500。
 
 - 同一 PDF 重复上传：默认**追加**（新 job → 新题）
 - 结果页「清理旧题」：`DELETE FROM questions WHERE bank_id = ? AND source_document_id = ?`
@@ -280,11 +326,15 @@ source_document_id: Mapped[int | None] = mapped_column(
 - 家长端「教材」页不显示练习册
 
 **（b）题库练习列表**：`GET /api/banks/practice`（`bank.py:277`）必须排除练习册卷
-- 判断依据：该卷的题 `qtype` 含 `calculation`/`application` 且 `source_document_id` 非空
-- 更简单可靠的做法：`QuestionBank` 上给 `source='practice_pdf'`（`bank.source` 已有该列），
-  `list_practice_banks` 加一句 `QuestionBank.source != "practice_pdf"`
-- 理由：`calculation` 的 category 是 `blank`，题库练习页会把竖式渲染成填空输入框，
-  提交走 `submit_bank` 必错
+- 判断依据：`QuestionBank.source == "practice_pdf"`
+- **`bank.source` 必须在 `_persist_drafts` 之后设置**：
+  `_persist_drafts` 末尾有 `if ids and bank.source == "manual": bank.source = "third_party"`
+  （`bank.py:153-154`）。若导入任务在 persist **之前**把 `source` 设成 `"practice_pdf"`，
+  该判断不成立（因为不等于 `"manual"`）而保留；但若先设成别的值再 persist，
+  可能被改写。**约定：persist 完成后立刻 `bank.source = "practice_pdf"`。**
+- `task_gen.py:364-412` 的 `_gen_bank_practice_tasks` 也要同样排除
+  （它按 `tags.include_daily_task` 筛选，练习册导出的题不写该 tag，故天然排除；
+  但为保险起见把 `source` 判断也加上）
 
 #### 2.12 磁盘
 
@@ -371,7 +421,7 @@ source_document_id: Mapped[int | None] = mapped_column(
 
 | 场景 | 处理 |
 | --- | --- |
-| 视觉模型不可用 | 判 `r = resolve(db,"llm")`，当 `r.provider == "fake"` 或 `not (r.api_key and r.base_url)` → 400「未配置可用的视觉模型（llm 档）」。**注意 `Resolved` 没有 `.name` 属性**（`model_config.py:15-23` 的 dataclass 只有 `provider` 字符串），写成 `.provider.name` 会 AttributeError |
+| 视觉模型不可用 | 判 `r = resolve(db,"llm")`，当 `r.provider == "fake"` 或 `not (r.api_key and r.base_url)` → 400「需要配置 OpenAI 兼容 / 中转站的 llm 档（deepseek、glm 这类内置 base_url 的 provider 无法用于 OCR）」。**注意 `Resolved` 没有 `.name` 属性**（`model_config.py:15-23` 的 dataclass 只有 `provider` 字符串），写成 `.provider.name` 会 AttributeError |
 | 答案页范围缺失/越界 | 400，提示必须填且 `1 ≤ answer_start ≤ answer_end ≤ total_pages` |
 | PDF 无法解析 | 400 |
 | 单页 OCR 返回空 | 记失败页，继续下一页，最后汇总 |
@@ -385,13 +435,17 @@ source_document_id: Mapped[int | None] = mapped_column(
 
 后端 pytest
 - `tests/test_practice_import.py`
+  - **`user_id` 落库**：导入后 `Question.user_id == bank.user_id`（非 NULL）
+  - **重启不丢题**（关键回归）：创建题 → 跑 `migrate_grade_buckets.migrate()` → 题数不变
   - 题型映射：`kind → qtype` 六种（含多空填空 → `fill_blank` + `blanks`）
   - 答案对齐：`(lesson_no, question_no)` 命中 / 未命中进待补清单
-  - 发布：导入后题 `status == "published"`；撤销后回 `pending`
-  - 幂等清理：按 `document_id` 删旧题
+  - 发布：导入后题 `status == "published"`；撤销后回 `pending`；PATCH 补答案后自动 published
+  - 幂等清理：按 `source_document_id` 删旧题
   - 任务执行器注入：monkeypatch `run_import_job`，验证 `done_pages` 递增与失败页记录
   - 视觉模型校验：fake provider → 400
   - 鉴权：别的家长的卷不可导入/查看
+  - 练习册卷不出现在 `GET /api/banks/practice`
+  - 练习册文档不出现在 `GET /api/pdf/documents`
 - `tests/test_practice.py`
   - 取题：按 `practice_current_lesson` 返回该课时 `published` 题
   - 判分：`oral` 走 `grade_math_answer`；`calculation` 走 `grade_math_work_photo`（mock）
@@ -409,16 +463,15 @@ Flutter
 | 文件 | 改动 |
 | --- | --- |
 | `backend/app/models.py` | `Question` 加 `lesson_no`/`lesson_title`/`question_no`/`source_document_id` + 索引；新增 `PracticeImportJob`、`PracticeAttempt` |
-| `backend/app/core/source_adapter.py` | `QuestionDraft` 加 `lesson_no`/`lesson_title`/`question_no` |
-| `backend/app/routers/bank.py` | `_persist_drafts` 透传三个课时字段 + `source_document_id`；`list_practice_banks` 排除 `source="practice_pdf"` |
-| `backend/app/migrate_practice_import.py` | 新增：给存量 `questions` 表 `ALTER TABLE` 加 4 列 + `CREATE INDEX`（幂等） |
+| `backend/app/core/source_adapter.py` | `QuestionDraft` 加 `lesson_no`/`lesson_title`/`question_no`/`source_document_id` |
+| `backend/app/routers/bank.py` | `_persist_drafts` 透传课时字段 + `source_document_id` + **`user_id=bank.user_id`**；`list_practice_banks` 排除 `source="practice_pdf"` |
+| `backend/app/migrate_practice_import.py` | 新增：`ALTER TABLE` 加 3 列 + `CREATE INDEX`（各自 try/except 幂等） |
 | `backend/app/routers/practice_import.py` | 新增：上传/进度/重试/待补/补答案/课时列表 |
 | `backend/app/routers/practice.py` | 新增：取题/判分/提交/preferences |
 | `backend/app/services/practice_import.py` | 新增：页码范围校验、OCR 编排、课时/题号解析、答案对齐、发布、`run_import_job` |
 | `backend/app/routers/pdf.py` | `content_kind="practice"` 默认从教材列表排除 |
 | `backend/app/main.py` | include 两个 router；启动时跑迁移 + 清理卡住的 job |
-| `parent-web/app.js` / `index.html` | 「练习册导入」子视图 + 当前课时设置；`MODULE_LABEL` 加 `daily_practice` |
-| `student-app/lib/features/practice/` | 新增：每日一练页 + controller + repository + 模型 |
+| `parent-web/app.js` / `index.html` | 「练习册导入」子视图 + 当前课时设置；`MODULE_LABEL` 加 `daily_practice` || `student-app/lib/features/practice/` | 新增：每日一练页 + controller + repository + 模型 |
 | `student-app/lib/core/router.dart` | `/practice` 的 **`StatefulShellBranch`（index 3）** + `_shellPaths` 加入 |
 | `student-app/lib/features/shell/app_shell.dart` | 第 5 Tab + 修正索引副作用 |
 | `backend/tests/test_practice_import.py` | 新增 |
