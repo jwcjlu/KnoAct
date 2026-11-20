@@ -9,13 +9,15 @@ class BrainPalette {
 
   // ── 数独（白底 + 深蓝格线，粗线分宫）────────────────────────────
   static const sudokuBg = Colors.white;
-  static const sudokuLine = Color(0xFFB9C4E4);
-  static const sudokuBoxLine = Color(0xFF2C3E8F);
+
+  /// 每格细线：一屏缩小后仍要看得清，用中等深度的灰蓝
+  static const sudokuLine = Color(0xFF55618A);
+  static const sudokuBoxLine = Color(0xFF16234F);
   static const sudokuGiven = Color(0xFF1D2433);
   static const sudokuInput = Color(0xFF3158E8);
-  static const sudokuSelected = Color(0x263158E8);
-  static const sudokuPeer = Color(0x103158E8);
-  static const sudokuWrong = Color(0x33C05B4A);
+  static const sudokuSelected = Color(0x3D3158E8);
+  static const sudokuPeer = Color(0x143158E8);
+  static const sudokuWrong = Color(0x4DC05B4A);
   static const sudokuPadBg = Color(0xFFEDF1FF);
 
   // ── 舒尔特方格（暖白底 + 陶土橙强调色）──────────────────────────

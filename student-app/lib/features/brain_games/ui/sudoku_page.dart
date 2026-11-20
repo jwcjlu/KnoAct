@@ -195,7 +195,7 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
     return null;
   }
 
-  /// 棋盘：外层画粗线分宫，内部用细线，格线不会挤压格子尺寸。
+  /// 棋盘：细线分出每一格，粗线分出宫，两者都清晰可见。
   Widget _buildBoard(SudokuSpec spec) {
     final p = _puzzle!;
     final n = spec.size;
@@ -204,17 +204,14 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
       aspectRatio: 1,
       child: Container(
         key: const ValueKey('sudoku-grid'),
-        decoration: BoxDecoration(
-          color: BrainPalette.sudokuBg,
-          border: Border.all(color: BrainPalette.sudokuBoxLine, width: 2),
-        ),
+        decoration: BoxDecoration(color: BrainPalette.sudokuBg),
         child: LayoutBuilder(
           builder: (context, c) {
             final cellW = c.maxWidth / n;
             final cellH = c.maxHeight / n;
             return Stack(
               children: [
-                // 细格线（每格右边/下边）
+                // 高亮底（选中 / 同行列宫 / 落错）
                 for (var r = 0; r < n; r++)
                   for (var c2 = 0; c2 < n; c2++)
                     if (_cellColor(r, c2) != null)
@@ -225,30 +222,19 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
                         height: cellH,
                         child: ColoredBox(color: _cellColor(r, c2)!),
                       ),
-                // 宫线（粗）
-                for (var c2 = 1; c2 < n; c2++)
-                  if (c2 % spec.boxCols == 0)
-                    Positioned(
-                      left: c2 * cellW - 1,
-                      top: 0,
-                      bottom: 0,
-                      width: 2,
-                      child: const ColoredBox(
-                        color: BrainPalette.sudokuBoxLine,
-                      ),
+                // 所有格线：细线每格、粗线分宫
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _SudokuGridPainter(
+                      size: n,
+                      boxRows: spec.boxRows,
+                      boxCols: spec.boxCols,
+                      thin: BrainPalette.sudokuLine,
+                      thick: BrainPalette.sudokuBoxLine,
                     ),
-                for (var r = 1; r < n; r++)
-                  if (r % spec.boxRows == 0)
-                    Positioned(
-                      top: r * cellH - 1,
-                      left: 0,
-                      right: 0,
-                      height: 2,
-                      child: const ColoredBox(
-                        color: BrainPalette.sudokuBoxLine,
-                      ),
-                    ),
-                // 选中格描边
+                  ),
+                ),
+                // 选中格描边（压在格线之上，仍可见）
                 if (_selectedRow != null && _selectedCol != null)
                   Positioned(
                     left: _selectedCol! * cellW,
@@ -259,8 +245,8 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           border: Border.all(
-                            color: BrainPalette.sudokuBoxLine,
-                            width: 2,
+                            color: BrainPalette.sudokuInput,
+                            width: 2.5,
                           ),
                         ),
                       ),
@@ -381,8 +367,8 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
                 child: Column(
                   children: [
-                    // 棋盘吃掉所有剩余高度（一屏内不滚动）
-                    Expanded(child: _buildBoard(p.spec)),
+                    // 棋盘吃掉所有剩余高度（一屏内不滚动），并保持正方形
+                    Expanded(child: FitSquare(child: _buildBoard(p.spec))),
                     const SizedBox(height: 12),
                     _pad(p.spec),
                     const SizedBox(height: 8),
@@ -397,4 +383,77 @@ class _SudokuPageState extends ConsumerState<SudokuPage> {
             ),
     );
   }
+}
+
+/// 数独棋盘线：每格细线 + 每宫粗线，避免「看不出有格」。
+class _SudokuGridPainter extends CustomPainter {
+  _SudokuGridPainter({
+    required this.size,
+    required this.boxRows,
+    required this.boxCols,
+    required this.thin,
+    required this.thick,
+  });
+
+  final int size;
+  final int boxRows;
+  final int boxCols;
+  final Color thin;
+  final Color thick;
+
+  @override
+  void paint(Canvas canvas, Size s) {
+    final cellW = s.width / size;
+    final cellH = s.height / size;
+
+    final thinPaint = Paint()
+      ..color = thin
+      ..strokeWidth = 1.5
+      ..isAntiAlias = true;
+    final thickPaint = Paint()
+      ..color = thick
+      ..strokeWidth = 2.5
+      ..isAntiAlias = true;
+
+    // 细线：跳过会成为宫线的位置，避免叠色发虚
+    for (var i = 1; i < size; i++) {
+      final x = i * cellW;
+      final y = i * cellH;
+      if (i % boxCols != 0) {
+        canvas.drawLine(Offset(x, 0), Offset(x, s.height), thinPaint);
+      }
+      if (i % boxRows != 0) {
+        canvas.drawLine(Offset(0, y), Offset(s.width, y), thinPaint);
+      }
+    }
+
+    // 粗线：宫边界
+    for (var i = 0; i < size; i++) {
+      final x = i * cellW;
+      final y = i * cellH;
+      if (i % boxCols == 0) {
+        canvas.drawLine(Offset(x, 0), Offset(x, s.height), thickPaint);
+      }
+      if (i % boxRows == 0) {
+        canvas.drawLine(Offset(0, y), Offset(s.width, y), thickPaint);
+      }
+    }
+
+    // 最外框
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, s.width, s.height),
+      Paint()
+        ..color = thick
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_SudokuGridPainter old) =>
+      old.size != size ||
+      old.boxRows != boxRows ||
+      old.boxCols != boxCols ||
+      old.thin != thin ||
+      old.thick != thick;
 }

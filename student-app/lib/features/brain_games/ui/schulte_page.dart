@@ -355,7 +355,7 @@ class _SchultePageState extends ConsumerState<SchultePage> {
                         ),
                         child: Container(
                           key: const ValueKey('schulte-board'),
-                          child: _boardWidget(b),
+                          child: FitSquare(child: _boardWidget(b)),
                         ),
                       ),
                     ),
