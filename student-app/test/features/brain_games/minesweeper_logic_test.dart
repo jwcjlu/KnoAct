@@ -65,4 +65,19 @@ void main() {
     expect(b.isCleared(allSafe), isTrue);
     expect(b.isCleared(allSafe.difference({0})), isFalse);
   });
+
+  test('victoryFlags：通关后所有未开雷都插旗', () {
+    final b = generateMinesweeper('easy', safeIndex: 0, random: Random(5));
+    final flags = b.victoryFlags(const {}, const {});
+    expect(flags, b.mines);
+    expect(flags.length, b.mineCount);
+  });
+
+  test('victoryFlags：保留玩家自己插的旗', () {
+    final b = generateMinesweeper('easy', safeIndex: 0, random: Random(5));
+    final mine = b.mines.first;
+    final flags = b.victoryFlags(const {}, {mine});
+    expect(flags.contains(mine), isTrue);
+    expect(flags.containsAll(b.mines), isTrue);
+  });
 }

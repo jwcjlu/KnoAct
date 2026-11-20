@@ -79,6 +79,16 @@ class MinesweeperBoard {
     }
     return true;
   }
+
+  /// 通关后应显示的旗子：所有未点开的雷。
+  /// 与玩家手动插错的旗一起看，保证「雷都被标出来了」。
+  Set<int> victoryFlags(Set<int> opened, Set<int> userFlags) {
+    final out = <int>{...userFlags};
+    for (final m in mines) {
+      if (!opened.contains(m)) out.add(m);
+    }
+    return out;
+  }
 }
 
 /// 布雷时排除 [safeIndex]，保证首次点击不是雷。

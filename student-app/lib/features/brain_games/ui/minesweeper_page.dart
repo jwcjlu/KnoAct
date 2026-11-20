@@ -139,6 +139,11 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     setState(() {
       _finished = true;
       _elapsedMs = _sw.elapsedMilliseconds;
+      // 通关后把剩下的雷全部插上旗，让「雷都标出来了」一眼可见
+      if (solved) {
+        final b = _board;
+        if (b != null) _flags.addAll(b.victoryFlags(_opened, _flags));
+      }
     });
     final uid = _userId;
     var isBest = false;
@@ -255,16 +260,21 @@ class _MinesweeperPageState extends ConsumerState<MinesweeperPage> {
     final adj = board.adjacentAt(r, c);
     return _sunkenCell(
       child: adj > 0
-          ? FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                '$adj',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                  color: BrainPalette.mineNumber[adj] ?? Colors.black,
-                ),
-              ),
+          ? LayoutBuilder(
+              builder: (context, c) {
+                // 字号跟随格子尺寸（约占 55%），大屏不显小、小屏不溢出
+                final side = math.min(c.maxWidth, c.maxHeight);
+                return Text(
+                  '$adj',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: side * .58,
+                    height: 1,
+                    color: BrainPalette.mineNumber[adj] ?? Colors.black,
+                  ),
+                );
+              },
             )
           : const SizedBox.shrink(),
     );
