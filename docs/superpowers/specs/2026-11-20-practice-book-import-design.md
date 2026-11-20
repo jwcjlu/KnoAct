@@ -273,17 +273,24 @@ db.query(Question).filter(Question.user_id.is_(None)).delete(synchronize_session
 **失败时把空字符串也缓存住**，于是 `POST /retry` 永远拿到同一个失败结果。
 必须直接 `_render_page_png(pdf_path, i, dpi=150)` + `services.ai.ocr_image()`。
 
-#### 2.8 发布（原设计缺失）
+#### 2.8 发布（只发布已对齐的题，**关键约束**）
 
 `_persist_drafts()` 写入的是 `status="pending"`，而取题链路只认 `published`。
-导入流程**必须**在落库后把本次导入的题置为 `published`：
+导入流程在落库后，**只把「已对齐答案」的 id 置为 published**：
 
 ```python
-db.query(Question).filter(Question.id.in_(ids)).update(
+aligned_ids = [qid for qid, d in zip(ids, drafts) if _draft_aligned(d)]
+db.query(Question).filter(Question.id.in_(aligned_ids)).update(
     {"status": "published"}, synchronize_session=False)
 ```
 
-家长端「练习册导入」结果页提供「撤销发布」按钮（置回 pending），便于发现 OCR 错误时下线。
+- `_draft_aligned(d)`：`answer` 非空；若 `qtype in ("fill_blank","cloze")`
+  还要求 `answer_json["blanks"]` 非空且数量与题干 `____` 一致。
+- **未对齐的题保持 `pending`**，不进孩子端。若全量置 published，
+  `grade_math_answer(user, "")` 恒返回 False，孩子每天必然做错、家长还看不到待补入口。
+- 「待补答案」清单口径：`bank_id = ? AND status = "pending" AND answer = ""`
+- 家长端「撤销发布」：把该次导入的题整批置回 `pending`。
+- `PATCH .../questions/{id}` 补完答案后置 `published`（若原为 pending）。
 
 #### 2.9 接口清单
 
@@ -295,7 +302,12 @@ db.query(Question).filter(Question.id.in_(ids)).update(
 | `GET` | `/api/practice-import/jobs/{job_id}/missing-answers` | 待补答案清单（lesson_no + question_no + 题干） |
 | `PATCH` | `/api/practice-import/questions/{question_id}` | 家长补答案 / 改题干；补完后**自动置 `published`** |
 | `GET` | `/api/practice-import/lessons?bank_id=` | 已导入课时列表 + 每课时题数（供下拉） |
-| `PUT` | `/api/practice/preferences` | 设置 `practice_current_lesson`（对齐 `learning.py:508` 的写法） |
+| `PUT` | `/api/practice/preferences` | 设置 `practice_current_lesson` / `practice_current_document`（对齐 `learning.py:508` 的写法） |
+| `POST` | `/api/banks/practice-book` | 新建一个练习册卷（`source="practice_pdf"`, `subject`, `grade`, `title`），返回 `bank_id` |
+| `GET` | `/api/practice/today` | 今日题目：按 `bank_id + lesson_no + status=published` 取题；返回 `qtype`/题干/`answer_json.blanks` 空位结构（**绝不下发 answer**）、已完成状态 |
+| `POST` | `/api/practice/answer` | 逐题作答：`{question_id, student_answer}`，口算/填空即时判分，返回 `is_correct` |
+| `POST` | `/api/practice/answer-photo` | multipart `file` + `question_id`：竖式/脱式/应用题，落盘 `uploads/practice_photos/q{question_id}_{ts}.jpg`，调 `grade_math_work_photo`，写 `PracticeAttempt.ai_*` |
+| `POST` | `/api/practice/submit` | 提交今日练习（校验是否全部答完），写 `AnswerRecord(module="daily_practice")` |
 
 #### 2.10 导入幂等与清理
 
@@ -314,6 +326,14 @@ source_document_id: Mapped[int | None] = mapped_column(
 >
 > `DELETE /api/questions/{id}` 也要先删 `PracticeAttempt` 再删题（或把
 > `PracticeAttempt.question_id` 设为 `ondelete="CASCADE"`），否则新库会 500。
+>
+> **批量清理同样要先删作答**：`DELETE FROM questions WHERE bank_id=? AND source_document_id=?`
+> 前先 `DELETE FROM practice_attempts WHERE bank_id=?`（新库有真外键）。
+>
+> **删练习册（文档）后**：`SET NULL` 会让题「活着但失去出处」且仍是 `published`，
+> 孩子会继续被推到这些题、而页图已删无法对照补答案。因此
+> `DELETE /api/pdf/documents/{id}` 在 `content_kind="practice"` 时，
+> 需先把该 `source_document_id` 的题置 `pending`（并提示家长）。
 
 - 同一 PDF 重复上传：默认**追加**（新 job → 新题）
 - 结果页「清理旧题」：`DELETE FROM questions WHERE bank_id = ? AND source_document_id = ?`
@@ -397,13 +417,22 @@ source_document_id: Mapped[int | None] = mapped_column(
 
 **取题规则**
 
-1. 读 `practice_current_lesson` → 该课时全部 `published` 题（走 `ix_questions_bank_lesson` 索引）
+1. 读 `practice_current_document`（哪本练习册）+ `practice_current_lesson`，
+   取 `bank_id = current_document AND lesson_no = current_lesson AND status = "published"`
+   （正好走 `ix_questions_bank_lesson` 索引）。
+   **必须带 `bank_id`**：否则导入第二本练习册后，同号课时的题会混在一起。
 2. 若今天该课时已全部答完 → 提示「今天这页练完了，去下一课时？」
-3. 家长「指定今天练第 N 课时」→ **写 `ChildConfig`**（不是请求参数），下次仍生效
-4. 若该课时无题 → 「当前课时还没有题目，请家长导入或换个课时」
+3. 家长「指定今天练第 N 课时」→ **写 `ChildConfig`**（`practice_current_lesson`，
+   不是请求参数），下次仍生效
+4. `[换一页]` 语义：**切到下一个有题（published 数 > 0）的课时**，
+   并写回 `practice_current_lesson`（即推进进度）。不提供同课时内换组。
+5. 若该课时无题 → 「当前课时还没有题目，请家长导入或换个课时」
 
 **提交**
-- 逐题写 `PracticeAttempt`（唯一约束 `user_id + question_id + date`，同日重复作答走 upsert）
+- 逐题写 `PracticeAttempt`（唯一约束 `user_id + question_id + date`）
+  - **upsert 写法**（SQLite/MySQL 无通用 ORM upsert）：
+    `row = db.query(PracticeAttempt).filter_by(user_id=..., question_id=..., date=...).first()`
+    → 有则更新字段，无则 `db.add(...)`
 - 同时写 `AnswerRecord`，**`module="daily_practice"`**（避免与题库练习的 `"practice"` 混淆）
 - 全部题答完才算「今日完成」；部分完成显示进度
 
@@ -412,6 +441,8 @@ source_document_id: Mapped[int | None] = mapped_column(
 ### 四、家长端、容错与测试
 
 **家长端「练习册导入」子视图**
+- **先新建/选择练习册卷**：`POST /api/banks/practice-book`（填标题/学科/年级），
+  得到 `bank_id` 后才能上传（家长端提供「新建练习册」按钮 + 已有卷下拉）
 - 上传 PDF + **必填答案页起止页**（带说明：扫描版无法自动识别）
 - 进度卡片：`第 37/108 页 · 已识别 214 题 · 已对齐 198 题 · 已发布 198 题`
 - 完成后：待补答案清单（可逐题填）、失败页重试、撤销发布、清理页图
@@ -426,7 +457,7 @@ source_document_id: Mapped[int | None] = mapped_column(
 | PDF 无法解析 | 400 |
 | 单页 OCR 返回空 | 记失败页，继续下一页，最后汇总 |
 | 整本一个课时都没解析出 | job → `failed`，提示「未识别到课时结构，请检查页码范围或改用拍照录题」 |
-| 服务重启时任务进行中 | 启动时把 `rendering/ocr/aligning` 的 job 置 `failed`，`error="服务重启，请重试"`，家长可点重试 |
+| 服务重启时任务进行中 | 启动时把 `rendering/ocr/aligning` 的 job 置 `failed`，`error="服务重启，请重试"`（重试走 `/retry`），家长可点重试。**不要置 pending**（避免和「从没跑过」混淆） |
 | 学生端无题可练 | 「当前课时还没有题目，请家长导入或换个课时」 |
 | 拍照判题 AI 失败 | 写 `ai_status="failed"`，提示重拍；`ai_status="pending_review"` 时显示「等家长确认」 |
 | 提交网络失败 | 保留已作答，可重试 |
@@ -474,6 +505,7 @@ Flutter
 | `parent-web/app.js` / `index.html` | 「练习册导入」子视图 + 当前课时设置；`MODULE_LABEL` 加 `daily_practice` || `student-app/lib/features/practice/` | 新增：每日一练页 + controller + repository + 模型 |
 | `student-app/lib/core/router.dart` | `/practice` 的 **`StatefulShellBranch`（index 3）** + `_shellPaths` 加入 |
 | `student-app/lib/features/shell/app_shell.dart` | 第 5 Tab + 修正索引副作用 |
+| `student-app/lib/features/shell/task_nav.dart` | `_allowedReturnTo` 加入 `/practice`（若从首页/任务页带 `returnTo` 跳转） |
 | `backend/tests/test_practice_import.py` | 新增 |
 | `backend/tests/test_practice.py` | 新增 |
 | `student-app/test/features/practice/` | 新增 |
@@ -487,3 +519,15 @@ Flutter
 - 从阅读进度自动推断当前课时
 - OCR 置信度打分与自动复核
 - 页图自动清理策略（按 N 天未访问）
+
+## 实施建议：拆成两个计划
+
+本 spec 覆盖后端导入流水线 + 新表/迁移 + 家长端子视图 + Flutter 新增第 5 Tab，
+约 18 个文件、三种前端，作为**单个计划偏大**。建议按依赖顺序拆成两步：
+
+1. **计划一：导入流水线**（后端 models/迁移/`practice_import` 服务与路由 + 家长端子视图）
+   —— 产出「已发布题目」这一可验证成果
+2. **计划二：学生端每日一练**（`practice` 路由 + Flutter 第 5 Tab + 导航改造 + 测试）
+   —— 复用计划一的题目
+
+每步都能独立验证、独立回滚。
