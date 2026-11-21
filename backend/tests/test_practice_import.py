@@ -104,3 +104,64 @@ def test_persist_drafts_passes_lesson_fields(db):
     assert row.lesson_title == "小数乘小数"
     assert row.question_no == "1"
     assert row.source_document_id == doc.id
+
+
+def test_parse_lesson_page_extracts_header_and_items():
+    from app.services.practice_import import parse_lesson_page
+
+    text = """第3课时 小数乘小数
+1. 8.9 + 4.5 =        2. 1000 - 550 =
+3. 0.76 - 0.39 =      4. 3.4 - 1.24 =
+"""
+    out = parse_lesson_page(text)
+    assert out["lesson_no"] == 3
+    assert out["lesson_title"] == "小数乘小数"
+    assert [i["question_no"] for i in out["items"]] == ["1", "2", "3", "4"]
+    assert "8.9" in out["items"][0]["question"]
+    assert "0.76" in out["items"][2]["question"]
+
+
+def test_parse_lesson_page_does_not_split_on_decimals():
+    from app.services.practice_import import parse_lesson_page
+
+    out = parse_lesson_page("第1课时 口算\n1. 计算 3.25 + 1.8 =")
+    assert len(out["items"]) == 1
+    assert "3.25" in out["items"][0]["question"]
+
+
+def test_parse_lesson_page_handles_fullwidth_and_no_title():
+    from app.services.practice_import import parse_lesson_page
+
+    out = parse_lesson_page("第 12 课时 练习课\n（1）0.6×0.4＝")
+    assert out["lesson_no"] == 12
+    assert out["lesson_title"] == "练习课"
+    assert out["items"][0]["question_no"] == "1"
+
+
+def test_parse_lesson_page_returns_empty_when_no_header():
+    from app.services.practice_import import parse_lesson_page
+
+    out = parse_lesson_page("随便一段没有课时标题的文字")
+    assert out["lesson_no"] is None
+    assert out["items"] == []
+
+
+def test_align_answers_matches_by_lesson_and_number():
+    from app.services.practice_import import align_answers
+
+    questions = [
+        {"lesson_no": 3, "question_no": "1", "question": "8.9+4.5="},
+        {"lesson_no": 3, "question_no": "2", "question": "1000-550="},
+    ]
+    answers = [{"lesson_no": 3, "question_no": "1", "answer": "13.4"}]
+    aligned, missing = align_answers(questions, answers)
+    assert aligned[0]["answer"] == "13.4"
+    assert [m["question_no"] for m in missing] == ["2"]
+
+
+def test_split_blanks_by_count():
+    from app.services.practice_import import split_blanks
+
+    assert split_blanks("0.24, 1.16", 2) == ["0.24", "1.16"]
+    assert split_blanks("13.4", 1) == ["13.4"]
+    assert split_blanks("1, 2, 3", 2) is None
