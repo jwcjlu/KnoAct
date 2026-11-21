@@ -634,7 +634,14 @@ function renderPassageMarkup(src){
 let bankList = [];
 let bankSelectedId = null;
 let bankAddQtype = 'single_choice';
-const BANK_SOURCE_LABEL = {manual:'手动录入', photo:'拍照识别', third_party:'第三方/混合'};
+let bankView = null;               // null | 'practice_import'
+// 练习册导入
+let practiceBookBanks = [];
+let practiceImportJob = null;
+let practiceLessons = [];
+let practiceMissing = [];
+let practicePollTimer = null;
+const BANK_SOURCE_LABEL = {manual:'手动录入', photo:'拍照识别', third_party:'第三方/混合', practice_pdf:'练习册导入'};
 function bankFormDefaultGrade(){
   const c = children.find(x=>x.id===uid);
   return c && c.grade ? String(c.grade) : '';
@@ -914,7 +921,196 @@ function renderBankQuestionForm(){
     <div class="bd">${body}</div>
   </div>`;
 }
+// ===== 练习册导入 =====
+async function openPracticeImport(){
+  await loadPracticeBanks();
+  bankView = 'practice_import';
+  render();
+}
+
+async function loadPracticeBanks(){
+  const list = await api('/api/banks');
+  practiceBookBanks = (Array.isArray(list) ? list : []).filter(b => b.source === 'practice_pdf');
+}
+
+function renderPracticeImport(){
+  const bankOpts = practiceBookBanks.map(b =>
+    `<option value="${b.id}">${escapeAttr(b.title)}（${escapeAttr(b.subject || '')}）</option>`
+  ).join('');
+  const job = practiceImportJob;
+  const progress = job ? `
+    <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:var(--blue-soft2)">
+      <div style="font-size:13px;font-weight:700">导入进度：${escapeAttr(String(job.status || ''))}</div>
+      <div style="font-size:12px;color:var(--gray2);margin-top:6px">
+        第 ${job.done_pages}/${job.total_pages} 页 ·
+        识别 ${job.question_count} 题 · 已对齐 ${job.aligned_count} ·
+        已发布 ${job.published_count}
+      </div>
+      ${job.failed_pages && job.failed_pages.length
+        ? `<div style="margin-top:8px;font-size:12px;color:#c05b4a">
+             失败页：${job.failed_pages.join(', ')}
+             <span class="rule-edit" style="margin-left:8px" onclick="retryPracticeJob(${job.id})">重试</span>
+           </div>` : ''}
+      ${job.error ? `<div style="margin-top:6px;font-size:12px;color:#c05b4a">${escapeAttr(String(job.error))}</div>` : ''}
+    </div>` : '';
+
+  const missingRows = practiceMissing.length ? practiceMissing.map(m => `
+    <div class="pdf-row">
+      <div class="pdf-info">
+        <div class="nm">第 ${m.lesson_no} 课时 · ${escapeAttr(String(m.lesson_title || ''))}</div>
+        <div class="meta">题 ${escapeAttr(String(m.question_no || ''))}：${escapeAttr(String(m.question || '').slice(0, 60))}</div>
+      </div>
+      <div class="pdf-actions">
+        <input placeholder="填标准答案" id="ans_${m.id}"
+               style="border:1px solid var(--line3);border-radius:8px;padding:6px 10px;font-size:12px;width:140px">
+        <button class="btn-ghost" onclick="savePracticeAnswer(${m.id})">保存</button>
+      </div>
+    </div>`).join('') : '<div style="color:#8e9691;padding:8px 0">没有待补答案</div>';
+
+  const lessonOpts = practiceLessons.map(l =>
+    `<option value="${l.lesson_no}">第${l.lesson_no}课时 ${escapeAttr(String(l.title || ''))}（${l.count}题）</option>`
+  ).join('');
+
+  return `<div class="parent-grid" style="display:block">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic blue">${icon('book',20)}</div>
+        <div><h3>练习册导入</h3>
+          <div class="sub">上传扫描版练习册 PDF，自动 OCR 拆出课时与题目</div></div>
+        <button class="btn-ghost" style="margin-left:auto" onclick="bankView=null;render()">返回题库管理</button>
+      </div>
+      <div class="bd">
+        <div class="bank-field">
+          <div class="bank-field-label">选择练习册卷</div>
+          <select id="practiceBankSel" style="width:100%;border:1px solid var(--line3);border-radius:10px;padding:9px 12px;font-size:13px" onchange="loadPracticeLessons(this.value)">
+            <option value="">— 请选择 —</option>${bankOpts}
+          </select>
+          <button class="btn-ghost" style="margin-top:8px" onclick="createPracticeBook()">+ 新建练习册卷</button>
+        </div>
+
+        <div class="bank-field" style="margin-top:16px">
+          <div class="bank-field-label">上传 PDF</div>
+          <input type="file" id="practicePdf" accept="application/pdf" style="font-size:13px">
+          <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center">
+            <label style="font-size:12px;color:var(--gray2)">答案页起
+              <input id="ansStart" type="number" min="1" style="width:80px;border:1px solid var(--line3);border-radius:8px;padding:6px 8px">
+            </label>
+            <label style="font-size:12px;color:var(--gray2)">止
+              <input id="ansEnd" type="number" min="1" style="width:80px;border:1px solid var(--line3);border-radius:8px;padding:6px 8px">
+            </label>
+            <button class="btn-primary" onclick="startPracticeImport()">开始导入</button>
+          </div>
+          <div class="ms-hint">扫描版 PDF 无法自动识别答案页，请先翻到答案页填写范围（如 100–107）。</div>
+        </div>
+
+        ${progress}
+
+        <div style="margin-top:20px">
+          <div class="bank-list-head">待补答案</div>
+          <div class="pdf-list">${missingRows}</div>
+        </div>
+
+        <div style="margin-top:20px">
+          <div class="bank-list-head">当前课时（决定孩子每天练哪页）</div>
+          <select style="border:1px solid var(--line3);border-radius:10px;padding:9px 12px;font-size:13px;min-width:280px"
+                  onchange="savePracticeLesson(this.value)">
+            <option value="">— 请选择 —</option>${lessonOpts}
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function createPracticeBook(){
+  const title = prompt('练习册名称（如 RJ五上 计算小达人）');
+  if(!title) return;
+  const r = await api('/api/banks/practice-book', {method:'POST',
+    body:{title, subject:'数学', grade:5}});
+  if(r && r.id){ await loadPracticeBanks(); render(); toast('已创建练习册卷'); }
+  else toast('创建失败');
+}
+
+async function startPracticeImport(){
+  const sel = document.getElementById('practiceBankSel');
+  const file = document.getElementById('practicePdf');
+  const a1 = (document.getElementById('ansStart')?.value || '').trim();
+  const a2 = (document.getElementById('ansEnd')?.value || '').trim();
+  if(!sel || !sel.value) return toast('请先选择练习册卷');
+  if(!file || !file.files.length) return toast('请选择 PDF');
+  if(!a1 || !a2) return toast('请填写答案页起止页');
+
+  const fd = new FormData();
+  fd.append('file', file.files[0]);
+  fd.append('answer_start_page', a1);
+  fd.append('answer_end_page', a2);
+  toast('正在上传并开始 OCR，请稍候…');
+  const r = await apiForm(`/api/banks/${sel.value}/import-practice-pdf`, fd);
+  if(r && r.job_id){ pollPracticeJob(r.job_id); }
+  else toast('导入失败：' + (r && (r.detail || r.error) ? (r.detail || r.error) : '未知错误'));
+}
+
+function pollPracticeJob(jobId){
+  if(practicePollTimer) clearInterval(practicePollTimer);
+  const tick = async () => {
+    const j = await api(`/api/practice-import/jobs/${jobId}`);
+    if(j && j.id){
+      practiceImportJob = j;
+      render();
+      if(j.status === 'done' || j.status === 'failed'){
+        clearInterval(practicePollTimer);
+        practicePollTimer = null;
+        await loadPracticeMissing();
+        render();
+      }
+    }
+  };
+  tick();
+  practicePollTimer = setInterval(tick, 2000);
+}
+
+async function retryPracticeJob(jobId){
+  const r = await api(`/api/practice-import/jobs/${jobId}/retry`, {method:'POST'});
+  if(r && r.ok){ practiceImportJob = null; pollPracticeJob(jobId); }
+  else toast('重试失败');
+}
+
+async function loadPracticeMissing(){
+  const sel = document.getElementById('practiceBankSel');
+  const bankId = sel && sel.value;
+  if(!bankId){ practiceMissing = []; return; }
+  const r = await api(`/api/practice-import/missing-answers?bank_id=${bankId}`);
+  practiceMissing = (r && r.items) || [];
+}
+
+async function savePracticeAnswer(qid){
+  const el = document.getElementById(`ans_${qid}`);
+  const answer = (el && el.value || '').trim();
+  if(!answer) return toast('请填写答案');
+  const r = await api(`/api/practice-import/questions/${qid}`, {method:'PATCH',
+    body:{answer}});
+  if(r && r.id){ toast('已保存并发布'); await loadPracticeMissing(); render(); }
+  else toast('保存失败');
+}
+
+async function loadPracticeLessons(bankId){
+  if(!bankId){ practiceLessons = []; practiceMissing = []; render(); return; }
+  const r = await api(`/api/practice-import/lessons?bank_id=${bankId}`);
+  practiceLessons = (r && r.lessons) || [];
+  await loadPracticeMissing();
+  render();
+}
+
+async function savePracticeLesson(lessonNo){
+  const sel = document.getElementById('practiceBankSel');
+  const bankId = sel && sel.value;
+  if(!bankId || !lessonNo) return;
+  const r = await api('/api/practice/preferences', {method:'PUT',
+    body:{user_id: uid, current_document: Number(bankId), current_lesson: Number(lessonNo)}});
+  toast(r && r.ok ? '已设为当前课时' : '设置失败');
+}
+
 function renderBankManage(){
+  if(bankView === 'practice_import') return renderPracticeImport();
   const defGrade = bankFormDefaultGrade();
   const gradeOpts = `<option value="">不指定</option>${[1,2,3,4,5,6].map(g =>
     `<option value="${g}" ${defGrade === String(g) ? 'selected' : ''}>小学${g}年级</option>`
@@ -938,7 +1134,8 @@ function renderBankManage(){
   return `<div class="parent-grid" style="display:block">
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('grid',20)}</div>
-        <div><h3>题库管理</h3><div class="sub">新建卷子并录入题目，经审核后进入学生端练习</div></div></div>
+        <div><h3>题库管理</h3><div class="sub">新建卷子并录入题目，经审核后进入学生端练习</div></div>
+        <button class="btn-ghost" style="margin-left:auto" onclick="openPracticeImport()">练习册导入</button></div>
       <div class="bd">
         <form class="bank-create" onsubmit="event.preventDefault();createBankFromForm();">
           <div class="bank-create-grid">
