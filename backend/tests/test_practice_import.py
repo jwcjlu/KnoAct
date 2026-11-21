@@ -107,18 +107,52 @@ def test_persist_drafts_passes_lesson_fields(db):
 
 
 def test_parse_lesson_page_extracts_header_and_items():
+    """大题号只作分组，每个算式行才是一道题。"""
     from app.services.practice_import import parse_lesson_page
 
     text = """第3课时 小数乘小数
-1. 8.9 + 4.5 =        2. 1000 - 550 =
-3. 0.76 - 0.39 =      4. 3.4 - 1.24 =
+1. 直接写出得数。
+8.9 + 4.5 =
+1000 - 550 =
+2. 计算下面各题，能简算的要简算。
+(72 ÷ 18 + 8) × 28
 """
     out = parse_lesson_page(text)
     assert out["lesson_no"] == 3
     assert out["lesson_title"] == "小数乘小数"
-    assert [i["question_no"] for i in out["items"]] == ["1", "2", "3", "4"]
-    assert "8.9" in out["items"][0]["question"]
-    assert "0.76" in out["items"][2]["question"]
+    assert len(out["items"]) == 3
+    assert out["items"][0]["question"] == "8.9 + 4.5 ="
+    assert out["items"][0]["kind"] == "oral"
+    assert out["items"][2]["question"] == "(72 ÷ 18 + 8) × 28"
+    assert out["items"][2]["kind"] == "step"
+
+
+def test_parse_lesson_page_real_book_page():
+    """真实页面（第 3 课时练习课）：15 道口算 + 6 道简算 + 1 道巧算。"""
+    from app.services.practice_import import parse_lesson_page
+
+    text = """第 3 课时 练习课
+视频讲解　智能批改
+1. 直接写出得数。（建议 2 分钟完成）
+8.9 + 4.5 =
+1000 − 550 =
+3.32 + 2.74 =
+2. 计算下面各题，能简算的要简算。（建议 6 分钟完成）
+(72 ÷ 18 + 8) × 28
+(13 × 125) × (3 × 8)
+巧算。
+2024 × 20232023 − 2023 × 20242024
+月　日
+RJ 五（上）
+"""
+    out = parse_lesson_page(text)
+    assert out["lesson_no"] == 3
+    assert len(out["items"]) == 6, [i["question"] for i in out["items"]]
+    kinds = [i["kind"] for i in out["items"]]
+    assert kinds[:3] == ["oral"] * 3
+    assert kinds[3] == "step"
+    # 页脚噪音不能被当成题
+    assert all("RJ" not in i["question"] for i in out["items"])
 
 
 def test_parse_lesson_page_does_not_split_on_decimals():
@@ -280,12 +314,12 @@ def test_run_import_job_publishes_aligned_and_records_failures(db, monkeypatch):
     db.close()
 
     pages = {
-        1: "第3课时 小数乘小数\n1. 8.9+4.5=\n2. 1000-550=",
+        1: "第3课时 小数乘小数\n1. 直接写出得数。\n8.9 + 4.5 =\n1000 - 550 =",
         2: "",
         3: "第3课时 小数乘小数\n1. 13.4\n2. 450",
         4: "",
     }
-    monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_: pages.get(idx + 1, ""))
+    monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_, **kw: pages.get(idx + 1, ""))
     monkeypatch.setattr(pi, "SessionLocal", SessionLocal, raising=False)
 
     pi.run_import_job(job_id)
@@ -323,8 +357,8 @@ def test_run_import_job_all_ok_marks_done(db, monkeypatch):
     job_id = job.id
     db.close()
 
-    pages = {1: "第1课时 口算\n1. 1+1=", 2: "第1课时 口算\n1. 2"}
-    monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_: pages.get(idx + 1, ""))
+    pages = {1: "第1课时 口算\n1. 直接写出得数。\n1 + 1 =", 2: "第1课时 口算\n1. 2"}
+    monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_, **kw: pages.get(idx + 1, ""))
 
     pi.run_import_job(job_id)
 
@@ -537,3 +571,33 @@ def test_practice_bank_excluded_from_practice_list(setup_db):
     r = TestClient(app).get("/api/banks/practice", headers=child_h)
     assert r.status_code == 200
     assert all(b["title"] != "练习册卷" for b in r.json())
+
+
+def test_strip_answer_removes_computed_result():
+    """视觉模型会自己算答案写进题干，必须截断在等号。"""
+    from app.services.practice_import import _strip_answer
+
+    assert _strip_answer("8.9＋4.5＝13.4") == "8.9＋4.5 ="
+    assert _strip_answer("1000－550＝450") == "1000－550 ="
+    # 不带答案的原样保留
+    assert _strip_answer("8.9 + 4.5 =") == "8.9 + 4.5 ="
+    # 等号后是问号不算答案
+    assert _strip_answer("1+1=？") == "1+1=？"
+
+
+def test_split_row_separates_columns():
+    from app.services.practice_import import _split_row
+
+    parts = _split_row("8.9＋4.5＝    1000－550＝    3.32＋2.74＝")
+    assert len(parts) == 3
+    assert parts[0].startswith("8.9")
+
+
+def test_build_drafts_strips_answer_from_question():
+    from app.services.practice_import import build_drafts
+
+    aligned = [{"lesson_no": 1, "question_no": "1",
+                "question": "8.9＋4.5＝13.4", "answer": "13.4", "kind": "oral"}]
+    drafts = build_drafts(aligned, document_id=1)
+    assert drafts[0].question == "8.9＋4.5 ="
+    assert drafts[0].answer == "13.4"

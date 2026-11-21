@@ -979,16 +979,43 @@ function renderPracticeImport(){
         <button class="btn-ghost" style="margin-left:auto" onclick="bankView=null;render()">返回题库管理</button>
       </div>
       <div class="bd">
+        <div class="bank-create" style="margin-bottom:16px">
+          <div class="bank-field-label" style="font-size:13px;font-weight:700;margin-bottom:10px">① 新建练习册</div>
+          <div class="bank-create-grid">
+            <label class="bank-field">
+              <span class="bank-field-label">练习册名称</span>
+              <input id="pbNewTitle" class="inp" type="text" placeholder="如：RJ五上 计算小达人" autocomplete="off"/>
+            </label>
+            <label class="bank-field">
+              <span class="bank-field-label">学科</span>
+              <select id="pbNewSubject" class="inp">
+                <option selected>数学</option><option>语文</option><option>英语</option>
+              </select>
+            </label>
+            <label class="bank-field">
+              <span class="bank-field-label">年级</span>
+              <select id="pbNewGrade" class="inp">
+                <option value="">不指定</option>
+                <option>1</option><option>2</option><option>3</option>
+                <option>4</option><option selected>5</option><option>6</option>
+              </select>
+            </label>
+          </div>
+          <div class="bank-create-foot">
+            <span class="bank-daily-hint">没有现成卷子时先在这里建一本</span>
+            <button type="button" class="btn-primary" onclick="createPracticeBook()">新建练习册卷</button>
+          </div>
+        </div>
+
         <div class="bank-field">
-          <div class="bank-field-label">选择练习册卷</div>
+          <div class="bank-field-label">② 选择练习册卷</div>
           <select id="practiceBankSel" style="width:100%;border:1px solid var(--line3);border-radius:10px;padding:9px 12px;font-size:13px" onchange="loadPracticeLessons(this.value)">
             <option value="">— 请选择 —</option>${bankOpts}
           </select>
-          <button class="btn-ghost" style="margin-top:8px" onclick="createPracticeBook()">+ 新建练习册卷</button>
         </div>
 
         <div class="bank-field" style="margin-top:16px">
-          <div class="bank-field-label">上传 PDF</div>
+          <div class="bank-field-label">③ 上传 PDF</div>
           <input type="file" id="practicePdf" accept="application/pdf" style="font-size:13px">
           <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:center">
             <label style="font-size:12px;color:var(--gray2)">答案页起
@@ -1022,12 +1049,26 @@ function renderPracticeImport(){
 }
 
 async function createPracticeBook(){
-  const title = prompt('练习册名称（如 RJ五上 计算小达人）');
-  if(!title) return;
+  const titleEl = document.getElementById('pbNewTitle');
+  const title = (titleEl && titleEl.value || '').trim();
+  if(!title) return toast('请填写练习册名称');
+  const subject = (document.getElementById('pbNewSubject')?.value || '数学').trim();
+  const gradeRaw = (document.getElementById('pbNewGrade')?.value || '').trim();
+  const grade = gradeRaw ? Number(gradeRaw) : null;
+
   const r = await api('/api/banks/practice-book', {method:'POST',
-    body:{title, subject:'数学', grade:5}});
-  if(r && r.id){ await loadPracticeBanks(); render(); toast('已创建练习册卷'); }
-  else toast('创建失败');
+    body:{title, subject, grade}});
+  if(r && r.id){
+    if(titleEl) titleEl.value = '';
+    await loadPracticeBanks();
+    // 自动选中刚建的卷，省一步
+    const sel = document.getElementById('practiceBankSel');
+    if(sel) sel.value = String(r.id);
+    render();
+    toast('已创建并选中：' + title);
+  } else {
+    toast('创建失败：' + (r && (r.detail || r.error) ? (r.detail || r.error) : '未知错误'));
+  }
 }
 
 async function startPracticeImport(){
