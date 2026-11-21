@@ -422,7 +422,9 @@ def _parse_pages(
                 lesson_no = pno if real_no is None else pno
                 title = parsed["lesson_title"]
                 if real_no is not None:
-                    title = f"第{real_no}课时 {title}".strip()
+                    # 标题里已有「第N课时」时不要重复拼接
+                    if not re.match(r"^第\s*\d+\s*课时", title):
+                        title = f"第{real_no}课时 {title}".strip()
                 for it in parsed["items"]:
                     items.append({
                         **it,

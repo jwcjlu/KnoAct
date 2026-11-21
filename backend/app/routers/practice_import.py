@@ -313,6 +313,44 @@ def patch_question(
     return {"id": q.id, "status": q.status}
 
 
+@router.get("/api/practice-import/questions")
+def list_practice_questions(
+    bank_id: int = Query(...),
+    lesson_no: int | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """浏览已导入的题目（家长端核对用）。可按课时过滤。"""
+    bank = _require_own_bank(bank_id, user, db)
+    q = db.query(Question).filter(Question.bank_id == bank.id)
+    if lesson_no is not None:
+        q = q.filter(Question.lesson_no == lesson_no)
+    total = q.count()
+    rows = (
+        q.order_by(Question.lesson_no, Question.id)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": r.id,
+                "lesson_no": r.lesson_no,
+                "lesson_title": r.lesson_title,
+                "question": r.question,
+                "answer": r.answer,
+                "qtype": r.qtype,
+                "status": r.status,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/api/practice-import/lessons")
 def lessons(
     bank_id: int = Query(...),

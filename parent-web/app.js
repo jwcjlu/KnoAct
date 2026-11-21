@@ -642,6 +642,10 @@ let practiceImportJob = null;
 let practiceLessons = [];
 let practiceMissing = [];
 let practicePollTimer = null;
+let practiceQuestions = [];     // 已导入题目（浏览用）
+let practiceQTotal = 0;
+let practiceQLesson = '';       // 筛选课时
+let practiceQOffset = 0;
 const BANK_SOURCE_LABEL = {manual:'手动录入', photo:'拍照识别', third_party:'第三方/混合', practice_pdf:'练习册导入'};
 function bankFormDefaultGrade(){
   const c = children.find(x=>x.id===uid);
@@ -933,6 +937,7 @@ async function openPracticeImport(){
   if(practiceSelectedBankId){
     await loadPracticeLessons(practiceSelectedBankId);
     await loadLatestPracticeJob(practiceSelectedBankId);   // 带上上次/进行中的进度
+    await loadPracticeQuestions(0);
   }
   render();
 }
@@ -983,7 +988,7 @@ function renderPracticeImport(){
   const missingRows = practiceMissing.length ? practiceMissing.map(m => `
     <div class="pdf-row">
       <div class="pdf-info">
-        <div class="nm">第 ${m.lesson_no} 课时 · ${escapeAttr(String(m.lesson_title || ''))}</div>
+        <div class="nm">${escapeAttr(String(m.lesson_title || ''))}</div>
         <div class="meta">题 ${escapeAttr(String(m.question_no || ''))}：${escapeAttr(String(m.question || '').slice(0, 60))}</div>
       </div>
       <div class="pdf-actions">
@@ -994,7 +999,7 @@ function renderPracticeImport(){
     </div>`).join('') : '<div style="color:#8e9691;padding:8px 0">没有待补答案</div>';
 
   const lessonOpts = practiceLessons.map(l =>
-    `<option value="${l.lesson_no}">第${l.lesson_no}课时 ${escapeAttr(String(l.title || ''))}（${l.count}题）</option>`
+    `<option value="${l.lesson_no}">${escapeAttr(String(l.title || ''))}（${l.count}题）</option>`
   ).join('');
 
   return `<div class="parent-grid" style="display:block">
@@ -1070,17 +1075,82 @@ function renderPracticeImport(){
             <option value="">— 请选择 —</option>${lessonOpts}
           </select>
         </div>
+
+        <div style="margin-top:24px">
+          <div class="bank-list-head" style="display:flex;align-items:center;gap:10px">
+            <span>④ 已导入题目（${practiceQTotal} 题）</span>
+            <select style="border:1px solid var(--line3);border-radius:8px;padding:5px 8px;font-size:12px;font-weight:400"
+                    onchange="filterPracticeQuestions(this.value)">
+              <option value="">全部课时</option>
+              ${practiceLessons.map(l =>
+                `<option value="${l.lesson_no}" ${String(l.lesson_no)===String(practiceQLesson)?'selected':''}>${escapeAttr(String(l.title||''))}（${l.count}题）</option>`
+              ).join('')}
+            </select>
+            <button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="loadPracticeQuestions(0)">刷新</button>
+          </div>
+          <div class="pdf-list" style="margin-top:10px">${practiceQuestionRows()}</div>
+          ${practiceQTotal > practiceQuestions.length ? `
+            <div style="text-align:center;margin-top:12px">
+              <button class="btn-ghost" onclick="loadPracticeQuestions(${practiceQOffset + 50})">
+                加载更多（已显示 ${practiceQuestions.length}/${practiceQTotal}）
+              </button>
+            </div>` : ''}
+        </div>
       </div>
     </div>
   </div>`;
 }
 
+function practiceQuestionRows(){
+  if(!practiceQuestions.length){
+    return '<div style="color:#8e9691;padding:12px 0">还没有题目。导入完成后这里会列出全部题目。</div>';
+  }
+  return practiceQuestions.map(q => `
+    <div class="pdf-row">
+      <div class="pdf-info">
+        <div class="nm">${escapeAttr(String(q.question || ''))}</div>
+        <div class="meta">
+          ${escapeAttr(String(q.lesson_title || ''))}
+          · 答案 <b style="color:var(--green2)">${escapeAttr(String(q.answer || '（缺）'))}</b>
+        </div>
+      </div>
+      <div class="pdf-actions">
+        <span style="font-size:11px;color:${q.status==='published'?'var(--green2)':'#c05b4a'}">
+          ${q.status==='published'?'已发布':'未发布'}
+        </span>
+      </div>
+    </div>`).join('');
+}
+
+function filterPracticeQuestions(lessonNo){
+  practiceQLesson = lessonNo || '';
+  loadPracticeQuestions(0);
+}
+
+async function loadPracticeQuestions(offset){
+  const bankId = practiceSelectedBankId;
+  if(!bankId){ practiceQuestions = []; practiceQTotal = 0; return; }
+  const params = new URLSearchParams({bank_id: bankId, limit: '50', offset: String(offset||0)});
+  if(practiceQLesson) params.set('lesson_no', practiceQLesson);
+  const r = await api(`/api/practice-import/questions?${params}`);
+  const items = (r && r.items) || [];
+  practiceQTotal = (r && r.total) || 0;
+  practiceQOffset = offset || 0;
+  // offset>0 视为「加载更多」，追加而不是替换
+  practiceQuestions = practiceQOffset > 0 ? [...practiceQuestions, ...items] : items;
+  render();
+}
+
 async function onPracticeBankChange(bankId){
   practiceSelectedBankId = bankId || '';
   practiceImportJob = null;
+  practiceQuestions = [];
+  practiceQTotal = 0;
+  practiceQLesson = '';
   if(practicePollTimer){ clearInterval(practicePollTimer); practicePollTimer = null; }
   await loadPracticeLessons(practiceSelectedBankId);
   await loadLatestPracticeJob(practiceSelectedBankId);
+  await loadPracticeQuestions(0);
   render();
 }
 
@@ -1135,7 +1205,9 @@ function startPracticePolling(jobId){
       if(j.status === 'done' || j.status === 'failed'){
         clearInterval(practicePollTimer);
         practicePollTimer = null;
+        await loadPracticeLessons(practiceSelectedBankId);
         await loadPracticeMissing();
+        await loadPracticeQuestions(0);   // 导入完成后刷新题目列表
         render();
       }
     }
