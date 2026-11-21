@@ -19,6 +19,7 @@ _STATEMENTS: list[tuple[str, str]] = [
         "source_document_id",
         "ALTER TABLE questions ADD COLUMN source_document_id INTEGER",
     ),
+    ("image_path", "ALTER TABLE questions ADD COLUMN image_path VARCHAR(512)"),
     (
         "ix_questions_bank_lesson",
         "CREATE INDEX ix_questions_bank_lesson ON questions (bank_id, lesson_no)",

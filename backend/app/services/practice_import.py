@@ -275,6 +275,7 @@ QTYPE_OF_KIND: dict[str, str] = {
     "step": "calculation",
     "app": "application",
     "other": "oral",
+    "image": "application",   # 图片题：需看图作答，按应用题走拍照判分
 }
 
 
@@ -316,6 +317,8 @@ def build_drafts(
         d.question_no = str(q.get("question_no") or "")
         d.source_document_id = document_id
         d.tags = {"source": "practice_pdf", "page": q.get("page") or 0}
+        if q.get("image_path"):
+            d.tags["image_path"] = q["image_path"]
 
         if qtype == "fill_blank":
             n = int(blanks_of(q) or 0)
@@ -420,30 +423,66 @@ def _parse_pages(
             parsed = parse_lesson_page(text)
             if not parsed["items"]:
                 failed.append(pno)
-            else:
-                # 课时号在每个单元内会重新从 1 开始，直接用作 lesson_no 会撞车。
-                # 因此用「页序」保证全书唯一，真实课时号放进 lesson_title。
-                real_no = parsed["lesson_no"]
-                lesson_no = pno if real_no is None else pno
-                title = parsed["lesson_title"]
-                if real_no is not None:
-                    # 标题里已有「第N课时」时不要重复拼接
-                    if not re.match(r"^第\s*\d+\s*课时", title):
-                        title = f"第{real_no}课时 {title}".strip()
-                for it in parsed["items"]:
-                    items.append({
-                        **it,
-                        "lesson_no": lesson_no,
-                        "lesson_title": title,
-                        "real_lesson_no": real_no,
-                        "page": pno,
-                    })
+                continue
+            # 课时号在每个单元内会重新从 1 开始，直接用作 lesson_no 会撞车。
+            # 因此用「页序」保证全书唯一，真实课时号放进 lesson_title。
+            real_no = parsed["lesson_no"]
+            lesson_no = pno
+            title = parsed["lesson_title"]
+            if real_no is not None:
+                # 标题里已有「第N课时」时不要重复拼接
+                if not re.match(r"^第\s*\d+\s*课时", title):
+                    title = f"第{real_no}课时 {title}".strip()
+            for it in parsed["items"]:
+                items.append({
+                    **it,
+                    "lesson_no": lesson_no,
+                    "lesson_title": title,
+                    "real_lesson_no": real_no,
+                    "page": pno,
+                })
+            # 同页若还有图形题（题干在图里，OCR 只能拿到 (1)(2)(3) 标签），
+            # 按视觉模型给出的范围裁图补一道图片题。
+            _append_image_question(db, pdf_path, pno, text, items)
         if on_progress is not None:
             try:
                 on_progress(idx, items)
             except Exception:
                 pass
     return items, failed
+
+
+# 出现这些词说明该页可能有「题干在图里」的题
+_IMAGE_HINT_RE = re.compile(r"涂色|面积|统计图|条形图|折线图|扇形图|看图|方格|钟面|展开图")
+
+
+def _append_image_question(
+    db, pdf_path: str, pno: int, text: str, items: list[dict]
+) -> None:
+    """检测并追加图片题（不改动已有文字题）。"""
+    if not _IMAGE_HINT_RE.search(text or ""):
+        return
+    from .practice_image import crop_question_image, detect_image_questions
+
+    infos = detect_image_questions(db, pdf_path, pno - 1)
+    for info in infos:
+        out = (
+            f"uploads/practice_images/p{pno}_"
+            f"{int(info['start'] * 100)}_{int(info['end'] * 100)}.png"
+        )
+        saved = crop_question_image(pdf_path, pno - 1, info["start"], info["end"], out)
+        if not saved:
+            continue
+        title = info.get("title") or f"第{pno}页 图形题"
+        items.append({
+            "question_no": f"img{pno}",
+            "question": title,
+            "kind": "image",
+            "image_path": saved,
+            "lesson_no": pno,
+            "lesson_title": title,
+            "page": pno,
+        })
 
 
 def _answers_of(answer_items: list[dict]) -> list[dict]:
@@ -560,13 +599,20 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
             finally:
                 s2.close()
 
+        # 图片题没有可解的算式，答案留空（进「待补答案」由家长填）
+        solvable = [it for it in q_items if it.get("kind") != "image"]
         solved = (
-            solve_math_items(db, q_items, on_progress=_solve_progress)
-            if q_items else {}
+            solve_math_items(db, solvable, on_progress=_solve_progress)
+            if solvable else {}
         )
         aligned: list[dict] = []
-        for i, it in enumerate(q_items):
-            ans = (solved.get(i) or "").strip()
+        idx_solvable = 0
+        for it in q_items:
+            if it.get("kind") == "image":
+                aligned.append({**it, "answer": ""})
+                continue
+            ans = (solved.get(idx_solvable) or "").strip()
+            idx_solvable += 1
             if ans:
                 aligned.append({**it, "answer": ans})
         job.aligned_count = len(aligned)

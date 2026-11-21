@@ -20,6 +20,8 @@ class QuestionDraft:
     lesson_title: str = ""
     question_no: str = ""
     source_document_id: int | None = None
+    # 图片题：题干主体在图里，存裁好的题图路径
+    image_path: str = ""
 
 
 class SourceAdapter(ABC):

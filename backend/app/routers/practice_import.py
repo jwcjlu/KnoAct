@@ -35,12 +35,21 @@ class PracticeBookReq(BaseModel):
     title: str
     subject: str = "数学"
     grade: int | None = None
+    include_daily_task: bool = False
 
 
 class PatchQuestionReq(BaseModel):
     answer: str | None = None
     question: str | None = None
     analysis: str | None = None
+
+
+def _image_url(path: str) -> str:
+    """题目图片的访问地址（/uploads 已静态挂载；空路径返回空串）。"""
+    p = (path or "").strip().replace("\\", "/")
+    if not p:
+        return ""
+    return "/" + p.lstrip("/")
 
 
 def _require_own_bank(bank_id: int, user: User, db: Session) -> QuestionBank:
@@ -74,6 +83,9 @@ def create_practice_book(
         subject=req.subject,
         grade=req.grade,
         source=PRACTICE_SOURCE,
+        tags=json.dumps(
+            {"include_daily_task": bool(req.include_daily_task)}, ensure_ascii=False
+        ),
     )
     db.add(bank)
     db.commit()
@@ -276,6 +288,7 @@ def missing_answers(
                 "lesson_title": q.lesson_title,
                 "question_no": q.question_no,
                 "question": q.question,
+                "image_url": _image_url(q.image_path),
             }
             for q in rows
         ]
@@ -313,6 +326,31 @@ def patch_question(
     return {"id": q.id, "status": q.status}
 
 
+class BankDailyReq(BaseModel):
+    include_daily_task: bool
+
+
+@router.patch("/api/practice-import/bank-daily")
+def set_bank_daily(
+    req: BankDailyReq,
+    bank_id: int = Query(...),
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """把该练习册卷加入/移出「每日任务」抽题范围。"""
+    bank = _require_own_bank(bank_id, user, db)
+    try:
+        tags = json.loads(bank.tags or "{}")
+    except (ValueError, TypeError):
+        tags = {}
+    if not isinstance(tags, dict):
+        tags = {}
+    tags["include_daily_task"] = bool(req.include_daily_task)
+    bank.tags = json.dumps(tags, ensure_ascii=False)
+    db.commit()
+    return {"ok": True, "include_daily_task": tags["include_daily_task"]}
+
+
 @router.get("/api/practice-import/questions")
 def list_practice_questions(
     bank_id: int = Query(...),
@@ -345,6 +383,7 @@ def list_practice_questions(
                 "answer": r.answer,
                 "qtype": r.qtype,
                 "status": r.status,
+                "image_url": _image_url(r.image_path),
             }
             for r in rows
         ],

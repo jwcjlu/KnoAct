@@ -140,6 +140,9 @@ class Question(Base):
     # 来源文档（练习册导入题才填）；删文档时置 NULL，题目保留
     source_document_id: Mapped[int | None] = mapped_column(
         ForeignKey("pdf_documents.id", ondelete="SET NULL"), nullable=True)
+    # 图片题：题干主体在图里（几何/统计题），存裁好的题目图路径
+    image_path: Mapped[str] = mapped_column(String(512), default="")
+
 
 class Note(Base):
     __tablename__ = "notes"

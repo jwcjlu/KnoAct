@@ -155,6 +155,7 @@ def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft]
             lesson_title=(d.lesson_title or None),
             question_no=(d.question_no or None),
             source_document_id=d.source_document_id,
+            image_path=d.image_path or "",
         )
         db.add(q)
         db.flush()

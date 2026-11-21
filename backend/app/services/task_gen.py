@@ -362,7 +362,11 @@ def _bank_include_daily(tags_json: str) -> bool:
 
 
 def _gen_bank_practice_tasks(db: Session, user_id: int, day: date):
-    """从家长勾选「纳入每日任务」的卷子中抽已发布题，生成 task_type=practice。"""
+    """从家长勾选「纳入每日任务」的卷子中抽已发布题，生成 task_type=practice。
+
+    练习册（source=practice_pdf）按「课时」逐日推进：优先练家长设定的当前课时，
+    练完就往后走。普通题库卷仍按原来的整卷轮转。
+    """
     child = db.get(User, user_id)
     if not child or not child.parent_id:
         return []
@@ -385,31 +389,88 @@ def _gen_bank_practice_tasks(db: Session, user_id: int, day: date):
             continue
         if db.query(Task).filter_by(user_id=user_id, subject=subj, date=day, task_type="practice").first():
             continue
-        pool = (
-            db.query(Question)
-            .filter_by(bank_id=bank.id, status="published")
-            .order_by(Question.id)
-            .all()
-        )
-        if not pool:
+
+        picked, lesson_no, lesson_title = _pick_practice_questions(db, bank, user_id, day, n_pick)
+        if not picked:
             continue
-        offset = day.toordinal() % len(pool)
-        picked = [pool[(offset + i) % len(pool)] for i in range(min(n_pick, len(pool)))]
+
+        detail = f"每日抽练 · {len(picked)} 道题"
+        if lesson_no is not None:
+            detail = f"{lesson_title or f'第{lesson_no}课时'} · {len(picked)} 道题"
+
         created.append(Task(
             task_type="practice",
             subject=subj,
             title=f"{bank.title} 题库练习",
-            detail=f"每日抽练 · {len(picked)} 道题",
+            detail=detail,
             content=json.dumps({
                 "bank_id": bank.id,
                 "bank_title": bank.title,
                 "question_ids": [q.id for q in picked],
+                "lesson_no": lesson_no,
+                "lesson_title": lesson_title,
             }, ensure_ascii=False),
             points=15,
             content_status="published",
         ))
         used_subjects.add(subj)
     return created
+
+
+def _pick_practice_questions(db: Session, bank, user_id: int, day: date, n_pick: int):
+    """给出当天该抽的题。返回 (questions, lesson_no, lesson_title)。
+
+    练习册卷：按课时推进（当前课时 → 练完顺延）。普通卷：整卷轮转。
+    """
+    from ..models import ChildConfig
+
+    base = (
+        db.query(Question)
+        .filter_by(bank_id=bank.id, status="published")
+        .order_by(Question.lesson_no, Question.id)
+    )
+    all_q = base.all()
+    if not all_q:
+        return [], None, ""
+
+    source = getattr(bank, "source", "") or ""
+    if source != "practice_pdf":
+        offset = day.toordinal() % len(all_q)
+        return [all_q[(offset + i) % len(all_q)] for i in range(min(n_pick, len(all_q)))], None, ""
+
+    # 练习册：按课时推进
+    lessons = sorted({q.lesson_no for q in all_q if q.lesson_no is not None})
+    if not lessons:
+        offset = day.toordinal() % len(all_q)
+        return [all_q[(offset + i) % len(all_q)] for i in range(min(n_pick, len(all_q)))], None, ""
+
+    cur = (
+        db.query(ChildConfig)
+        .filter_by(user_id=user_id, key="practice_current_lesson")
+        .first()
+    )
+    try:
+        no = int(cur.value) if cur and cur.value else lessons[0]
+    except (TypeError, ValueError):
+        no = lessons[0]
+
+    # 指定的课时不在本卷里 → 取最近的
+    if no not in lessons:
+        no = min(lessons, key=lambda x: abs(x - no))
+
+    pool = [q for q in all_q if q.lesson_no == no]
+    # 该课时已练完（当天已有该课时任务）→ 顺延到下一课时
+    taken = db.query(Task).filter_by(user_id=user_id, date=day, task_type="practice").first()
+    if taken is not None and len(pool) <= n_pick:
+        idx = lessons.index(no)
+        if idx + 1 < len(lessons):
+            no = lessons[idx + 1]
+            pool = [q for q in all_q if q.lesson_no == no]
+
+    title = (pool[0].lesson_title or "") if pool else ""
+    offset = day.toordinal() % len(pool) if pool else 0
+    picked = [pool[(offset + i) % len(pool)] for i in range(min(n_pick, len(pool)))] if pool else []
+    return picked, no, title
 
 
 def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = False):

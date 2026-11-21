@@ -646,6 +646,8 @@ let practiceQuestions = [];     // 已导入题目（浏览用）
 let practiceQTotal = 0;
 let practiceQLesson = '';       // 筛选课时
 let practiceQOffset = 0;
+let practiceDailyOn = false;    // 当前卷是否纳入每日任务
+let practicePreview = [];       // 今日会抽到的题（预览）
 const BANK_SOURCE_LABEL = {manual:'手动录入', photo:'拍照识别', third_party:'第三方/混合', practice_pdf:'练习册导入'};
 function bankFormDefaultGrade(){
   const c = children.find(x=>x.id===uid);
@@ -990,6 +992,8 @@ function renderPracticeImport(){
       <div class="pdf-info">
         <div class="nm">${escapeAttr(String(m.lesson_title || ''))}</div>
         <div class="meta">题 ${escapeAttr(String(m.question_no || ''))}：${escapeAttr(String(m.question || '').slice(0, 60))}</div>
+        ${m.image_url ? `<img src="${API}${escapeAttr(m.image_url)}" alt="题图"
+            style="display:block;margin-top:8px;max-width:320px;width:100%;border:1px solid var(--line3);border-radius:8px">` : ''}
       </div>
       <div class="pdf-actions">
         <input placeholder="填标准答案" id="ans_${m.id}"
@@ -1033,7 +1037,11 @@ function renderPracticeImport(){
             </label>
           </div>
           <div class="bank-create-foot">
-            <span class="bank-daily-hint">没有现成卷子时先在这里建一本</span>
+            <label class="bank-daily">
+              <input type="checkbox" id="pbIncludeDaily" checked/>
+              <span>纳入每日任务</span>
+              <span class="bank-daily-hint">勾选后每天自动从该练习册抽题给孩子练</span>
+            </label>
             <button type="button" class="btn-primary" onclick="createPracticeBook()">新建练习册卷</button>
           </div>
         </div>
@@ -1044,6 +1052,12 @@ function renderPracticeImport(){
             <option value="">— 请选择 —</option>${bankOpts}
           </select>
           ${selHint}
+          ${practiceSelectedBankId ? `
+            <label class="bank-daily" style="margin-top:10px">
+              <input type="checkbox" ${practiceDailyOn ? 'checked' : ''} onchange="togglePracticeDaily(this.checked)"/>
+              <span>纳入每日任务</span>
+              <span class="bank-daily-hint">勾选后每天自动从该练习册抽题（按当前课时推进）</span>
+            </label>` : ''}
         </div>
 
         <div class="bank-field" style="margin-top:16px">
@@ -1074,6 +1088,20 @@ function renderPracticeImport(){
                   onchange="savePracticeLesson(this.value)">
             <option value="">— 请选择 —</option>${lessonOpts}
           </select>
+          <div style="display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap">
+            <button class="btn-ghost" onclick="previewTodayTasks()">预览今日会抽到的题</button>
+            <button class="btn-primary" onclick="generateTodayTasks()">立即生成今日任务</button>
+          </div>
+          ${practicePreview.length ? `
+            <div class="pdf-list" style="margin-top:12px">
+              ${practicePreview.map(p => `
+                <div class="pdf-row">
+                  <div class="pdf-info">
+                    <div class="nm">${escapeAttr(String(p.question || ''))}</div>
+                    <div class="meta">${escapeAttr(String(p.lesson_title || ''))} · 答案 ${escapeAttr(String(p.answer || ''))}</div>
+                  </div>
+                </div>`).join('')}
+            </div>` : ''}
         </div>
 
         <div style="margin-top:24px">
@@ -1113,6 +1141,8 @@ function practiceQuestionRows(){
           ${escapeAttr(String(q.lesson_title || ''))}
           · 答案 <b style="color:var(--green2)">${escapeAttr(String(q.answer || '（缺）'))}</b>
         </div>
+        ${q.image_url ? `<img src="${API}${escapeAttr(q.image_url)}" alt="题图" loading="lazy"
+            style="display:block;margin-top:8px;max-width:360px;width:100%;border:1px solid var(--line3);border-radius:8px">` : ''}
       </div>
       <div class="pdf-actions">
         <span style="font-size:11px;color:${q.status==='published'?'var(--green2)':'#c05b4a'}">
@@ -1147,10 +1177,34 @@ async function onPracticeBankChange(bankId){
   practiceQuestions = [];
   practiceQTotal = 0;
   practiceQLesson = '';
+  practiceDailyOn = false;
   if(practicePollTimer){ clearInterval(practicePollTimer); practicePollTimer = null; }
   await loadPracticeLessons(practiceSelectedBankId);
+  await loadDailyFlag(practiceSelectedBankId);
   await loadLatestPracticeJob(practiceSelectedBankId);
   await loadPracticeQuestions(0);
+  render();
+}
+
+/** 读当前卷是否已纳入每日任务。 */
+async function loadDailyFlag(bankId){
+  if(!bankId){ practiceDailyOn = false; return; }
+  const list = await api('/api/banks');
+  const b = (Array.isArray(list) ? list : []).find(x => String(x.id) === String(bankId));
+  practiceDailyOn = !!(b && b.include_daily_task);
+}
+
+async function togglePracticeDaily(on){
+  const bankId = practiceSelectedBankId;
+  if(!bankId) return;
+  const r = await api(`/api/practice-import/bank-daily?bank_id=${bankId}`,
+    {method:'PATCH', body:{include_daily_task: !!on}});
+  if(r && r.ok){
+    practiceDailyOn = !!r.include_daily_task;
+    toast(practiceDailyOn ? '已纳入每日任务' : '已移出每日任务');
+  } else {
+    toast('设置失败');
+  }
   render();
 }
 
@@ -1161,9 +1215,10 @@ async function createPracticeBook(){
   const subject = (document.getElementById('pbNewSubject')?.value || '数学').trim();
   const gradeRaw = (document.getElementById('pbNewGrade')?.value || '').trim();
   const grade = gradeRaw ? Number(gradeRaw) : null;
+  const includeDaily = !!(document.getElementById('pbIncludeDaily')?.checked);
 
   const r = await api('/api/banks/practice-book', {method:'POST',
-    body:{title, subject, grade}});
+    body:{title, subject, grade, include_daily_task: includeDaily}});
   if(r && r.id){
     if(titleEl) titleEl.value = '';
     practiceSelectedBankId = String(r.id);   // 记住选择，重绘后仍是它
@@ -1256,6 +1311,18 @@ async function savePracticeLesson(lessonNo){
   const r = await api('/api/practice/preferences', {method:'PUT',
     body:{user_id: uid, current_document: Number(bankId), current_lesson: Number(lessonNo)}});
   toast(r && r.ok ? '已设为当前课时' : '设置失败');
+  practicePreview = [];
+  render();
+}
+
+async function previewTodayTasks(){
+  if(!uid) return toast('请先选择孩子');
+  const r = await api(`/api/practice/preview?user_id=${uid}`);
+  practicePreview = (r && r.items) || [];
+  if(!practicePreview.length){
+    toast('今天不会抽到题：请确认已勾选「纳入每日任务」');
+  }
+  render();
 }
 
 function renderBankManage(){
