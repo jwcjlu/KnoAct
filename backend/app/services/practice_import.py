@@ -65,9 +65,14 @@ def _split_row(line: str) -> list[str]:
     """同一横向行里的多道题按制表符/连续全角空格切开。
 
     OCR 常把「8.9+4.5=    1000-550=    3.32+2.74=」识别成一行。
+
+    注意：`（　　）` 是填空题的空位，不能当列分隔符，先整体保护起来。
     """
-    parts = re.split(r"\t+|\u3000{2,}|\s{4,}", line.strip())
-    return [p.strip() for p in parts if p.strip()]
+    s = line.strip()
+    # 把括号里的空白替换成占位符，切分完再还原
+    s = re.sub(r"[（(]\s*[）)]", "\uf000", s)
+    parts = re.split(r"\t+|\u3000{2,}|\s{4,}", s)
+    return [p.replace("\uf000", "（　）").strip() for p in parts if p.strip()]
 
 
 _UNIT_RE = re.compile(r"^\s*([一二三四五六七八九十]+)\s+([^\n]{2,20})\s*$", re.M)
@@ -517,6 +522,14 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
 
         if retry_pages:
             q_pages = [p for p in retry_pages if q_start <= p <= q_end]
+            # 重跑前删掉这些页的旧题，避免重复入库
+            from ..models import Question as _Q
+
+            db.query(_Q).filter(
+                _Q.bank_id == bank.id,
+                _Q.lesson_no.in_(q_pages) if q_pages else False,
+            ).delete(synchronize_session=False)
+            db.commit()
         else:
             q_pages = list(range(q_start, q_end + 1))
 
