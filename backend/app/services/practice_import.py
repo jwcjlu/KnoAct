@@ -133,3 +133,33 @@ def build_drafts(
                 d.qtype = "oral"
         out.append(d)
     return out
+
+def _is_aligned(q) -> bool:
+    """已对齐 = 有答案；fill_blank/cloze 还要求 blanks 非空。"""
+    if not (q.answer or "").strip():
+        return False
+    if q.qtype in ("fill_blank", "cloze"):
+        try:
+            data = json.loads(q.answer_json or "{}")
+        except (ValueError, TypeError):
+            return False
+        return bool(data.get("blanks"))
+    return True
+
+
+def publish_aligned(db, bank_id: int) -> int:
+    """把该卷里「已对齐答案」且仍 pending 的题置 published，返回条数。"""
+    from ..models import Question
+
+    rows = (
+        db.query(Question)
+        .filter(Question.bank_id == bank_id, Question.status == "pending")
+        .all()
+    )
+    ids = [q.id for q in rows if _is_aligned(q)]
+    if not ids:
+        return 0
+    db.query(Question).filter(Question.id.in_(ids)).update(
+        {"status": "published"}, synchronize_session=False
+    )
+    return len(ids)

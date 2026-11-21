@@ -211,3 +211,47 @@ def test_build_drafts_downgrades_bad_fill_to_oral():
                 "answer": "1, 2, 3", "kind": "fill"}]
     drafts = build_drafts(aligned, document_id=1, blanks_of=lambda q: 2)
     assert drafts[0].qtype == "oral"
+
+
+def test_publish_only_aligned(db):
+    """未对齐的题保持 pending，不能进孩子端。"""
+    from app.models import Question, QuestionBank
+    from conftest import make_account
+    from app.services.practice_import import publish_aligned
+
+    parent = make_account(db, "pi_pub", "parent")
+    bank = QuestionBank(user_id=parent.id, title="卷", subject="数学")
+    db.add(bank)
+    db.commit()
+    q1 = Question(user_id=parent.id, bank_id=bank.id, qtype="oral",
+                  question="a", answer="1", status="pending")
+    q2 = Question(user_id=parent.id, bank_id=bank.id, qtype="oral",
+                  question="b", answer="", status="pending")
+    db.add_all([q1, q2])
+    db.commit()
+
+    n = publish_aligned(db, bank.id)
+    db.commit()
+
+    assert n == 1
+    assert db.get(Question, q1.id).status == "published"
+    assert db.get(Question, q2.id).status == "pending"
+
+
+def test_publish_skips_fill_blank_without_blanks(db):
+    from app.models import Question, QuestionBank
+    from conftest import make_account
+    from app.services.practice_import import publish_aligned
+
+    parent = make_account(db, "pi_pub2", "parent")
+    bank = QuestionBank(user_id=parent.id, title="卷2", subject="数学")
+    db.add(bank)
+    db.commit()
+    q = Question(user_id=parent.id, bank_id=bank.id, qtype="fill_blank",
+                 question="__ + __ =", answer="1, 2", answer_json="{}",
+                 status="pending")
+    db.add(q)
+    db.commit()
+
+    assert publish_aligned(db, bank.id) == 0
+    assert db.get(Question, q.id).status == "pending"
