@@ -255,3 +255,87 @@ def test_publish_skips_fill_blank_without_blanks(db):
 
     assert publish_aligned(db, bank.id) == 0
     assert db.get(Question, q.id).status == "pending"
+
+
+def test_run_import_job_publishes_aligned_and_records_failures(db, monkeypatch):
+    from app.models import Question, QuestionBank, PdfDocument, PracticeImportJob
+    from conftest import make_account
+    from app.services import practice_import as pi
+    from app.database import SessionLocal
+
+    parent = make_account(db, "pi_job", "parent")
+    bank = QuestionBank(user_id=parent.id, title="卷", subject="数学")
+    doc = PdfDocument(filename="b.pdf", subject="数学", storage_path="uploads/x.pdf",
+                      content_kind="practice")
+    db.add_all([bank, doc])
+    db.commit()
+    job = PracticeImportJob(
+        user_id=parent.id, bank_id=bank.id, document_id=doc.id, total_pages=4,
+        question_start_page=1, question_end_page=2,
+        answer_start_page=3, answer_end_page=4,
+    )
+    db.add(job)
+    db.commit()
+    job_id, bank_id = job.id, bank.id
+    db.close()
+
+    pages = {
+        1: "第3课时 小数乘小数\n1. 8.9+4.5=\n2. 1000-550=",
+        2: "",
+        3: "第3课时 小数乘小数\n1. 13.4\n2. 450",
+        4: "",
+    }
+    monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_: pages.get(idx + 1, ""))
+    monkeypatch.setattr(pi, "SessionLocal", SessionLocal, raising=False)
+
+    pi.run_import_job(job_id)
+
+    s = SessionLocal()
+    try:
+        fresh = s.get(PracticeImportJob, job_id)
+        assert fresh.status == "failed"      # 有失败页
+        assert json.loads(fresh.failed_pages) == [2, 4]
+        assert s.query(Question).filter_by(bank_id=bank_id, status="published").count() == 2
+        assert s.get(QuestionBank, bank_id).source == "practice_pdf"
+    finally:
+        s.close()
+
+
+def test_run_import_job_all_ok_marks_done(db, monkeypatch):
+    from app.models import PdfDocument, PracticeImportJob, QuestionBank
+    from conftest import make_account
+    from app.services import practice_import as pi
+    from app.database import SessionLocal
+
+    parent = make_account(db, "pi_job2", "parent")
+    bank = QuestionBank(user_id=parent.id, title="卷2", subject="数学")
+    doc = PdfDocument(filename="c.pdf", subject="数学", storage_path="uploads/y.pdf",
+                      content_kind="practice")
+    db.add_all([bank, doc])
+    db.commit()
+    job = PracticeImportJob(
+        user_id=parent.id, bank_id=bank.id, document_id=doc.id, total_pages=2,
+        question_start_page=1, question_end_page=1,
+        answer_start_page=2, answer_end_page=2,
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    pages = {1: "第1课时 口算\n1. 1+1=", 2: "第1课时 口算\n1. 2"}
+    monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_: pages.get(idx + 1, ""))
+
+    pi.run_import_job(job_id)
+
+    s = SessionLocal()
+    try:
+        row = s.get(PracticeImportJob, job_id)
+        assert row.status == "done"
+        assert row.published_count == 1
+        assert row.question_count == 1
+    finally:
+        s.close()
+
+
+import json  # noqa: E402

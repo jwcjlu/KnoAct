@@ -163,3 +163,143 @@ def publish_aligned(db, bank_id: int) -> int:
         {"status": "published"}, synchronize_session=False
     )
     return len(ids)
+
+_OCR_INSTRUCTION = (
+    "识别这一页练习册的全部文字，保留「第N课时 标题」与题号（1. 2. (1)），"
+    "题目与答案都要原样输出，不要解释、不要省略。"
+)
+
+
+def _ocr_text(pdf_path: str, page_index: int, db) -> str:
+    """OCR 单页。不用 pdf_split._ocr_page（它会缓存失败结果，导致 retry 无效）。"""
+    from .ai import ocr_image
+    from .pdf_split import _render_page_png
+
+    try:
+        png = _render_page_png(pdf_path, page_index, dpi=150)
+    except Exception:
+        return ""
+    try:
+        return (ocr_image(db, png, instruction=_OCR_INSTRUCTION) or "").strip()
+    except Exception:
+        return ""
+
+
+def _parse_pages(db, pdf_path: str, pages: list[int]) -> tuple[list[dict], list[int]]:
+    """OCR 并解析指定页码（1-based）。返回 (items, 失败页列表)。
+
+    注意：答案页解析出的「题干」其实是答案文本，需经 `_answers_of()` 转换。
+    """
+    items: list[dict] = []
+    failed: list[int] = []
+    for pno in pages:
+        text = _ocr_text(pdf_path, pno - 1, db)
+        parsed = parse_lesson_page(text)
+        if not parsed["items"]:
+            failed.append(pno)
+            continue
+        for it in parsed["items"]:
+            items.append({
+                **it,
+                "lesson_no": parsed["lesson_no"],
+                "lesson_title": parsed["lesson_title"],
+                "page": pno,
+            })
+    return items, failed
+
+
+def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
+    """后台执行导入。retry_pages 非空时只重跑这些页。
+
+    新开 Session：BackgroundTasks 执行时请求级 session 已失效。
+    """
+    from ..database import SessionLocal
+    from ..models import PdfDocument, PracticeImportJob, QuestionBank
+    from ..routers.bank import _persist_drafts
+
+    db = SessionLocal()
+    try:
+        job = db.get(PracticeImportJob, job_id)
+        if job is None:
+            return
+        doc = db.get(PdfDocument, job.document_id)
+        bank = db.get(QuestionBank, job.bank_id)
+        if doc is None or bank is None:
+            job.status = "failed"
+            job.error = "文档或题库卷不存在"
+            db.commit()
+            return
+
+        job.status = "ocr"
+        db.commit()
+
+        q_start = job.question_start_page or 1
+        q_end = job.question_end_page or (job.answer_start_page or 1) - 1
+        a_start = job.answer_start_page or 1
+        a_end = job.answer_end_page or a_start
+
+        if retry_pages:
+            q_pages = [p for p in retry_pages if q_start <= p <= q_end]
+            a_pages = [p for p in retry_pages if a_start <= p <= a_end]
+            q_items, q_failed = _parse_pages(db, doc.storage_path, q_pages)
+            a_items, a_failed = _parse_pages(db, doc.storage_path, a_pages)
+        else:
+            q_items, q_failed = _parse_pages(
+                db, doc.storage_path, list(range(q_start, q_end + 1)))
+            a_items, a_failed = _parse_pages(
+                db, doc.storage_path, list(range(a_start, a_end + 1)))
+
+        job.status = "aligning"
+        job.question_count = len(q_items)
+        db.commit()
+
+        aligned, _missing = align_answers(q_items, _answers_of(a_items))
+        job.aligned_count = len(aligned)
+
+        drafts = build_drafts(aligned, document_id=job.document_id)
+        _persist_drafts(db, bank, drafts, "practice_pdf")
+        # 必须在 persist 之后设置：_persist_drafts 会把 manual 改成 third_party
+        bank.source = "practice_pdf"
+        db.commit()
+
+        job.published_count = publish_aligned(db, bank.id)
+
+        failed = sorted(q_failed + a_failed)
+        job.failed_pages = json.dumps(failed)
+        total = (q_end - q_start + 1) + (a_end - a_start + 1)
+        job.done_pages = max(0, total - len(failed))
+        job.status = "failed" if failed else "done"
+        job.error = f"{len(failed)} 页识别失败，可重试" if failed else ""
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        try:
+            job = db.get(PracticeImportJob, job_id)
+            if job is not None:
+                job.status = "failed"
+                job.error = str(exc)[:480]
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+def _answers_of(answer_items: list[dict]) -> list[dict]:
+    """答案页解析出的 items 里，`question` 字段实为答案文本，转成对齐用的答案结构。
+
+    若 OCR 输出里答案已带「= 结果」形式，取等号右侧。
+    """
+    out: list[dict] = []
+    for it in answer_items:
+        raw = (it.get("question") or "").strip()
+        if "=" in raw or "＝" in raw:
+            raw = re.split(r"[=＝]", raw)[-1].strip()
+        if not raw:
+            continue
+        out.append({
+            "lesson_no": it.get("lesson_no"),
+            "question_no": it.get("question_no"),
+            "answer": raw,
+            "analysis": it.get("analysis", ""),
+        })
+    return out
