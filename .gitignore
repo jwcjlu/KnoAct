@@ -34,3 +34,6 @@ backend/*.db.bak_*
 
 # 本地构建产物
 knoact-student-app-*.tar
+
+# 本地临时渲染产物
+/build/
