@@ -481,3 +481,59 @@ def test_lessons_endpoint_counts_published(setup_db):
     assert lessons[0]["lesson_no"] == 3
     assert lessons[0]["title"] == "小数乘小数"
     assert lessons[0]["count"] == 1
+
+
+def test_practice_doc_hidden_from_textbook_list(setup_db):
+    from app.database import SessionLocal
+    from conftest import parent_child
+    from app.models import PdfDocument
+
+    s = SessionLocal()
+    p, _c, parent_h, _ch = parent_child(s, "pi_hide")
+    s.add(PdfDocument(filename="练习册.pdf", subject="数学", storage_path="uploads/a.pdf",
+                      content_kind="practice"))
+    s.add(PdfDocument(filename="教材.pdf", subject="数学", storage_path="uploads/b.pdf",
+                      content_kind="textbook"))
+    s.commit()
+    s.close()
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.pdf import router as pdf_router
+
+    app = FastAPI()
+    app.include_router(pdf_router)
+    r = TestClient(app).get("/api/pdf/documents", headers=parent_h)
+    names = [d["filename"] for d in r.json()]
+    assert "教材.pdf" in names
+    assert "练习册.pdf" not in names
+
+    r2 = TestClient(app).get("/api/pdf/documents?include_practice=true", headers=parent_h)
+    assert "练习册.pdf" in [d["filename"] for d in r2.json()]
+
+
+def test_practice_bank_excluded_from_practice_list(setup_db):
+    from app.database import SessionLocal
+    from conftest import parent_child
+    from app.models import Question, QuestionBank
+
+    s = SessionLocal()
+    p, c, _ph, child_h = parent_child(s, "pi_hide2")
+    bank = QuestionBank(user_id=p.id, title="练习册卷", subject="数学",
+                        source="practice_pdf", status="active")
+    s.add(bank)
+    s.flush()
+    s.add(Question(user_id=p.id, bank_id=bank.id, qtype="oral", question="a",
+                   answer="1", status="published"))
+    s.commit()
+    s.close()
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.bank import router as bank_router
+
+    app = FastAPI()
+    app.include_router(bank_router)
+    r = TestClient(app).get("/api/banks/practice", headers=child_h)
+    assert r.status_code == 200
+    assert all(b["title"] != "练习册卷" for b in r.json())

@@ -1,6 +1,7 @@
 import os
 from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from ..core.access import (
     ensure_pdf_document_access,
@@ -67,9 +68,14 @@ async def upload_pdf(subject: str = Form(...), grade: int = Form(None),
 
 @router.get("/documents")
 def list_documents(user_id: int | None = None,
+                   include_practice: bool = False,
                    user: User = Depends(require_learning_user),
                    db: Session = Depends(get_db)):
-    """列出教材：家长/管理员可查全库或按 user_id 过滤已绑定；孩子仅能看到本人已绑定的文档。"""
+    """列出教材：家长/管理员可查全库或按 user_id 过滤已绑定；孩子仅能看到本人已绑定的文档。
+
+    `include_practice=false`（默认）时排除练习册导入的 PDF —— 它们只在
+    「题库管理 → 练习册导入」里出现，不应混进教材列表。
+    """
     if user.role == "child":
         effective_user_id = user.id
     elif user_id is not None:
@@ -82,6 +88,12 @@ def list_documents(user_id: int | None = None,
     if effective_user_id is not None:
         bound = db.query(UserDocument.document_id).filter_by(user_id=effective_user_id)
         q = q.filter(PdfDocument.id.in_(bound))
+    if not include_practice:
+        # 练习册（content_kind='practice'）不进教材列表；NULL 视为教材
+        q = q.filter(
+            or_(PdfDocument.content_kind.is_(None),
+                PdfDocument.content_kind != "practice")
+        )
     docs = q.all()
     out = []
     for d in docs:

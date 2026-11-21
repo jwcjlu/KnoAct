@@ -27,6 +27,9 @@ from ..services.ocr_import import structure_questions_from_text
 
 _PHOTO_MAX_BYTES = 8 * 1024 * 1024
 _PHOTO_MAX_PAGES = 8
+
+# 练习册导入的卷来源标记：不进孩子端「题库练习」列表
+PRACTICE_SOURCE = "practice_pdf"
 _PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 _PHOTO_OCR_INSTRUCTION = (
     "识别试卷图片中的全部文字，保留题号、选项与表格。"
@@ -296,6 +299,7 @@ def list_practice_banks(user: User = Depends(require_learning_user),
     banks = (
         db.query(QuestionBank)
         .filter_by(user_id=pid, status="active")
+        .filter(QuestionBank.source != PRACTICE_SOURCE)
         .order_by(QuestionBank.id.desc())
         .all()
     )
