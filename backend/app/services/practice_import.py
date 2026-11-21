@@ -144,6 +144,47 @@ def parse_lesson_page(text: str, *, lenient: bool = False) -> dict:
     return {"lesson_no": lesson_no, "lesson_title": lesson_title, "items": items}
 
 
+def parse_answer_page(text: str) -> list[dict]:
+    """解析答案页：没有「第N课时」标题，只按页内题号顺序产出答案。
+
+    一个题号行里可能挤着多个答案（如「1. 9.9 100 0.1」对应横向 3 道题），
+    这里把它们拆成多条，按出现顺序返回。
+
+    返回 [{"question_no": "1", "answer": "9.9"}, {"question_no": "1", "answer": "100"}, ...]
+    """
+    items: list[dict] = []
+    seq = 0
+    for raw_line in (text or "").replace("\r", "").split("\n"):
+        line = raw_line.strip()
+        if not line or _NOISE_RE.match(line):
+            continue
+
+        m = _SECTION_RE.match(line)
+        if not m:
+            continue
+        answer_text = (m.group(4) or "").strip()
+        if not answer_text:
+            continue
+
+        # 带过程的答案（「60 ÷ 5 = 12」）只取最后结果
+        if "=" in answer_text or "＝" in answer_text:
+            tail = re.split(r"[=＝]", answer_text)[-1].strip()
+            if tail:
+                answer_text = tail
+
+        # 一行多答案：按空白切开逐个入列
+        parts = [p for p in re.split(r"\s{2,}|\t+|\u3000+", answer_text) if p.strip()]
+        if not parts:
+            parts = [answer_text]
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            seq += 1
+            items.append({"question_no": str(seq), "answer": part})
+    return items
+
+
 def split_blanks(answer_text: str, count: int) -> list[str] | None:
     """把答案文本按空位数量切开；数量不匹配返回 None（视为未对齐）。"""
     raw = (answer_text or "").strip()
@@ -178,6 +219,24 @@ def align_answers(
                     "analysis": hit.get("analysis", ""),
                 }
             )
+        else:
+            missing.append(q)
+    return aligned, missing
+
+
+def align_by_order(
+    questions: list[dict], answers: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """顺序对齐：第 N 题配第 N 个答案。
+
+    答案页天然没有「第N课时」标题，只能依赖「题面页按课时顺序 + 答案页同序」
+    这一事实（计算类练习册都是这个结构）。
+    """
+    aligned: list[dict] = []
+    missing: list[dict] = []
+    for i, q in enumerate(questions):
+        if i < len(answers) and (answers[i].get("answer") or "").strip():
+            aligned.append({**q, "answer": answers[i]["answer"]})
         else:
             missing.append(q)
     return aligned, missing
@@ -314,27 +373,44 @@ def _parse_pages(
     pages: list[int],
     *,
     is_answer: bool = False,
+    on_progress=None,
 ) -> tuple[list[dict], list[int]]:
     """OCR 并解析指定页码（1-based）。返回 (items, 失败页列表)。
 
     答案页解析出的「题干」其实是答案文本，需经 `_answers_of()` 转换；
     答案页用宽松解析（纯数字答案行也算一道题）。
+
+    `on_progress(done_count, items_so_far)`：每处理完一页回调一次，用于刷新进度。
     """
     items: list[dict] = []
     failed: list[int] = []
-    for pno in pages:
+    for idx, pno in enumerate(pages, start=1):
         text = _ocr_text(pdf_path, pno - 1, db, is_answer=is_answer)
-        parsed = parse_lesson_page(text, lenient=is_answer)
-        if not parsed["items"]:
-            failed.append(pno)
-            continue
-        for it in parsed["items"]:
-            items.append({
-                **it,
-                "lesson_no": parsed["lesson_no"],
-                "lesson_title": parsed["lesson_title"],
-                "page": pno,
-            })
+        if is_answer:
+            # 答案页没有「第N课时」，按页内题号顺序产出
+            ans = parse_answer_page(text)
+            if not ans:
+                failed.append(pno)
+            else:
+                for it in ans:
+                    items.append({**it, "page": pno})
+        else:
+            parsed = parse_lesson_page(text)
+            if not parsed["items"]:
+                failed.append(pno)
+            else:
+                for it in parsed["items"]:
+                    items.append({
+                        **it,
+                        "lesson_no": parsed["lesson_no"],
+                        "lesson_title": parsed["lesson_title"],
+                        "page": pno,
+                    })
+        if on_progress is not None:
+            try:
+                on_progress(idx, items)
+            except Exception:
+                pass
     return items, failed
 
 
@@ -386,24 +462,51 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
         a_start = job.answer_start_page or 1
         a_end = job.answer_end_page or a_start
 
+        total_pages = (q_end - q_start + 1) + (a_end - a_start + 1)
+
+        def _progress(done: int, items_so_far: list[dict]) -> None:
+            """每页 OCR 完就刷新进度：done_pages 与已识别题数。
+
+            独立 session：长时间 OCR 期间主 session 缓存会过期。
+            """
+            from ..database import SessionLocal as _SL
+            from ..models import PracticeImportJob as _Job
+
+            s2 = _SL()
+            try:
+                j2 = s2.get(_Job, job_id)
+                if j2 is not None:
+                    j2.done_pages = min(done, total_pages)
+                    j2.question_count = len(items_so_far)
+                    s2.commit()
+            except Exception:
+                s2.rollback()
+            finally:
+                s2.close()
+
         if retry_pages:
             q_pages = [p for p in retry_pages if q_start <= p <= q_end]
-            a_pages = [p for p in retry_pages if a_start <= p <= a_end]
-            q_items, q_failed = _parse_pages(db, doc.storage_path, q_pages)
-            a_items, a_failed = _parse_pages(
-                db, doc.storage_path, a_pages, is_answer=True)
         else:
-            q_items, q_failed = _parse_pages(
-                db, doc.storage_path, list(range(q_start, q_end + 1)))
-            a_items, a_failed = _parse_pages(
-                db, doc.storage_path, list(range(a_start, a_end + 1)), is_answer=True)
+            q_pages = list(range(q_start, q_end + 1))
 
+        q_items, q_failed = _parse_pages(
+            db, doc.storage_path, q_pages, on_progress=_progress)
+
+        # 答案用 AI 求解：不依赖答案页 OCR，也不会因页间错位而整体错配
         job.status = "aligning"
         job.question_count = len(q_items)
         db.commit()
 
-        aligned, _missing = align_answers(q_items, _answers_of(a_items))
+        from .practice_solve import solve_math_items
+
+        solved = solve_math_items(db, q_items) if q_items else {}
+        aligned: list[dict] = []
+        for i, it in enumerate(q_items):
+            ans = (solved.get(i) or "").strip()
+            if ans:
+                aligned.append({**it, "answer": ans})
         job.aligned_count = len(aligned)
+        db.commit()
 
         drafts = build_drafts(aligned, document_id=job.document_id)
         _persist_drafts(db, bank, drafts, "practice_pdf")
@@ -413,9 +516,9 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
 
         job.published_count = publish_aligned(db, bank.id)
 
-        failed = sorted(q_failed + a_failed)
+        failed = sorted(q_failed)
         job.failed_pages = json.dumps(failed)
-        total = (q_end - q_start + 1) + (a_end - a_start + 1)
+        total = q_end - q_start + 1
         job.done_pages = max(0, total - len(failed))
         job.status = "failed" if failed else "done"
         job.error = f"{len(failed)} 页识别失败，可重试" if failed else ""

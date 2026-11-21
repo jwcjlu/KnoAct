@@ -316,19 +316,22 @@ def test_run_import_job_publishes_aligned_and_records_failures(db, monkeypatch):
     pages = {
         1: "第3课时 小数乘小数\n1. 直接写出得数。\n8.9 + 4.5 =\n1000 - 550 =",
         2: "",
-        3: "第3课时 小数乘小数\n1. 13.4\n2. 450",
-        4: "",
     }
     monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_, **kw: pages.get(idx + 1, ""))
     monkeypatch.setattr(pi, "SessionLocal", SessionLocal, raising=False)
+    # 答案由 AI 求解（不依赖答案页 OCR）
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {i: "1" for i in range(len(items))},
+    )
 
     pi.run_import_job(job_id)
 
     s = SessionLocal()
     try:
         fresh = s.get(PracticeImportJob, job_id)
-        assert fresh.status == "failed"      # 有失败页
-        assert json.loads(fresh.failed_pages) == [2, 4]
+        assert fresh.status == "failed"      # 第 2 页识别失败
+        assert json.loads(fresh.failed_pages) == [2]
         assert s.query(Question).filter_by(bank_id=bank_id, status="published").count() == 2
         assert s.get(QuestionBank, bank_id).source == "practice_pdf"
     finally:
@@ -357,8 +360,12 @@ def test_run_import_job_all_ok_marks_done(db, monkeypatch):
     job_id = job.id
     db.close()
 
-    pages = {1: "第1课时 口算\n1. 直接写出得数。\n1 + 1 =", 2: "第1课时 口算\n1. 2"}
+    pages = {1: "第1课时 口算\n1. 直接写出得数。\n1 + 1 =", 2: ""}
     monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_, **kw: pages.get(idx + 1, ""))
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {0: "2"},
+    )
 
     pi.run_import_job(job_id)
 
@@ -601,3 +608,38 @@ def test_build_drafts_strips_answer_from_question():
     drafts = build_drafts(aligned, document_id=1)
     assert drafts[0].question == "8.9＋4.5 ="
     assert drafts[0].answer == "13.4"
+
+
+def test_parse_answer_page_without_lesson_header():
+    """答案页没有「第N课时」标题，仍要能解析出答案。"""
+    from app.services.practice_import import parse_answer_page
+
+    text = """1. 13.4
+2. 450
+3. 60 ÷ 5 = 12
+"""
+    items = parse_answer_page(text)
+    assert len(items) == 3
+    assert items[0]["answer"] == "13.4"
+    assert items[2]["answer"] == "12"   # 带过程时取最后结果
+
+
+def test_align_by_order_pairs_nth_question_with_nth_answer():
+    from app.services.practice_import import align_by_order
+
+    qs = [{"question_no": "1", "question": "a"}, {"question_no": "2", "question": "b"}]
+    ans = [{"answer": "1"}, {"answer": "2"}]
+    aligned, missing = align_by_order(qs, ans)
+    assert len(aligned) == 2
+    assert aligned[1]["answer"] == "2"
+    assert missing == []
+
+
+def test_align_by_order_marks_tail_as_missing():
+    from app.services.practice_import import align_by_order
+
+    qs = [{"question_no": "1"}, {"question_no": "2"}, {"question_no": "3"}]
+    ans = [{"answer": "1"}]
+    aligned, missing = align_by_order(qs, ans)
+    assert len(aligned) == 1
+    assert len(missing) == 2
