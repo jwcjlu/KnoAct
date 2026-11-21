@@ -15,6 +15,11 @@ class QuestionDraft:
     tags: dict = field(default_factory=dict)
     passage_title: str = ""
     passage_content: str = ""
+    # 练习册导入用：课时号/课时标题/题号/来源文档
+    lesson_no: int | None = None
+    lesson_title: str = ""
+    question_no: str = ""
+    source_document_id: int | None = None
 
 
 class SourceAdapter(ABC):

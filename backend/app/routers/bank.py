@@ -146,6 +146,12 @@ def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft]
             date=today,
             status="pending",
             passage_id=passage_id,
+            # 必须写 user_id：否则 migrate_grade_buckets 启动时会删掉无主题目
+            user_id=bank.user_id,
+            lesson_no=d.lesson_no,
+            lesson_title=(d.lesson_title or None),
+            question_no=(d.question_no or None),
+            source_document_id=d.source_document_id,
         )
         db.add(q)
         db.flush()
