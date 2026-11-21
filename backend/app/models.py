@@ -108,6 +108,9 @@ class Text(Base):
 
 class Question(Base):
     __tablename__ = "questions"
+    __table_args__ = (
+        Index("ix_questions_bank_lesson", "bank_id", "lesson_no"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -129,6 +132,14 @@ class Question(Base):
     extra: Mapped[str] = mapped_column(LongText, default="")
     task_type: Mapped[str] = mapped_column(String(16), default="reading")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # 练习册导入用：课时号/课时标题/题号（可索引，便于按课时取题）
+    lesson_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lesson_title: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    question_no: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # 来源文档（练习册导入题才填）；删文档时置 NULL，题目保留
+    source_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pdf_documents.id", ondelete="SET NULL"), nullable=True)
 
 class Note(Base):
     __tablename__ = "notes"
@@ -628,4 +639,52 @@ class BrainGameResult(Base):
     duration_ms: Mapped[int] = mapped_column(Integer)
     moves: Mapped[int] = mapped_column(Integer, default=0)
     solved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class PracticeImportJob(Base):
+    """练习册 PDF 导入任务：进度、页码范围、识别/对齐/发布计数。"""
+    __tablename__ = "practice_import_jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"))
+    document_id: Mapped[int] = mapped_column(ForeignKey("pdf_documents.id"))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    # pending | ocr | aligning | done | failed
+    total_pages: Mapped[int] = mapped_column(Integer, default=0)
+    done_pages: Mapped[int] = mapped_column(Integer, default=0)
+    question_start_page: Mapped[int] = mapped_column(Integer, default=1)
+    question_end_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    answer_start_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    answer_end_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    question_count: Mapped[int] = mapped_column(Integer, default=0)
+    aligned_count: Mapped[int] = mapped_column(Integer, default=0)
+    published_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_pages: Mapped[str] = mapped_column(LongText, default="[]")
+    error: Mapped[str] = mapped_column(String(512), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PracticeAttempt(Base):
+    """逐题作答（计划二写入，计划三家长查看；计划一先建表，避免二次迁移）。"""
+    __tablename__ = "practice_attempts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "question_id", "date", name="uq_practice_attempt"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"))
+    bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"))
+    date: Mapped[date] = mapped_column(Date)
+    lesson_no: Mapped[int] = mapped_column(Integer, default=0)
+    question_snapshot: Mapped[str] = mapped_column(LongText, default="")
+    student_answer: Mapped[str] = mapped_column(LongText, default="")
+    is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
+    photo_path: Mapped[str] = mapped_column(String(512), default="")
+    ai_status: Mapped[str] = mapped_column(String(16), default="")
+    ai_final_answer: Mapped[str] = mapped_column(String(64), default="")
+    ai_steps_plausible: Mapped[bool] = mapped_column(Boolean, default=False)
+    ai_reason: Mapped[str] = mapped_column(String(512), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

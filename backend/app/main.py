@@ -66,6 +66,12 @@ def _ensure_db_tables() -> None:
         except Exception as exc:
             db.rollback()
             _log.warning("child grade/桶回填失败: %s", exc)
+        try:
+            from .migrate_practice_import import migrate as _migrate_practice_import
+
+            _migrate_practice_import()
+        except Exception as exc:
+            _log.warning("练习册导入迁移失败: %s", exc)
     finally:
         db.close()
 
