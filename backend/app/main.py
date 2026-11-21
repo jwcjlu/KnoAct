@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -72,7 +73,7 @@ def _ensure_db_tables() -> None:
             _migrate_practice_import()
         except Exception as exc:
             _log.warning("练习册导入迁移失败: %s", exc)
-        # 清理上次进程遗留的「进行中」导入任务，避免永久卡住
+        # 上次进程遗留的「进行中」导入任务：标 failed 并自动续跑
         try:
             from .models import PracticeImportJob
 
@@ -81,17 +82,43 @@ def _ensure_db_tables() -> None:
                 .filter(PracticeImportJob.status.in_(("ocr", "aligning", "rendering")))
                 .all()
             )
+            auto = []
             for j in stuck:
-                j.status = "failed"
-                j.error = "服务重启，请重试"
+                q_end = j.question_end_page or (j.answer_start_page or 1) - 1
+                j.failed_pages = json.dumps(
+                    list(range(j.question_start_page or 1, q_end + 1))
+                )
+                j.status = "pending"
+                j.error = ""
+                j.done_pages = 0
+                auto.append(j.id)
             if stuck:
                 db.commit()
-                _log.warning("清理了 %d 个卡住的练习册导入任务", len(stuck))
+                _log.warning("恢复 %d 个中断的练习册导入任务", len(stuck))
+                _resume_jobs = list(auto)
+            else:
+                _resume_jobs = []
         except Exception as exc:
             db.rollback()
-            _log.warning("清理卡住的导入任务失败: %s", exc)
+            _log.warning("恢复中断的导入任务失败: %s", exc)
+            _resume_jobs = []
     finally:
         db.close()
+
+    # 后台线程续跑（不能放进 BackgroundTasks，那里没有请求）
+    if _resume_jobs:
+        import threading
+
+        def _run_resume(job_id: int) -> None:
+            try:
+                from .services.practice_import import run_import_job
+
+                run_import_job(job_id)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("续跑导入任务 %s 失败: %s", job_id, exc)
+
+        for jid in _resume_jobs:
+            threading.Thread(target=_run_resume, args=(jid,), daemon=True).start()
 
 
 # 开发阶段放开跨域，便于前端本地联调

@@ -70,6 +70,15 @@ def _split_row(line: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+_UNIT_RE = re.compile(r"^\s*([一二三四五六七八九十]+)\s+([^\n]{2,20})\s*$", re.M)
+
+_SPECIAL_RE = re.compile(
+    r"^\s*(专项练习[一二三四五六七八九十\d]*|阶段能力检测[一二三四五六七八九十\d]*"
+    r"|期中[^\n]{0,12}|期末[^\n]{0,12}|单元[^\n]{0,12}检测[^\n]{0,8})\s*$",
+    re.M,
+)
+
+
 def parse_lesson_page(text: str, *, lenient: bool = False) -> dict:
     """从一页 OCR 文本解析课时号、标题与题目列表。
 
@@ -78,15 +87,23 @@ def parse_lesson_page(text: str, *, lenient: bool = False) -> dict:
 
     切分规则：大题号（1. / 2.）只作分组并推断题型，每个算式行是一道题，
     题号在该大题内从 1 递增。
+
+    没有「第N课时」时（如「专项练习一」「期中检测」），退用该页标题作章节名，
+    lesson_no 置 None（入库时由调用方按页序编号）。
     """
     text = (text or "").replace("\r", "")
     m = _LESSON_RE.search(text)
-    if not m:
-        return {"lesson_no": None, "lesson_title": "", "items": []}
-
-    lesson_no = int(m.group(1))
-    lesson_title = (m.group(2) or "").strip().split("\n")[0].strip()
-    body = text[m.end():]
+    if m:
+        lesson_no = int(m.group(1))
+        lesson_title = (m.group(2) or "").strip().split("\n")[0].strip()
+        body = text[m.end():]
+    else:
+        sp = _SPECIAL_RE.search(text)
+        if not sp:
+            return {"lesson_no": None, "lesson_title": "", "items": []}
+        lesson_no = None
+        lesson_title = sp.group(1).strip()
+        body = text[sp.end():]
 
     items: list[dict] = []
     cur_kind = "other"
@@ -399,11 +416,19 @@ def _parse_pages(
             if not parsed["items"]:
                 failed.append(pno)
             else:
+                # 课时号在每个单元内会重新从 1 开始，直接用作 lesson_no 会撞车。
+                # 因此用「页序」保证全书唯一，真实课时号放进 lesson_title。
+                real_no = parsed["lesson_no"]
+                lesson_no = pno if real_no is None else pno
+                title = parsed["lesson_title"]
+                if real_no is not None:
+                    title = f"第{real_no}课时 {title}".strip()
                 for it in parsed["items"]:
                     items.append({
                         **it,
-                        "lesson_no": parsed["lesson_no"],
-                        "lesson_title": parsed["lesson_title"],
+                        "lesson_no": lesson_no,
+                        "lesson_title": title,
+                        "real_lesson_no": real_no,
                         "page": pno,
                     })
         if on_progress is not None:
@@ -499,7 +524,27 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
 
         from .practice_solve import solve_math_items
 
-        solved = solve_math_items(db, q_items) if q_items else {}
+        # 解题阶段也要报进度：按批回调刷新 aligned_count（前端显示「已对齐」）
+        def _solve_progress(done: int, total: int) -> None:
+            from ..database import SessionLocal as _SL
+            from ..models import PracticeImportJob as _Job
+
+            s2 = _SL()
+            try:
+                j2 = s2.get(_Job, job_id)
+                if j2 is not None:
+                    j2.aligned_count = done
+                    j2.question_count = total
+                    s2.commit()
+            except Exception:
+                s2.rollback()
+            finally:
+                s2.close()
+
+        solved = (
+            solve_math_items(db, q_items, on_progress=_solve_progress)
+            if q_items else {}
+        )
         aligned: list[dict] = []
         for i, it in enumerate(q_items):
             ans = (solved.get(i) or "").strip()

@@ -41,10 +41,17 @@ def _parse_solve(raw: str) -> dict[int, str]:
     return out
 
 
-def solve_math_items(db, items: list[dict], *, batch_size: int = 20) -> dict[int, str]:
+def solve_math_items(
+    db,
+    items: list[dict],
+    *,
+    batch_size: int = 20,
+    on_progress=None,
+) -> dict[int, str]:
     """批量求答案。items 是 parse_lesson_page 的产出，返回 {列表下标: 答案}。
 
     fake provider 或调用失败时返回已成功的部分（缺的进「待补答案」清单）。
+    `on_progress(done, total)` 每批完成后回调，用于刷新进度。
     """
     from .ai import get_provider
 
@@ -55,7 +62,8 @@ def solve_math_items(db, items: list[dict], *, batch_size: int = 20) -> dict[int
         return {}
 
     answers: dict[int, str] = {}
-    for start in range(0, len(items), batch_size):
+    total = len(items)
+    for start in range(0, total, batch_size):
         chunk = items[start:start + batch_size]
         lines = [
             f"{i}. {it.get('question', '')}"
@@ -74,4 +82,9 @@ def solve_math_items(db, items: list[dict], *, batch_size: int = 20) -> dict[int
         for local_idx, ans in got.items():
             if 0 <= local_idx < len(chunk):
                 answers[start + local_idx] = ans
+        if on_progress is not None:
+            try:
+                on_progress(len(answers), total)
+            except Exception:
+                pass
     return answers
