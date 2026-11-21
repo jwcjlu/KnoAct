@@ -174,6 +174,43 @@ def import_practice_pdf(
     return {"job_id": job.id, "document_id": doc.id, "total_pages": total}
 
 
+def _job_payload(job) -> dict:
+    """统一的进度负载（含题面页范围，前端据此显示「第 N/M 页」）。"""
+    q_start = job.question_start_page or 1
+    q_end = job.question_end_page or (job.answer_start_page or 1) - 1
+    return {
+        "id": job.id,
+        "status": job.status,
+        "total_pages": job.total_pages,
+        "question_pages": max(0, q_end - q_start + 1),
+        "done_pages": job.done_pages,
+        "question_count": job.question_count,
+        "aligned_count": job.aligned_count,
+        "published_count": job.published_count,
+        "failed_pages": json.loads(job.failed_pages or "[]"),
+        "error": job.error,
+    }
+
+
+@router.get("/api/practice-import/jobs/latest")
+def latest_job(
+    bank_id: int = Query(...),
+    user: User = Depends(require_learning_user),
+    db: Session = Depends(get_db),
+):
+    """该卷最近一次导入任务（进页面时自动带出进度）。"""
+    _require_own_bank(bank_id, user, db)
+    job = (
+        db.query(PracticeImportJob)
+        .filter(PracticeImportJob.bank_id == bank_id)
+        .order_by(PracticeImportJob.id.desc())
+        .first()
+    )
+    if job is None:
+        return {"job": None}
+    return {"job": _job_payload(job)}
+
+
 @router.get("/api/practice-import/jobs/{job_id}")
 def get_job(
     job_id: int,
@@ -184,17 +221,7 @@ def get_job(
     if job is None:
         raise HTTPException(status_code=404, detail={"error": "job_not_found"})
     ensure_user_access(user, job.user_id, db)
-    return {
-        "id": job.id,
-        "status": job.status,
-        "total_pages": job.total_pages,
-        "done_pages": job.done_pages,
-        "question_count": job.question_count,
-        "aligned_count": job.aligned_count,
-        "published_count": job.published_count,
-        "failed_pages": json.loads(job.failed_pages or "[]"),
-        "error": job.error,
-    }
+    return _job_payload(job)
 
 
 @router.post("/api/practice-import/jobs/{job_id}/retry")

@@ -928,10 +928,25 @@ async function openPracticeImport(){
   // 只有一本时直接选中，省一次点击
   if(!practiceSelectedBankId && practiceBookBanks.length === 1){
     practiceSelectedBankId = String(practiceBookBanks[0].id);
-    await loadPracticeLessons(practiceSelectedBankId);
   }
   bankView = 'practice_import';
+  if(practiceSelectedBankId){
+    await loadPracticeLessons(practiceSelectedBankId);
+    await loadLatestPracticeJob(practiceSelectedBankId);   // 带上上次/进行中的进度
+  }
   render();
+}
+
+/** 进页面/切卷时拉该卷最近一次任务；进行中则继续轮询。 */
+async function loadLatestPracticeJob(bankId){
+  if(!bankId) return;
+  const r = await api(`/api/practice-import/jobs/latest?bank_id=${bankId}`);
+  const job = r && r.job;
+  if(!job) { practiceImportJob = null; return; }
+  practiceImportJob = job;
+  if(job.status === 'pending' || job.status === 'ocr' || job.status === 'aligning'){
+    startPracticePolling(job.id);
+  }
 }
 
 async function loadPracticeBanks(){
@@ -952,8 +967,9 @@ function renderPracticeImport(){
     <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:var(--blue-soft2)">
       <div style="font-size:13px;font-weight:700">导入进度：${escapeAttr(String(job.status || ''))}</div>
       <div style="font-size:12px;color:var(--gray2);margin-top:6px">
-        第 ${job.done_pages}/${job.total_pages} 页 ·
-        识别 ${job.question_count} 题 · 已对齐 ${job.aligned_count} ·
+        第 ${job.done_pages}/${job.question_pages || job.total_pages} 页 ·
+        识别 ${job.question_count} 题 ·
+        ${job.status === 'aligning' ? `已算答案 ${job.aligned_count}/${job.question_count}` : `已对齐 ${job.aligned_count}`} ·
         已发布 ${job.published_count}
       </div>
       ${job.failed_pages && job.failed_pages.length
@@ -1061,7 +1077,11 @@ function renderPracticeImport(){
 
 async function onPracticeBankChange(bankId){
   practiceSelectedBankId = bankId || '';
+  practiceImportJob = null;
+  if(practicePollTimer){ clearInterval(practicePollTimer); practicePollTimer = null; }
   await loadPracticeLessons(practiceSelectedBankId);
+  await loadLatestPracticeJob(practiceSelectedBankId);
+  render();
 }
 
 async function createPracticeBook(){
@@ -1105,7 +1125,7 @@ async function startPracticeImport(){
   else toast('导入失败：' + (r && (r.detail || r.error) ? (r.detail || r.error) : '未知错误'));
 }
 
-function pollPracticeJob(jobId){
+function startPracticePolling(jobId){
   if(practicePollTimer) clearInterval(practicePollTimer);
   const tick = async () => {
     const j = await api(`/api/practice-import/jobs/${jobId}`);
@@ -1123,6 +1143,9 @@ function pollPracticeJob(jobId){
   tick();
   practicePollTimer = setInterval(tick, 2000);
 }
+
+// 兼容旧名
+function pollPracticeJob(jobId){ startPracticePolling(jobId); }
 
 async function retryPracticeJob(jobId){
   const r = await api(`/api/practice-import/jobs/${jobId}/retry`, {method:'POST'});

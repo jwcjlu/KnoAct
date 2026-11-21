@@ -480,6 +480,10 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
             return
 
         job.status = "ocr"
+        # 重跑时清零上一轮的统计，避免面板显示旧数字
+        job.aligned_count = 0
+        job.question_count = 0
+        job.published_count = 0
         db.commit()
 
         q_start = job.question_start_page or 1
