@@ -84,3 +84,52 @@ def align_answers(
         else:
             missing.append(q)
     return aligned, missing
+
+from ..core.source_adapter import QuestionDraft
+
+# OCR 解析出的 kind → 题库 qtype。
+# category 由 CATEGORY_OF_QTYPE 派生（core/question_types.py），绝不手填。
+QTYPE_OF_KIND: dict[str, str] = {
+    "oral": "oral",
+    "fill": "fill_blank",
+    "vertical": "calculation",
+    "step": "calculation",
+    "app": "application",
+}
+
+
+def build_drafts(
+    aligned: list[dict],
+    *,
+    document_id: int,
+    blanks_of=lambda q: 0,
+) -> list[QuestionDraft]:
+    """已对齐的题 → QuestionDraft（供 bank._persist_drafts 落库）。
+
+    blanks_of(q) 返回该题空位数（fill 类用）；数量与答案切分不符时降级为 oral。
+    """
+    out: list[QuestionDraft] = []
+    for q in aligned:
+        kind = (q.get("kind") or "oral").strip()
+        qtype = QTYPE_OF_KIND.get(kind, "oral")
+        d = QuestionDraft(
+            qtype=qtype,
+            question=q.get("question") or "",
+            answer=(q.get("answer") or "").strip(),
+            analysis=q.get("analysis") or "",
+        )
+        d.lesson_no = q.get("lesson_no")
+        d.lesson_title = q.get("lesson_title") or ""
+        d.question_no = str(q.get("question_no") or "")
+        d.source_document_id = document_id
+        d.tags = {"source": "practice_pdf", "page": q.get("page") or 0}
+
+        if qtype == "fill_blank":
+            n = int(blanks_of(q) or 0)
+            blanks = split_blanks(d.answer, n) if n else None
+            if blanks:
+                d.answer_json = {"blanks": blanks}
+            else:
+                d.qtype = "oral"
+        out.append(d)
+    return out

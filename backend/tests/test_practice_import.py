@@ -165,3 +165,49 @@ def test_split_blanks_by_count():
     assert split_blanks("0.24, 1.16", 2) == ["0.24", "1.16"]
     assert split_blanks("13.4", 1) == ["13.4"]
     assert split_blanks("1, 2, 3", 2) is None
+
+
+def test_kind_maps_to_qtype():
+    from app.services.practice_import import QTYPE_OF_KIND
+
+    assert QTYPE_OF_KIND["oral"] == "oral"
+    assert QTYPE_OF_KIND["fill"] == "fill_blank"
+    assert QTYPE_OF_KIND["vertical"] == "calculation"
+    assert QTYPE_OF_KIND["step"] == "calculation"
+    assert QTYPE_OF_KIND["app"] == "application"
+
+
+def test_qtype_category_is_derived_not_hardcoded():
+    from app.core.question_types import CATEGORY_OF_QTYPE
+    from app.services.practice_import import QTYPE_OF_KIND
+
+    for qtype in QTYPE_OF_KIND.values():
+        assert qtype in CATEGORY_OF_QTYPE
+    assert "objective" not in set(CATEGORY_OF_QTYPE.values())
+
+
+def test_build_drafts_sets_lesson_and_blank_json():
+    from app.services.practice_import import build_drafts
+
+    aligned = [
+        {"lesson_no": 3, "lesson_title": "小数乘小数", "question_no": "1",
+         "question": "8.9+4.5=", "answer": "13.4", "kind": "oral", "page": 11},
+        {"lesson_no": 3, "lesson_title": "小数乘小数", "question_no": "2",
+         "question": "____ + ____ =", "answer": "1, 2", "kind": "fill", "page": 11},
+    ]
+    drafts = build_drafts(aligned, document_id=7, blanks_of=lambda q: 2)
+    assert drafts[0].qtype == "oral"
+    assert drafts[0].lesson_no == 3
+    assert drafts[0].source_document_id == 7
+    assert drafts[1].qtype == "fill_blank"
+    assert drafts[1].answer_json["blanks"] == ["1", "2"]
+
+
+def test_build_drafts_downgrades_bad_fill_to_oral():
+    """空位数与答案切分不符时降级为 oral，避免永远判错。"""
+    from app.services.practice_import import build_drafts
+
+    aligned = [{"lesson_no": 1, "question_no": "1", "question": "____",
+                "answer": "1, 2, 3", "kind": "fill"}]
+    drafts = build_drafts(aligned, document_id=1, blanks_of=lambda q: 2)
+    assert drafts[0].qtype == "oral"
