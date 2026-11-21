@@ -87,6 +87,11 @@ def test_practice_tables_exist(db):
 
     assert PracticeImportJob.__tablename__ == "practice_import_jobs"
     assert PracticeAttempt.__tablename__ == "practice_attempts"
+    cols = {c.name for c in PracticeAttempt.__table__.columns}
+    # 家长查看要能还原「当时练的题干」与「AI 判定」
+    for name in ("question_snapshot", "photo_path", "ai_status",
+                 "ai_final_answer", "ai_steps_plausible", "ai_reason"):
+        assert name in cols, f"PracticeAttempt 缺少列 {name}"
 
 
 def test_question_index_on_bank_lesson(db):
@@ -156,7 +161,7 @@ class PracticeImportJob(Base):
 
 
 class PracticeAttempt(Base):
-    """逐题作答（计划二用，计划一先建表，避免二次迁移）。"""
+    """逐题作答（计划二写入，计划三家长查看；计划一先建表，避免二次迁移）。"""
     __tablename__ = "practice_attempts"
     __table_args__ = (
         UniqueConstraint("user_id", "question_id", "date", name="uq_practice_attempt"),
@@ -168,6 +173,7 @@ class PracticeAttempt(Base):
     bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"))
     date: Mapped[date] = mapped_column(Date)
     lesson_no: Mapped[int] = mapped_column(Integer, default=0)
+    question_snapshot: Mapped[str] = mapped_column(LongText, default="")
     student_answer: Mapped[str] = mapped_column(LongText, default="")
     is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
     photo_path: Mapped[str] = mapped_column(String(512), default="")
@@ -177,6 +183,8 @@ class PracticeAttempt(Base):
     ai_reason: Mapped[str] = mapped_column(String(512), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 ```
+
+> `question_snapshot` 存题干快照：家长事后查看时题库可能已改，快照保证可追溯。
 
 > `Index` / `UniqueConstraint` / `Boolean` / `Date` / `LongText` 在 `models.py` 顶部已 import，无需新增。
 
@@ -1992,5 +2000,7 @@ git commit -m "test(practice-import): 端到端验证与收尾"
 
 ## 下一步
 
-计划二（学生端「每日一练」+ Flutter 第 5 Tab）单独成文：
-`docs/superpowers/plans/<date>-practice-daily-plan2.md`。
+- **计划二**：学生端「每日一练」+ Flutter 第 5 Tab（取题/判分/拍照提交/写 PracticeAttempt）
+- **计划三**：家长端查看（`/api/practice/records` + 照片鉴权 + 报告 Tab「每日一练」子视图）
+
+计划二、三单独成文，依赖计划一产出的已发布题目。

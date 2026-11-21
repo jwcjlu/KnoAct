@@ -174,6 +174,7 @@ class PracticeAttempt(Base):
     bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"))
     date: Mapped[date] = mapped_column(Date)          # 本地日历日
     lesson_no: Mapped[int] = mapped_column(Integer)
+    question_snapshot: Mapped[str] = mapped_column(LongText, default="")  # 题干快照
     student_answer: Mapped[str] = mapped_column(LongText, default="")
     is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
     photo_path: Mapped[str] = mapped_column(String(512), default="")
@@ -183,6 +184,52 @@ class PracticeAttempt(Base):
     ai_reason: Mapped[str] = mapped_column(String(512), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 ```
+
+**`question_snapshot` 是必须的**：家长事后查看时，题库里的题可能已被补答案/改写，
+快照保证「当时练的题干」可追溯。
+
+#### 2.3b 家长端查看（新需求：能看每道题 + 过程题照片）
+
+家长要看孩子练了什么、哪里错了、过程题的手写照片。三块补齐：
+
+**判题标准（过程题）**：答案对 **且** 过程合理。
+复用 `grade_math_work_photo` 已有的 `final_answer` / `steps_plausible` / `reason`，
+`is_correct = (final == expected) and steps_plausible`；
+`ai_status == "failed"` 时 `is_correct=False` 且标「待家长确认」。
+
+**新接口**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/practice/records?child_id=&date=` | 家长视角：某天逐题明细（按课时分组）。返回每题：题干快照、孩子答案、标准答案、对错、`ai_*`、`photo_url`、`lesson_no/title` |
+| `GET` | `/api/practice/attempts/{id}/photo` | 带鉴权，返回孩子手写照片（家长仅限自己的孩子；比直连 `/uploads/` 安全） |
+| `GET` | `/api/practice/summary?child_id=&days=7` | 近 N 天汇总：每天练了哪课、共几题、对几题、用时 |
+
+**照片存储**：`uploads/practice_photos/q{question_id}_{timestamp}.jpg`
+**照片访问必须走鉴权接口**，不要把 `uploads/practice_photos` 挂到静态目录外的地方
+（`/uploads` 已全量静态挂载，照片可被任何人猜路径访问 —— 若要彻底隔离，
+`practice_photos` 不应放在 `uploads/` 下，改放 `private_uploads/` 并只由接口读）。
+
+**家长端 UI**：报告 Tab 新增「每日一练」子视图
+
+```
+11月21日 · 第3课时 小数乘小数
+12 题 · 对 10 · 错 2 · 用时 08:32
+────────────────────────────────
+✓ 1. 8.9 + 4.5 =
+   孩子答：13.4   标准：13.4
+✗ 2. 3.32 × 2.74 =
+   标准：9.0968
+   AI 识别：9.096  过程合理 ✓
+   [查看手写照片]
+✓ 3. (72÷18+8)×28 =
+   标准：1792  AI 识别：1792  过程合理 ✓
+   [查看手写照片]
+```
+
+- 口算/填空：显示孩子答案与标准答案
+- 过程题：显示标准答案 + AI 识别结果 + 缩略图（点击放大）
+- `ai_status="failed"` 的题标黄「未能识别，请人工核对」
 
 #### 2.4 当前课时（复用 `ChildConfig`）
 
@@ -308,6 +355,9 @@ db.query(Question).filter(Question.id.in_(aligned_ids)).update(
 | `POST` | `/api/practice/answer` | 逐题作答：`{question_id, student_answer}`，口算/填空即时判分，返回 `is_correct` |
 | `POST` | `/api/practice/answer-photo` | multipart `file` + `question_id`：竖式/脱式/应用题，落盘 `uploads/practice_photos/q{question_id}_{ts}.jpg`，调 `grade_math_work_photo`，写 `PracticeAttempt.ai_*` |
 | `POST` | `/api/practice/submit` | 提交今日练习（校验是否全部答完），写 `AnswerRecord(module="daily_practice")` |
+| `GET` | `/api/practice/records?child_id=&date=` | 家长查看某天逐题明细（含照片 URL、AI 判定） |
+| `GET` | `/api/practice/attempts/{id}/photo` | 带鉴权返回孩子手写照片 |
+| `GET` | `/api/practice/summary?child_id=&days=7` | 近 N 天汇总（每天哪课/几题/对几题） |
 
 #### 2.10 导入幂等与清理
 
@@ -502,7 +552,7 @@ Flutter
 | `backend/app/services/practice_import.py` | 新增：页码范围校验、OCR 编排、课时/题号解析、答案对齐、发布、`run_import_job` |
 | `backend/app/routers/pdf.py` | `content_kind="practice"` 默认从教材列表排除 |
 | `backend/app/main.py` | include 两个 router；启动时跑迁移 + 清理卡住的 job |
-| `parent-web/app.js` / `index.html` | 「练习册导入」子视图 + 当前课时设置；`MODULE_LABEL` 加 `daily_practice` || `student-app/lib/features/practice/` | 新增：每日一练页 + controller + repository + 模型 |
+| `parent-web/app.js` / `index.html` | 「练习册导入」子视图 + 当前课时设置；报告 Tab 加「每日一练」查看子视图；`MODULE_LABEL` 加 `daily_practice` || `student-app/lib/features/practice/` | 新增：每日一练页 + controller + repository + 模型 |
 | `student-app/lib/core/router.dart` | `/practice` 的 **`StatefulShellBranch`（index 3）** + `_shellPaths` 加入 |
 | `student-app/lib/features/shell/app_shell.dart` | 第 5 Tab + 修正索引副作用 |
 | `student-app/lib/features/shell/task_nav.dart` | `_allowedReturnTo` 加入 `/practice`（若从首页/任务页带 `returnTo` 跳转） |
