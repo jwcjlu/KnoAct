@@ -637,6 +637,7 @@ let bankAddQtype = 'single_choice';
 let bankView = null;               // null | 'practice_import'
 // 练习册导入
 let practiceBookBanks = [];
+let practiceSelectedBankId = '';   // 当前选中的练习册卷（重绘后要保留）
 let practiceImportJob = null;
 let practiceLessons = [];
 let practiceMissing = [];
@@ -924,6 +925,11 @@ function renderBankQuestionForm(){
 // ===== 练习册导入 =====
 async function openPracticeImport(){
   await loadPracticeBanks();
+  // 只有一本时直接选中，省一次点击
+  if(!practiceSelectedBankId && practiceBookBanks.length === 1){
+    practiceSelectedBankId = String(practiceBookBanks[0].id);
+    await loadPracticeLessons(practiceSelectedBankId);
+  }
   bankView = 'practice_import';
   render();
 }
@@ -935,8 +941,12 @@ async function loadPracticeBanks(){
 
 function renderPracticeImport(){
   const bankOpts = practiceBookBanks.map(b =>
-    `<option value="${b.id}">${escapeAttr(b.title)}（${escapeAttr(b.subject || '')}）</option>`
+    `<option value="${b.id}" ${String(b.id) === String(practiceSelectedBankId) ? 'selected' : ''}>${escapeAttr(b.title)}（${escapeAttr(b.subject || '')}）</option>`
   ).join('');
+  const noBank = practiceBookBanks.length === 0;
+  const selHint = noBank
+    ? `<div class="ms-hint" style="color:#c05b4a">还没有练习册卷，请先用上方「① 新建练习册」建一本。</div>`
+    : '';
   const job = practiceImportJob;
   const progress = job ? `
     <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:var(--blue-soft2)">
@@ -1009,9 +1019,10 @@ function renderPracticeImport(){
 
         <div class="bank-field">
           <div class="bank-field-label">② 选择练习册卷</div>
-          <select id="practiceBankSel" style="width:100%;border:1px solid var(--line3);border-radius:10px;padding:9px 12px;font-size:13px" onchange="loadPracticeLessons(this.value)">
+          <select id="practiceBankSel" style="width:100%;border:1px solid var(--line3);border-radius:10px;padding:9px 12px;font-size:13px" onchange="onPracticeBankChange(this.value)">
             <option value="">— 请选择 —</option>${bankOpts}
           </select>
+          ${selHint}
         </div>
 
         <div class="bank-field" style="margin-top:16px">
@@ -1048,6 +1059,11 @@ function renderPracticeImport(){
   </div>`;
 }
 
+async function onPracticeBankChange(bankId){
+  practiceSelectedBankId = bankId || '';
+  await loadPracticeLessons(practiceSelectedBankId);
+}
+
 async function createPracticeBook(){
   const titleEl = document.getElementById('pbNewTitle');
   const title = (titleEl && titleEl.value || '').trim();
@@ -1060,10 +1076,9 @@ async function createPracticeBook(){
     body:{title, subject, grade}});
   if(r && r.id){
     if(titleEl) titleEl.value = '';
+    practiceSelectedBankId = String(r.id);   // 记住选择，重绘后仍是它
     await loadPracticeBanks();
-    // 自动选中刚建的卷，省一步
-    const sel = document.getElementById('practiceBankSel');
-    if(sel) sel.value = String(r.id);
+    await loadPracticeLessons(practiceSelectedBankId);
     render();
     toast('已创建并选中：' + title);
   } else {
@@ -1072,11 +1087,11 @@ async function createPracticeBook(){
 }
 
 async function startPracticeImport(){
-  const sel = document.getElementById('practiceBankSel');
+  const bankId = practiceSelectedBankId;
   const file = document.getElementById('practicePdf');
   const a1 = (document.getElementById('ansStart')?.value || '').trim();
   const a2 = (document.getElementById('ansEnd')?.value || '').trim();
-  if(!sel || !sel.value) return toast('请先选择练习册卷');
+  if(!bankId) return toast('请先选择练习册卷');
   if(!file || !file.files.length) return toast('请选择 PDF');
   if(!a1 || !a2) return toast('请填写答案页起止页');
 
@@ -1085,7 +1100,7 @@ async function startPracticeImport(){
   fd.append('answer_start_page', a1);
   fd.append('answer_end_page', a2);
   toast('正在上传并开始 OCR，请稍候…');
-  const r = await apiForm(`/api/banks/${sel.value}/import-practice-pdf`, fd);
+  const r = await apiForm(`/api/banks/${bankId}/import-practice-pdf`, fd);
   if(r && r.job_id){ pollPracticeJob(r.job_id); }
   else toast('导入失败：' + (r && (r.detail || r.error) ? (r.detail || r.error) : '未知错误'));
 }
@@ -1116,8 +1131,7 @@ async function retryPracticeJob(jobId){
 }
 
 async function loadPracticeMissing(){
-  const sel = document.getElementById('practiceBankSel');
-  const bankId = sel && sel.value;
+  const bankId = practiceSelectedBankId;
   if(!bankId){ practiceMissing = []; return; }
   const r = await api(`/api/practice-import/missing-answers?bank_id=${bankId}`);
   practiceMissing = (r && r.items) || [];
@@ -1142,8 +1156,7 @@ async function loadPracticeLessons(bankId){
 }
 
 async function savePracticeLesson(lessonNo){
-  const sel = document.getElementById('practiceBankSel');
-  const bankId = sel && sel.value;
+  const bankId = practiceSelectedBankId;
   if(!bankId || !lessonNo) return;
   const r = await api('/api/practice/preferences', {method:'PUT',
     body:{user_id: uid, current_document: Number(bankId), current_lesson: Number(lessonNo)}});
