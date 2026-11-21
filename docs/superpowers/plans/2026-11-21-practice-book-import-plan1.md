@@ -424,6 +424,17 @@ def test_parse_lesson_page_extracts_header_and_items():
     assert out["lesson_title"] == "小数乘小数"
     assert [i["question_no"] for i in out["items"]] == ["1", "2", "3", "4"]
     assert "8.9" in out["items"][0]["question"]
+    # 小数不能被误判成题号
+    assert "8.9" in out["items"][0]["question"]
+    assert "0.76" in out["items"][2]["question"]
+
+
+def test_parse_lesson_page_does_not_split_on_decimals():
+    from app.services.practice_import import parse_lesson_page
+
+    out = parse_lesson_page("第1课时 口算\n1. 计算 3.25 + 1.8 =")
+    assert len(out["items"]) == 1
+    assert "3.25" in out["items"][0]["question"]
 
 
 def test_parse_lesson_page_handles_fullwidth_and_no_title():
@@ -491,8 +502,13 @@ import re
 
 # 「第3课时 小数乘小数」/「第 12 课时 练习课」
 _LESSON_RE = re.compile(r"第\s*(\d+)\s*课时\s*([^\n]*)")
-# 「1. 题干」/「(1) 题干」/「（1）题干」
-_ITEM_RE = re.compile(r"(?:^|\s)(?:\((\d+)\)|（(\d+)）|(\d+)[.、．])\s*")
+
+# 题号只在「行首」或「行内空白 + 数字紧跟 . / 、/ (n)」时才算，
+# 且数字后面不能跟数字（否则 8.9 / 3.32 这类小数会被当成题号）。
+_ITEM_RE = re.compile(
+    r"(?:(?<=^)|(?<=[\s\u3000]))"          # 行首或空白之后
+    r"(?:\((\d{1,2})\)|（(\d{1,2})）|(\d{1,2})[.、．](?!\d))"
+)
 
 
 def parse_lesson_page(text: str) -> dict:
@@ -895,12 +911,11 @@ def test_run_import_job_all_ok_marks_done(db, monkeypatch):
 
     pi.run_import_job(job.id)
 
-    fresh = PracticeImportJob.__table__  # noqa: F841  确保类可用
     row = db.get(PracticeImportJob, job.id)
     db.refresh(row)
     assert row.status == "done"
-    assert row.answered_count == 1 if hasattr(row, "answered_count") else True
     assert row.published_count == 1
+    assert row.question_count == 1
 ```
 
 > 第二个用例里 `answered_count` 不存在时用 `hasattr` 兜底，避免误写。
@@ -936,11 +951,11 @@ _OCR_INSTRUCTION = (
 )
 
 
-def _parse_range(db, pdf_path: str, start: int, end: int) -> tuple[list[dict], list[int]]:
-    """OCR 并解析一段页码（1-based，含两端）。返回 (items, 失败页列表)。"""
+def _parse_pages(db, pdf_path: str, pages: list[int]) -> tuple[list[dict], list[int]]:
+    """OCR 并解析指定页码（1-based）。返回 (items, 失败页列表)。"""
     items: list[dict] = []
     failed: list[int] = []
-    for pno in range(start, end + 1):
+    for pno in pages:
         text = _ocr_text(pdf_path, pno - 1, db)
         parsed = parse_lesson_page(text)
         if not parsed["items"]:
@@ -956,8 +971,11 @@ def _parse_range(db, pdf_path: str, start: int, end: int) -> tuple[list[dict], l
     return items, failed
 
 
-def run_import_job(job_id: int) -> None:
-    """后台执行导入。每页/每阶段新开 Session，避免请求级 session 失效。"""
+def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
+    """后台执行导入。`retry_pages` 非空时只重跑这些页。
+
+    每阶段新开 Session，避免请求级 session 失效（BackgroundTasks 里请求已结束）。
+    """
     from ..database import SessionLocal
     from ..models import PdfDocument, PracticeImportJob, QuestionBank
     from ..routers.bank import _persist_drafts
@@ -978,17 +996,25 @@ def run_import_job(job_id: int) -> None:
         job.status = "ocr"
         db.commit()
 
+        q_start = job.question_start_page or 1
         q_end = job.question_end_page or (job.answer_start_page or 1) - 1
-        q_items, q_failed = _parse_range(db, doc.storage_path, job.question_start_page, q_end)
+        a_start = job.answer_start_page or 1
+        a_end = job.answer_end_page or a_start
 
-        a_items, a_failed = _parse_range(
-            db, doc.storage_path,
-            job.answer_start_page or 1, job.answer_end_page or (job.answer_start_page or 1))
+        if retry_pages:
+            # 只重跑指定页（已知每页属于题面还是答案）
+            q_pages = [p for p in retry_pages if q_start <= p <= q_end]
+            a_pages = [p for p in retry_pages if a_start <= p <= a_end]
+            q_items, q_failed = _parse_pages(db, doc.storage_path, q_pages)
+            a_items, a_failed = _parse_pages(db, doc.storage_path, a_pages)
+        else:
+            q_items, q_failed = _parse_pages(
+                db, doc.storage_path, list(range(q_start, q_end + 1)))
+            a_items, a_failed = _parse_pages(
+                db, doc.storage_path, list(range(a_start, a_end + 1)))
 
         job.status = "aligning"
         job.question_count = len(q_items)
-        job.done_pages = (q_end - job.question_start_page + 1) + \
-                         ((job.answer_end_page or 0) - (job.answer_start_page or 0) + 1)
         db.commit()
 
         aligned, missing = align_answers(q_items, a_items)
@@ -1003,11 +1029,11 @@ def run_import_job(job_id: int) -> None:
         published = publish_aligned(db, bank.id)
         job.published_count = published
 
-        failed = q_failed + a_failed
+        failed = sorted(q_failed + a_failed)
         job.failed_pages = json.dumps(failed)
+        job.done_pages = max(0, (a_end - q_start + 1) - len(failed))
         job.status = "failed" if failed else "done"
-        if failed:
-            job.error = f"{len(failed)} 页识别失败，可重试"
+        job.error = f"{len(failed)} 页识别失败，可重试" if failed else ""
         db.commit()
     except Exception as exc:  # noqa: BLE001
         try:
@@ -1101,16 +1127,15 @@ def test_import_rejects_without_vision_model(setup_db, monkeypatch):
     from app.database import SessionLocal
     from conftest import parent_child
     from app.models import QuestionBank
-    from app.services import model_config
+    from app.routers import practice_import as pi
 
     class FakeResolved:
         provider = "fake"
         api_key = ""
         base_url = ""
 
-    monkeypatch.setattr(model_config, "resolve", lambda *a, **k: FakeResolved())
-    monkeypatch.setattr("app.routers.practice_import.resolve",
-                        lambda *a, **k: FakeResolved())
+    # 直接替换 router 模块里解析出来的 _vision_ready，避开 resolve 的导入路径问题
+    monkeypatch.setattr(pi, "_vision_ready", lambda db: False)
 
     s = SessionLocal()
     p, _c, parent_h, _ch = parent_child(s, "pib3")
@@ -1377,16 +1402,24 @@ def get_job(job_id: int,
 def retry_job(job_id: int, background: BackgroundTasks,
               user: User = Depends(require_learning_user),
               db: Session = Depends(get_db)):
+    """只重跑上次失败的页（成功页不重跑，省 OCR 费用）。"""
     job = db.get(PracticeImportJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail={"error": "job_not_found"})
     ensure_user_access(user, job.user_id, db)
+
+    try:
+        pages = json.loads(job.failed_pages or "[]")
+    except (ValueError, TypeError):
+        pages = []
+    if not pages:
+        return {"ok": False, "message": "没有失败页需要重试"}
+
     job.status = "pending"
     job.error = ""
-    job.failed_pages = "[]"
     db.commit()
-    background.add_task(run_import_job, job.id)
-    return {"ok": True}
+    background.add_task(run_import_job, job.id, list(pages))
+    return {"ok": True, "retry_pages": pages}
 
 
 @router.get("/api/practice-import/missing-answers")
@@ -1526,14 +1559,21 @@ def test_practice_doc_hidden_from_textbook_list(setup_db):
     s.commit()
     s.close()
 
-    client = _client_router()
-    # pdf 路由不在本 router，这里直接调函数验证过滤逻辑
-    from app.routers.pdf import _list_documents
-    s = SessionLocal()
-    names = [d.filename for d in _list_documents(s, user_id=None, include_practice=False)]
-    s.close()
+    # 走真实路由（家长身份）
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.pdf import router as pdf_router
+
+    app = FastAPI()
+    app.include_router(pdf_router)
+    r = TestClient(app).get("/api/pdf/documents", headers=parent_h)
+    names = [d["filename"] for d in r.json()]
     assert "教材.pdf" in names
     assert "练习册.pdf" not in names
+
+    # include_practice=true 时能看到
+    r2 = TestClient(app).get("/api/pdf/documents?include_practice=true", headers=parent_h)
+    assert "练习册.pdf" in [d["filename"] for d in r2.json()]
 
 
 def test_practice_bank_excluded_from_practice_list(setup_db):
@@ -1566,26 +1606,33 @@ cd backend && python -m pytest tests/test_practice_import.py -v -k "hidden or ex
 
 Expected: FAIL
 
-- [ ] **Step 3: 改 pdf 列表过滤**
+- [ ] **Step 3: 改 pdf 列表过滤（`list_documents` 已存在，直接改）**
 
-在 `backend/app/routers/pdf.py` 找到列出文档的地方（`GET /api/pdf/documents` 的处理函数），
-抽出可测函数并对 `practice` 过滤：
+`backend/app/routers/pdf.py:69` 的 `list_documents` 已存在，**不要新建函数**。
+给它加一个 `include_practice` 参数并在查询上过滤：
 
 ```python
-def _list_documents(db, *, user_id: int | None, include_practice: bool = False):
-    from ..models import PdfDocument
+@router.get("/documents")
+def list_documents(user_id: int | None = None,
+                   include_practice: bool = False,
+                   user: User = Depends(require_learning_user),
+                   db: Session = Depends(get_db)):
+    # ...原有 effective_user_id 解析不变...
 
     q = db.query(PdfDocument)
-    if user_id is not None:
-        q = q.filter(PdfDocument.user_id == user_id)
+    if effective_user_id is not None:
+        bound = db.query(UserDocument.document_id).filter_by(user_id=effective_user_id)
+        q = q.filter(PdfDocument.id.in_(bound))
     if not include_practice:
+        # 练习册不进教材列表（只在「练习册导入」子视图里出现）
         q = q.filter(PdfDocument.content_kind != "practice")
-    return q.order_by(PdfDocument.id.desc()).all()
+    docs = q.all()
 ```
 
-路由里改为调用它，并加 `include_practice: bool = Query(False)` 参数。
-
-> 若原函数的签名/结构不同，按实际调整；核心是加 `content_kind != "practice"` 过滤。
+> 注意 `PdfDocument` **没有 `user_id` 列**（已核实），归属靠 `UserDocument` 绑定表。
+> 因此不要写 `PdfDocument.user_id == ...`。`content_kind` 老数据可能为 NULL，
+> 用 `!= "practice"` 在 SQLite 下会排除 NULL 行 —— 若担心，写成
+> `or_(PdfDocument.content_kind.is_(None), PdfDocument.content_kind != "practice")`。
 
 - [ ] **Step 4: 改 `list_practice_banks`**
 
