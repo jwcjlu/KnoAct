@@ -5,7 +5,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, passages, xuekubao, drill, lesson_audio, knowledge_pool, answer_records, brain_games
+from .routers import auth, config_router, pdf, progress, notes, points, learning, goals, mistakes, knowledge, questions, tts_router, annotations, home, tasks, quiz, mastery, render, math, users, buckets, screen_time, family, admin_users, bank, passages, xuekubao, drill, lesson_audio, knowledge_pool, answer_records, brain_games, practice_import
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -72,6 +72,24 @@ def _ensure_db_tables() -> None:
             _migrate_practice_import()
         except Exception as exc:
             _log.warning("练习册导入迁移失败: %s", exc)
+        # 清理上次进程遗留的「进行中」导入任务，避免永久卡住
+        try:
+            from .models import PracticeImportJob
+
+            stuck = (
+                db.query(PracticeImportJob)
+                .filter(PracticeImportJob.status.in_(("ocr", "aligning", "rendering")))
+                .all()
+            )
+            for j in stuck:
+                j.status = "failed"
+                j.error = "服务重启，请重试"
+            if stuck:
+                db.commit()
+                _log.warning("清理了 %d 个卡住的练习册导入任务", len(stuck))
+        except Exception as exc:
+            db.rollback()
+            _log.warning("清理卡住的导入任务失败: %s", exc)
     finally:
         db.close()
 
@@ -125,6 +143,7 @@ app.include_router(lesson_audio.router)
 app.include_router(knowledge_pool.router)
 app.include_router(answer_records.router)
 app.include_router(brain_games.router)
+app.include_router(practice_import.router)
 
 _warn_insecure_auth_env()
 

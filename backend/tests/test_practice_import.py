@@ -339,3 +339,145 @@ def test_run_import_job_all_ok_marks_done(db, monkeypatch):
 
 
 import json  # noqa: E402
+
+
+def _client_router():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.practice_import import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_create_practice_book_bank(setup_db):
+    from app.database import SessionLocal
+    from conftest import parent_child
+
+    s = SessionLocal()
+    _p, _c, parent_h, _ch = parent_child(s, "pib")
+    s.close()
+    client = _client_router()
+    r = client.post("/api/banks/practice-book", headers=parent_h,
+                    json={"title": "RJ五上", "subject": "数学", "grade": 5})
+    assert r.status_code == 200
+    assert r.json()["id"] > 0
+
+
+def test_import_rejects_without_answer_pages(setup_db):
+    from app.database import SessionLocal
+    from conftest import parent_child
+    from app.models import QuestionBank
+
+    s = SessionLocal()
+    p, _c, parent_h, _ch = parent_child(s, "pib2")
+    bank = QuestionBank(user_id=p.id, title="卷", subject="数学", source="practice_pdf")
+    s.add(bank)
+    s.commit()
+    bank_id = bank.id
+    s.close()
+
+    client = _client_router()
+    r = client.post(f"/api/banks/{bank_id}/import-practice-pdf", headers=parent_h,
+                    files={"file": ("a.pdf", b"%PDF-1.4 fake", "application/pdf")},
+                    data={"answer_start_page": "", "answer_end_page": ""})
+    assert r.status_code == 400
+    assert "答案页" in r.json()["detail"]
+
+
+def test_import_rejects_without_vision_model(setup_db, monkeypatch):
+    from app.database import SessionLocal
+    from conftest import parent_child
+    from app.models import QuestionBank
+    from app.routers import practice_import as pi
+
+    monkeypatch.setattr(pi, "_vision_ready", lambda db: False)
+
+    s = SessionLocal()
+    p, _c, parent_h, _ch = parent_child(s, "pib3")
+    bank = QuestionBank(user_id=p.id, title="卷", subject="数学", source="practice_pdf")
+    s.add(bank)
+    s.commit()
+    bank_id = bank.id
+    s.close()
+
+    client = _client_router()
+    r = client.post(f"/api/banks/{bank_id}/import-practice-pdf", headers=parent_h,
+                    files={"file": ("a.pdf", b"%PDF-1.4 fake", "application/pdf")},
+                    data={"answer_start_page": 100, "answer_end_page": 107})
+    assert r.status_code == 400
+    assert "视觉模型" in r.json()["detail"]
+
+
+def test_missing_answers_lists_pending_without_answer(setup_db):
+    from app.database import SessionLocal
+    from conftest import parent_child
+    from app.models import Question, QuestionBank
+
+    s = SessionLocal()
+    p, _c, parent_h, _ch = parent_child(s, "pib4")
+    bank = QuestionBank(user_id=p.id, title="卷", subject="数学", source="practice_pdf")
+    s.add(bank)
+    s.flush()
+    s.add(Question(user_id=p.id, bank_id=bank.id, qtype="oral", question="a",
+                   answer="", status="pending", lesson_no=3, question_no="1"))
+    s.commit()
+    bank_id = bank.id
+    s.close()
+
+    client = _client_router()
+    r = client.get(f"/api/practice-import/missing-answers?bank_id={bank_id}",
+                   headers=parent_h)
+    assert r.status_code == 200
+    assert len(r.json()["items"]) == 1
+    assert r.json()["items"][0]["question_no"] == "1"
+
+
+def test_patch_question_publishes_after_answer(setup_db):
+    from app.database import SessionLocal
+    from conftest import parent_child
+    from app.models import Question, QuestionBank
+
+    s = SessionLocal()
+    p, _c, parent_h, _ch = parent_child(s, "pib5")
+    bank = QuestionBank(user_id=p.id, title="卷", subject="数学", source="practice_pdf")
+    s.add(bank)
+    s.flush()
+    q = Question(user_id=p.id, bank_id=bank.id, qtype="oral", question="a",
+                 answer="", status="pending")
+    s.add(q)
+    s.commit()
+    qid = q.id
+    s.close()
+
+    client = _client_router()
+    r = client.patch(f"/api/practice-import/questions/{qid}", headers=parent_h,
+                     json={"answer": "13.4"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "published"
+
+
+def test_lessons_endpoint_counts_published(setup_db):
+    from app.database import SessionLocal
+    from conftest import parent_child
+    from app.models import Question, QuestionBank
+
+    s = SessionLocal()
+    p, _c, parent_h, _ch = parent_child(s, "pib6")
+    bank = QuestionBank(user_id=p.id, title="卷", subject="数学", source="practice_pdf")
+    s.add(bank)
+    s.flush()
+    s.add(Question(user_id=p.id, bank_id=bank.id, qtype="oral", question="a",
+                   answer="1", status="published", lesson_no=3, lesson_title="小数乘小数"))
+    s.commit()
+    bank_id = bank.id
+    s.close()
+
+    client = _client_router()
+    r = client.get(f"/api/practice-import/lessons?bank_id={bank_id}", headers=parent_h)
+    assert r.status_code == 200
+    lessons = r.json()["lessons"]
+    assert lessons[0]["lesson_no"] == 3
+    assert lessons[0]["title"] == "小数乘小数"
+    assert lessons[0]["count"] == 1
