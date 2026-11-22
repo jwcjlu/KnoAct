@@ -255,13 +255,56 @@ class _QuestionCard extends StatelessWidget {
           ],
         );
       }
-    } else if (question.qtypeCategory == 'blank') {
-      input = TextField(
-        key: ValueKey('bank-blank-${question.id}'),
-        decoration: const InputDecoration(hintText: '填写答案…', border: OutlineInputBorder(), isDense: true),
-        onChanged: onBlank == null ? null : (v) => onBlank!(0, v),
-        enabled: onBlank != null,
+    } else if (question.answerKind == 'symbol') {
+      const choices = ['>', '<', '='];
+      final picked = blankValues.isNotEmpty ? blankValues[0] : '';
+      input = Row(
+        children: [
+          for (final s in choices)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: ChoiceChip(
+                key: ValueKey('bank-symbol-${question.id}-$s'),
+                label: Text(s, style: const TextStyle(fontSize: 18)),
+                selected: picked == s,
+                onSelected: onBlank == null
+                    ? null
+                    : (on) {
+                        if (on) onBlank!(0, s);
+                      },
+              ),
+            ),
+        ],
       );
+    } else if (question.qtypeCategory == 'blank') {
+      final count = question.blankCount;
+      if (count <= 1) {
+        input = TextField(
+          key: ValueKey('bank-blank-${question.id}'),
+          decoration: const InputDecoration(hintText: '填写答案…', border: OutlineInputBorder(), isDense: true),
+          onChanged: onBlank == null ? null : (v) => onBlank!(0, v),
+          enabled: onBlank != null,
+        );
+      } else {
+        input = Column(
+          children: [
+            for (var i = 0; i < count; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: TextField(
+                  key: ValueKey('bank-blank-${question.id}-$i'),
+                  decoration: InputDecoration(
+                    hintText: '第 ${i + 1} 空',
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: onBlank == null ? null : (v) => onBlank!(i, v),
+                  enabled: onBlank != null,
+                ),
+              ),
+          ],
+        );
+      }
     } else {
       input = TextField(
         key: ValueKey('bank-text-${question.id}'),

@@ -129,8 +129,12 @@ class BankExerciseController extends Notifier<BankExerciseState> {
       return {'question_id': q.id, 'selected_index': state.selectedSingle[q.id] ?? 0};
     }
     if (q.qtypeCategory == 'blank') {
-      final b = state.blanks[q.id] ?? [''];
-      return {'question_id': q.id, 'blanks': b};
+      final n = q.blankCount < 1 ? 1 : q.blankCount;
+      final cur = List<String>.from(state.blanks[q.id] ?? const <String>[]);
+      while (cur.length < n) {
+        cur.add('');
+      }
+      return {'question_id': q.id, 'blanks': cur.take(n).toList()};
     }
     return {'question_id': q.id, 'text': state.texts[q.id] ?? ''};
   }
