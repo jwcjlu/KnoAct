@@ -448,6 +448,8 @@ db.query(PracticeQuestionGroup).filter(
 - **答案页可选**：`answer_start_page=None` 时仍能跑满 `total_pages`
 - **回归**：找规律题 = 1 个题组 + 4 个待做小题 + 3 个示例
 - **回归**：脱式题 `need_process=true`，只填数值不算完成
+- **泛化**：`ocr_import` 产出的 draft 带 `work_mode`，判分走 `grade_by_answer_kind`
+- **泛化**：`work_modes` 注册表不依赖任何具体入口（只依赖 `question_types`）
 
 Flutter
 - 题组展示：题干 + 示例 + 待做项
@@ -478,6 +480,8 @@ Flutter
 | `backend/app/services/practice_page_ai.py` | 新增：整页分析（`provider.generate(json_mode=True)`，不依赖 `ocr_image`） |
 | `backend/app/services/practice_import.py` | 重写：页面分析 + 跨页合并 + **先建题组再挂小题**；`retry_pages` 同步删旧题组；**删除** `parse_lesson_page`/`_split_row`/`parse_answer_page`/`align_answers`/`align_by_order` 及其测试 |
 | `backend/app/services/practice_grade.py` | 新增：按 `answer_kind` 分派判分 |
+| `backend/app/services/math_grade.py` | 新增：**所有数学入口共用的判分门面**（`grade_by_answer_kind`） |
+| `backend/app/services/ocr_import.py` | 对齐：`_STRUCTURE_SYSTEM` 增 `work_mode`/`need_process`/`is_example`；判分改走 `math_grade` |
 | `backend/app/services/practice_solve.py` | **保留函数名 `solve_math_items`**，返回类型改为 `dict[int, dict]`；同步改 `tests/test_practice_import.py` 的 monkeypatch |
 | `backend/app/services/practice_image.py` | **删除** `detect_image_questions()` 与 `_IMAGE_HINT_RE`；保留 `crop_question_image()` |
 | `backend/app/routers/practice_import.py` | 题组浏览；待补清单过滤 `is_example`；页类型查询与修改；重新导入清理入口 |
@@ -509,6 +513,51 @@ q_end = (job.question_end_page
 1. `services/practice_import.py:run_import_job()` 计算 `q_end`
 2. `routers/practice_import.py:_job_payload()` 计算 `question_pages`
 3. `main.py` 启动续跑时计算 `failed_pages` 范围
+
+### 九、与其他数学入口的泛化关系
+
+项目里现在有 4 条独立的数学题生成/解析路径，互不共享：
+
+| 入口 | 用途 | 本期处理 |
+| --- | --- | --- |
+| `services/practice_import.py` | 练习册 PDF 导入 | **重写**（题组 + 注册表） |
+| `services/ocr_import.py` `structure_questions_from_text` | 卷子拍照导入题库 | **对齐**：提示词改为输出 `work_mode` |
+| `services/math_gen.py` `generate_math_questions_split` | 每日任务现场出题 | 不动（语义是「出题」不是「解析」） |
+| `question_gen.py` / `knowledge_quiz.py` | 语文/英语题 | 不动 |
+
+**抽取的公共层**（本期做）
+
+1. **`core/work_modes.py`** — 题型注册表（`WorkModeSpec`），所有数学入口共用
+2. **`services/math_grade.py`** — 统一判分入口，替代散落的判分调用
+
+```python
+# services/math_grade.py
+def grade_by_answer_kind(db, question, student_answer="", photo_bytes=None) -> dict:
+    """按 answer_kind 分派。所有数学入口都走它。
+
+    - number / equation        → grade_math_answer()
+    - numeric_list             → 逐空比较
+    - symbol / choice          → 精确匹配（归一化全半角）
+    - text                     → grade_subjective()
+    - photo（或 need_process） → grade_math_work_photo()
+    """
+```
+
+**`ocr_import` 对齐方式**（收益最大的改动：卷子拍照导入立刻获得题型识别）
+
+- `_STRUCTURE_SYSTEM` 增加字段：`work_mode`（取自注册表）、`need_process`、`is_example`
+- 产出仍是 `QuestionDraft`，但带上 `work_mode`；入库后判分自动走 `grade_by_answer_kind`
+- 不引入题组概念（拍照卷子通常一题一组，暂不需要）
+
+**不做泛化的部分及理由**
+
+| 入口 | 不做的理由 |
+| --- | --- |
+| `math_gen` 现场出题 | 语义是「按教材内容出新题」，不是「解析已有题目」；提示词完全不同 |
+| `question_gen` / `knowledge_quiz` | 语文/英语题，题型体系不同（阅读、cloze 等） |
+
+**未来扩展路径**：若以后要让现场出题也带 `work_mode`，只需在其返回的 draft 上加字段，
+判分自动复用 `grade_by_answer_kind`，无需改判分代码。
 
 ## 后续可扩展（不在本次范围）
 
