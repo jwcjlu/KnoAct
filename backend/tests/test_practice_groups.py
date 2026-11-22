@@ -746,3 +746,67 @@ def test_delete_document_also_removes_import_jobs(setup_db, db):
 
     db.expire_all()
     assert db.query(PracticeImportJob).filter_by(document_id=doc_id).count() == 0
+
+
+def test_pick_practice_questions_excludes_examples(setup_db, db):
+    """抽题只抽待做小题，示例行不能被抽到。"""
+    from datetime import date
+
+    from app.models import Question, QuestionBank
+    from app.services.task_gen import _pick_practice_questions
+    from conftest import make_account
+
+    child = make_account(db, "tk_c", role="child")
+    bank = QuestionBank(user_id=child.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    for i in range(3):
+        db.add(Question(bank_id=bank.id, user_id=child.id,
+                        qtype="fill_blank", qtype_category="blank",
+                        question=f"示例{i}", answer="1", status="published",
+                        lesson_no=1, is_example=True, work_mode="pattern"))
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做", answer="2",
+                    status="published", lesson_no=1, is_example=False,
+                    work_mode="pattern"))
+    db.commit()
+
+    picked, lesson_no, _title = _pick_practice_questions(
+        db, bank, child.id, date(2026, 11, 22), 5)
+    assert [q.question for q in picked] == ["待做"]
+    assert lesson_no == 1
+
+
+def test_group_context_includes_examples(setup_db, db):
+    """抽中的题要能带出所属题组题干与示例行。"""
+    from app.models import Question, QuestionBank
+    from app.services.task_gen import _group_context
+    from conftest import make_account
+
+    child = make_account(db, "tk_c2", role="child")
+    bank = QuestionBank(user_id=child.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                              stem="不计算，运用规律直接写出得数",
+                              instruction="", work_mode="pattern",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    ex = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                  qtype_category="blank", question="示例1", answer="1.2",
+                  status="published", group_id=g.id, seq_in_group=1,
+                  is_example=True, work_mode="pattern")
+    todo = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做", answer="2",
+                    status="published", group_id=g.id, seq_in_group=2,
+                    is_example=False, work_mode="pattern")
+    db.add_all([ex, todo])
+    db.commit()
+
+    ctx = _group_context(db, [todo.id])
+    assert len(ctx) == 1
+    assert ctx[0]["stem"] == "不计算，运用规律直接写出得数"
+    assert ctx[0]["examples"][0]["question"] == "示例1"

@@ -409,6 +409,7 @@ def _gen_bank_practice_tasks(db: Session, user_id: int, day: date):
                 "question_ids": [q.id for q in picked],
                 "lesson_no": lesson_no,
                 "lesson_title": lesson_title,
+                "groups": _group_context(db, [q.id for q in picked]),
             }, ensure_ascii=False),
             points=15,
             content_status="published",
@@ -427,6 +428,7 @@ def _pick_practice_questions(db: Session, bank, user_id: int, day: date, n_pick:
     base = (
         db.query(Question)
         .filter_by(bank_id=bank.id, status="published")
+        .filter(Question.is_example.is_(False))   # 示例行不是待做题
         .order_by(Question.lesson_no, Question.id)
     )
     all_q = base.all()
@@ -471,6 +473,40 @@ def _pick_practice_questions(db: Session, bank, user_id: int, day: date, n_pick:
     offset = day.toordinal() % len(pool) if pool else 0
     picked = [pool[(offset + i) % len(pool)] for i in range(min(n_pick, len(pool)))] if pool else []
     return picked, no, title
+
+
+def _group_context(db: Session, question_ids: list[int]) -> list[dict]:
+    """给抽中的小题带上所属题组题干与示例行，便于孩子理解引导语。"""
+    from ..models import PracticeQuestionGroup, Question
+
+    if not question_ids:
+        return []
+    qs = db.query(Question).filter(Question.id.in_(question_ids)).all()
+    gids = {q.group_id for q in qs if q.group_id}
+    if not gids:
+        return []
+    groups = {g.id: g for g in db.query(PracticeQuestionGroup)
+              .filter(PracticeQuestionGroup.id.in_(gids)).all()}
+    examples: dict[int, list[dict]] = {}
+    for ex in (db.query(Question)
+               .filter(Question.group_id.in_(gids),
+                       Question.is_example.is_(True))
+               .order_by(Question.seq_in_group).all()):
+        examples.setdefault(ex.group_id, []).append(
+            {"question": ex.question, "answer": ex.answer})
+    out = []
+    for gid in sorted(gids):
+        g = groups.get(gid)
+        if g is None:
+            continue
+        out.append({
+            "group_id": g.id,
+            "stem": g.stem,
+            "instruction": g.instruction,
+            "work_mode": g.work_mode,
+            "examples": examples.get(gid, []),
+        })
+    return out
 
 
 def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = False):
