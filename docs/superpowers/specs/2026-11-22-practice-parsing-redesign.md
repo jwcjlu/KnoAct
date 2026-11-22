@@ -451,6 +451,10 @@ db.query(PracticeQuestionGroup).filter(
 - **泛化**：`ocr_import` 产出的 draft 带 `work_mode`，判分走 `grade_by_answer_kind`
 - **泛化**：`work_modes` / `subjects` 注册表不依赖具体入口，只依赖 `question_types`
 - **学科**：上传 `语文`/`英语` 练习册时返回 400「该学科解析器尚未实现」（不静默乱导）
+- **格式**：解析出的 `question` 只含白名单标记（`____` / `○` / `□` / 换行缩进 / `![](url)`），
+  不含 `$...$`、不含 HTML 标签
+- **格式**：竖式题的 `question` 保留 `\n` 与行首空格，前端 `white-space: pre-wrap` 能对齐
+- **格式**：比较大小题的 `○` 原样保留，未被 AI 替换成具体符号
 
 Flutter
 - 题组展示：题干 + 示例 + 待做项
@@ -494,9 +498,11 @@ Flutter
 | `backend/app/main.py` | 启动跑新迁移（仅 schema）；续跑范围回退到 `total_pages` |
 | `parent-web/app.js` | 题组形式展示；页类型可修正；重新导入二次确认；答案页改为可选 |
 | `student-app/lib/features/bank_exercise/data/bank_models.dart` | 题目模型加 `groupStem`/`examples`/`workMode`/`inputUi`/`answerKind` |
+| `student-app/lib/features/bank_exercise/question_html.dart` | 新增 `____`→输入框、`○`→符号按钮、竖式 `white-space` 保留 |
 | `student-app/lib/features/bank_exercise/ui/bank_exercise_page.dart` | 题组展示 + 按 `inputUi` 渲染 |
 | `student-app/lib/features/practice/`（新增） | 每日一练：题组式、多空、拍照（`photo`/`numeric_list` 只在这里做） |
-| `backend/tests/test_practice_groups.py` | 新增 |
+| `backend/app/services/practice_page_ai.py` | 提示词加「题目格式约束」（空位 `____`、竖式保留缩进、禁用 `$...$`） |
+| `backend/tests/test_practice_groups.py` | 新增，含格式标记测试 |
 
 **关于答案页范围**：新流程用 AI 求答案，`answer_start_page`/`answer_end_page` 不再必需，
 降级为**可选**（家长若提供，则用答案页做交叉校验；不提供则纯 AI 求答案）。
@@ -590,6 +596,46 @@ def grade_by_answer_kind(db, question, student_answer="", photo_bytes=None) -> d
 2. 写 `parsers/text_page.py`（提示词不同，输出结构相同）
 3. 写 `language_grade.py`（拼音/书写判分规则与数值不同）
 4. **数据模型、导入编排、跨页合并、发布闸门、待补清单零改动**
+
+### 十、题目格式与展示（解析即考虑呈现）
+
+**原则：解析输出的 `content` 必须是「前端能直接渲染」的有限标记文本，不是纯文本。**
+
+现有前端已支持有限标记（`ocr_import._STRUCTURE_SYSTEM` 定义）：
+`# ## ** * <u> /ipa/ ____`｜学生端 `question_html.dart` 另有分块解析（题干/选项/子题）。
+
+数学需要补充的标记（本期实现）：
+
+| 场景 | 标记 | 前端渲染 |
+| --- | --- | --- |
+| 填空位 | `____`（已有） | 输入框 |
+| 竖式挖空位 | `□` | 输入框（小） |
+| 比较大小待填 | `○` | 三个按钮 `>` `<` `=` |
+| 分式 | `1/2`（行内斜杠） | 纯文本；六年级若需美观再引 LaTeX |
+| 竖式对齐 | 用 `\n` + 行首空格 | 等宽字体 + 保留空白 |
+| 表格 | `\|` 分隔单元格 | 渲染为表格 |
+| 图形 | `![](/uploads/practice_images/xxx.png)` | 现有 `img` 支持 |
+| 单位 | 原样（`km`、`m²`、`cm²`） | 正常文本 |
+
+**AI 输出约束（写进页面分析提示词）**
+
+1. `items[].text` 中的空位**统一用 `____`**（不用「（　）」「(  )」等）
+2. 竖式题保留换行与对齐空格，用 `\n` 分隔行、行首空格保持缩进
+3. 比较大小题把待填的 `○` 原样保留
+4. **严禁使用 `$...$` 数学公式语法**（前端不解析，会原样显示）
+5. 图形引用用 `![](路径)`，路径由后端裁图后回填
+
+**双端展示统一**
+
+| 端 | 渲染方式 |
+| --- | --- |
+| 学生端 Flutter | 复用 `question_html.dart` 的分块渲染；新增 `____`→输入框、`○`→符号按钮 |
+| 家长端 parent-web | 同一份标记，用 `white-space: pre-wrap` 保留竖式排版；`____` 显示为下划线 |
+
+**`content` 存哪里**：`Question.question`（现有 LongText 字段），保持与题库练习、语文/英语题一致，
+**不新增富文本字段**，避免前端出现两套渲染逻辑。
+
+**题组题干同样遵循该标记**：`PracticeQuestionGroup.stem` 也允许上述标记。
 
 ## 后续可扩展（不在本次范围）
 
