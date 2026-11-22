@@ -9,7 +9,7 @@ void main() {
       '<script>alert(1)</script>',
     );
     expect(tokens.map((t) => t.kind).toList(), ['text', 'br', 'img']);
-    expect(tokens[0].text, '在数线上标出908000');
+    expect(tokens[0].text, r'在数线上标出$908000$');
     expect(tokens[2].text, 'https://img.cuotixue.com/a.jpg');
     expect(tokens.any((t) => t.text.contains('alert')), isFalse);
   });
@@ -20,7 +20,7 @@ void main() {
     );
     expect(tokens.map((t) => t.kind).toList(), ['img', 'br', 'text']);
     expect(tokens[0].text, 'https://img.example.com/x.png');
-    expect(tokens[2].text, '三角形面积为1');
+    expect(tokens[2].text, r'三角形面积为$1$');
   });
 
   test('拒绝非 http(s) 图片地址', () {
