@@ -11,6 +11,7 @@
     (72 ÷ 18 + 8) × 28
 所以「1. / 2.」是大题号（= 题型分组），真正的题目是它们下面的每一行算式。
 """
+import copy
 import json
 import re
 
@@ -315,6 +316,74 @@ def _strip_answer(question: str) -> str:
     if re.match(r"^[-−+]?\d", right):
         return left.rstrip(" =＝") + " ="
     return q
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """编辑距离（滚动数组）。用于判断相邻页的两段题干是否同一道题。"""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(
+                prev[j] + 1,                 # 删除
+                cur[j - 1] + 1,              # 插入
+                prev[j - 1] + (ca != cb),    # 替换
+            ))
+        prev = cur
+    return prev[-1]
+
+
+def merge_cross_page_groups(groups: list[dict]) -> list[dict]:
+    """全书扫完后统一合并被页面切断的题组。
+
+    合并条件（全部满足才吞下一组）：
+    1. 当前组 `continues_next_page` 为真
+    2. 下一组 `page_start == 当前组 page_end + 1`（页码紧邻）
+    3. `work_mode` 相同
+    4. stem 相似（任一为空 → 视为相似；否则子串包含或编辑距离 ≤ 30%）
+
+    合并失败时把 `continues_next_page` 置 False 并标 `incomplete=True`，
+    否则下一轮还会误吞。
+
+    **不修改入参**（入口深拷贝），调用方可安全复用原始 groups。
+    """
+    groups = copy.deepcopy(groups or [])
+    merged: list[dict] = []
+    i = 0
+    while i < len(groups):
+        cur = groups[i]
+        merged.append(cur)
+        # 合并成功后不前进外层游标，继续尝试吞下一组（支持跨 3 页以上）
+        while cur.get("continues_next_page") and i + 1 < len(groups):
+            nxt = groups[i + 1]
+            if (nxt.get("page_start") != cur.get("page_end", 0) + 1
+                    or cur.get("work_mode") != nxt.get("work_mode")):
+                cur["incomplete"] = True
+                cur["continues_next_page"] = False
+                break
+            a = (cur.get("stem") or "").strip()
+            b = (nxt.get("stem") or "").strip()
+            same_stem = (
+                not a or not b
+                or a in b or b in a
+                or _levenshtein(a, b) <= max(len(a), len(b)) * 0.3
+            )
+            if not same_stem:
+                cur["incomplete"] = True
+                cur["continues_next_page"] = False
+                break
+            cur["items"].extend(nxt.get("items") or [])
+            cur["page_end"] = nxt.get("page_end", cur.get("page_end"))
+            cur["continues_next_page"] = bool(nxt.get("continues_next_page"))
+            i += 1   # 吞掉 nxt
+        i += 1
+    return merged
 
 
 def build_drafts(
