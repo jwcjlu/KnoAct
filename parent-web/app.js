@@ -596,8 +596,11 @@ function markMath(escaped){
   while ((m = re.exec(src)) !== null) {
     out += src.slice(last, m.index);
     const tex = m[1];
-    // data-tex 用 escapeAttr 处理双引号；内容已 escape，安全
-    out += `<span class="math-tex" data-tex="${escapeAttr(tex)}"></span>`;
+    // 注意：tex 已经过 escapeHtml，里面的 & < > 已是 &amp; &lt; &gt;，
+    // 不能再套 escapeAttr —— 那会把 &lt; 二次成 &amp;lt;，浏览器单次解码后
+    // KaTeX 收到字面量 "a&lt;b" 解析失败（红色源码）。只需补双引号。
+    const safeTex = tex.replace(/"/g, '&quot;');
+    out += `<span class="math-tex" data-tex="${safeTex}"></span>`;
     last = m.index + m[0].length;
   }
   out += src.slice(last);

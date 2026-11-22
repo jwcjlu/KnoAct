@@ -49,4 +49,16 @@ const out4 = markMath(escapeHtml('$a=1$ 和 $b=2$'));
 const n = (out4.match(/math-tex/g) || []).length;
 assert.strictEqual(n, 2, '应生成 2 个占位，实际 ' + n);
 
+// 6) 公式里的 < > & 不能被二次转义
+//    （入参已 escapeHtml，再套 escapeAttr 会让 &lt; 变成 &amp;lt;，
+//      浏览器单次解码后 KaTeX 收到字面量 "a&lt;b" 而解析失败）
+const out5 = markMath(escapeHtml('$a<b$ 和 $3.6>3.06$'));
+assert.ok(!out5.includes('&amp;lt;'), '不应出现 &amp;lt;（二次转义）: ' + out5);
+assert.ok(!out5.includes('&amp;gt;'), '不应出现 &amp;gt;（二次转义）: ' + out5);
+assert.ok(out5.includes('a&lt;b'), '应得到单次转义的 a&lt;b: ' + out5);
+
+// 7) 双引号仍需挡住，防止属性截断
+const out6 = markMath(escapeHtml('$"x"$'));
+assert.ok(!out6.includes('data-tex=""x""'), '双引号会截断属性: ' + out6);
+
 console.log('OK  parent-web/test_math.js  全部通过');
