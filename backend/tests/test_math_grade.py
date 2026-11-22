@@ -100,3 +100,38 @@ def test_unknown_answer_kind_falls_back_to_text():
     r = grade_by_answer_kind(None, answer_kind="no_such", answer="x",
                              student_answer="y")
     assert r["is_correct"] is None
+
+def test_choice_with_non_dict_answer_json_does_not_raise():
+    """answer_json 来自 DB，不保证是 dict。必须降级为待判，而不是抛异常。"""
+    for bad in ("", "not-a-dict", [], 0):
+        r = grade_by_answer_kind(None, answer_kind="choice", answer="B",
+                                 answer_json=bad, student_answer="0")
+        assert r["is_correct"] is None
+        assert r["ai_status"] == "pending"
+
+
+def test_photo_pending_review_is_not_a_wrong_answer(monkeypatch):
+    """AI 没把握（pending_review）不能判成错，否则会污染错题本。"""
+    import app.services.math_grade as mg
+
+    monkeypatch.setattr(mg, "grade_math_work_photo", lambda db, img, q, exp: {
+        "final_answer": "", "steps_plausible": False, "confidence": 0.4,
+        "reason": "看不清", "ai_status": "pending_review", "ai_correct": False,
+    })
+    r = mg.grade_by_answer_kind(None, answer_kind="photo", answer="13.4",
+                                question="8.9+4.5", photo_bytes=b"img")
+    assert r["is_correct"] is None
+    assert r["ai_status"] == "pending_review"
+
+
+def test_photo_failed_is_not_a_wrong_answer(monkeypatch):
+    import app.services.math_grade as mg
+
+    monkeypatch.setattr(mg, "grade_math_work_photo", lambda db, img, q, exp: {
+        "final_answer": "", "steps_plausible": False, "confidence": 0.0,
+        "reason": "无法识别图片", "ai_status": "failed", "ai_correct": False,
+    })
+    r = mg.grade_by_answer_kind(None, answer_kind="photo", answer="13.4",
+                                question="8.9+4.5", photo_bytes=b"img")
+    assert r["is_correct"] is None
+    assert r["ai_status"] == "failed"

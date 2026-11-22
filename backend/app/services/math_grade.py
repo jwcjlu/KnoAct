@@ -82,7 +82,8 @@ def grade_by_answer_kind(
         return _result(ok, final_answer=expected)
 
     if kind == "choice":
-        idx = (answer_json or {}).get("correct_index")
+        # answer_json 可能来自 DB，不保证是 dict（可能 None / 字符串 / 列表）
+        idx = answer_json.get("correct_index") if isinstance(answer_json, dict) else None
         if idx is None:
             return _pending("缺少正确选项")
         try:
