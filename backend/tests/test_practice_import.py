@@ -643,3 +643,21 @@ def test_align_by_order_marks_tail_as_missing():
     aligned, missing = align_by_order(qs, ans)
     assert len(aligned) == 1
     assert len(missing) == 2
+
+
+def test_strip_answer_keeps_equation():
+    """方程不能被截断：4x-5.2 = 5.2 的右边是方程的一部分。"""
+    from app.services.practice_import import _strip_answer
+
+    assert _strip_answer("4x − 5.2 = 5.2") == "4x − 5.2 = 5.2"
+    assert _strip_answer("2(x + 8) = 22") == "2(x + 8) = 22"
+    assert _strip_answer("4.8x + 2.6x = 3.7") == "4.8x + 2.6x = 3.7"
+    # 纯算式仍要剥离答案
+    assert _strip_answer("8.9＋4.5＝13.4") == "8.9＋4.5 ="
+
+
+def test_equation_section_kind():
+    from app.services.practice_import import QTYPE_OF_KIND, _section_kind
+
+    assert _section_kind("利用等式的性质求出等式中的未知数。") == "equation"
+    assert QTYPE_OF_KIND["equation"] == "fill_blank"

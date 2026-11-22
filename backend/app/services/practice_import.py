@@ -34,8 +34,10 @@ _NOISE_RE = re.compile(
 
 
 def _section_kind(hint: str) -> str:
-    """由大题提示语推断题型：口算 / 竖式 / 脱式 / 应用。"""
+    """由大题提示语推断题型：口算 / 竖式 / 脱式 / 解方程 / 应用。"""
     h = hint or ""
+    if "解方程" in h or "未知数" in h or "等式" in h:
+        return "equation"
     if "直接写出得数" in h or "口算" in h:
         return "oral"
     if "竖式" in h:
@@ -275,23 +277,43 @@ QTYPE_OF_KIND: dict[str, str] = {
     "step": "calculation",
     "app": "application",
     "other": "oral",
-    "image": "application",   # 图片题：需看图作答，按应用题走拍照判分
+    "equation": "fill_blank",  # 解方程：填 x 的值
+    "image": "application",    # 图片题：需看图作答，按应用题走拍照判分
 }
 
 
+def _has_variable(expr: str) -> bool:
+    """表达式里是否含未知数（x/y/z/a/b/n 等字母变量）。"""
+    return bool(re.search(r"(?<![A-Za-z])[a-zA-Z](?![A-Za-z])", expr or ""))
+
+
 def _strip_answer(question: str) -> str:
-    """去掉题干里的「= 答案」部分。
+    """去掉题干里的「= 结果」部分。
 
     视觉模型有时会自己把算式算出来写进题干（如 `8.9＋4.5＝13.4`），
     必须截断在等号，否则孩子会直接看到答案。
+
+    **但含未知数的方程不能截断**：`4x－5.2 = 5.2` 里的 5.2 是方程的一部分，
+    截掉就变成了无解的半道题。
     """
     q = (question or "").strip()
     if not q:
         return ""
-    # 只在等号后跟数字/小数时截断，避免误伤「1+1=？」这类
-    m = re.search(r"[=＝]\s*[-−]?\d", q)
-    if m:
-        return q[: m.start()].rstrip(" =＝") + " ="
+
+    m = re.search(r"[=＝]", q)
+    if not m:
+        return q
+
+    left = q[: m.start()]
+    right = q[m.end():].strip()
+
+    # 左边含未知数 → 是方程，右边是常数项，必须保留
+    if _has_variable(left):
+        return q
+
+    # 右边以数字开头 → 是算出来的结果，截掉
+    if re.match(r"^[-−+]?\d", right):
+        return left.rstrip(" =＝") + " ="
     return q
 
 
@@ -318,6 +340,7 @@ def build_drafts(
         d.source_document_id = document_id
         d.tags = {"source": "practice_pdf", "page": q.get("page") or 0}
         if q.get("image_path"):
+            d.image_path = q["image_path"]
             d.tags["image_path"] = q["image_path"]
 
         if qtype == "fill_blank":

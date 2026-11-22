@@ -8,13 +8,14 @@ import os
 import re
 
 _LAYOUT_INSTR = (
-    "这是一页小学练习册。判断其中是否有需要看图才能作答的题目"
-    "（几何图形、统计图、钟面、方格图等，题干里有「求涂色部分的面积」「看图」之类）。\n"
-    "如果有，给出这道（或这几道）题在页面上的垂直范围，用 0~1 比例表示（页顶=0，页底=1）。\n"
+    "这是一页小学练习册的图片。\n"
+    "请找出页面中「需要看图才能作答」的题目（几何图形、统计图、钟面、方格图等）的"
+    "**完整区域**，必须包含：题目文字、所有图形、所有尺寸标注。\n"
+    "范围要覆盖整道题，绝不能切掉图形或标注。\n"
+    "用 0~1 比例给出上下边界（页面最顶部=0.0，最底部=1.0）。\n"
     "只返回 JSON：\n"
-    '{"has_image_question": true, "start": 0.71, "end": 0.86, "title": "求涂色部分的面积", '
-    '"reason": "简短说明"}\n'
-    "没有这类题时返回 {\"has_image_question\": false}。"
+    '{"found": true, "start": 0.55, "end": 0.95, "title": "题目标题"}\n'
+    "如果这一页没有这类题，返回 {\"found\": false}。"
 )
 
 
@@ -29,7 +30,9 @@ def _parse_layout(raw: str) -> dict:
             data = json.loads(m.group(0))
         except (ValueError, TypeError):
             return {}
-    if not isinstance(data, dict) or not data.get("has_image_question"):
+    if not isinstance(data, dict):
+        return {}
+    if not (data.get("found") or data.get("has_image_question")):
         return {}
     try:
         start = float(data.get("start"))
