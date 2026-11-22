@@ -394,3 +394,55 @@ def test_run_import_job_marks_failed_page(setup_db, db, monkeypatch):
     assert job.failed_pages == "[1]"
     pages = db.query(PracticeImportPage).filter_by(document_id=doc_id).all()
     assert pages[0].status == "failed"
+
+
+def test_retry_deletes_cross_page_group_overlapping_target(setup_db, db, monkeypatch):
+    """跨页组（page 1-2）在第 2 页重跑时必须被删掉，否则会多出一份重复题组。"""
+    from app.models import PracticeImportJob, PracticeQuestionGroup, Question
+    from app.services import practice_import as pi
+
+    job_id, bank_id, _doc_id = _mk_job(db, "rj5", 2, "g.pdf")
+
+    # 先手工造一个已存在的跨页组（模拟上一次导入的产物）
+    from app.models import QuestionBank
+    bank = db.get(QuestionBank, bank_id)
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=bank.user_id,
+                              stem="旧题组", work_mode="oral",
+                              page_start=1, page_end=2)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=bank.user_id, qtype="oral",
+                    qtype_category="subjective", question="旧题", answer="1",
+                    group_id=g.id, status="published"))
+    db.commit()
+    old_gid = g.id
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    # 只重跑第 2 页：返回一个普通 oral 组
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "practice",
+                            "groups": [{"stem": "新题组", "instruction": "",
+                                        "lesson_no": None, "lesson_title": "",
+                                        "work_mode": "oral", "need_process": False,
+                                        "continues_next_page": False,
+                                        "items": [{"seq": 1, "y": 0.1,
+                                                   "text": "2+2=____",
+                                                   "answer_hint": "",
+                                                   "is_example": False}]}],
+                            "image_questions": []})
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {0: {"kind": "number", "answer": "4"}},
+    )
+
+    pi.run_import_job(job_id, retry_pages=[2])
+
+    db.expire_all()
+    # 旧的跨页组必须消失（它跨到了重跑的第 2 页）
+    # 注意：SQLite 会复用被删行的 id，所以不能按 id 断言，要按 stem 判断
+    survivors = db.query(PracticeQuestionGroup).filter_by(bank_id=bank_id).all()
+    assert [s.stem for s in survivors] == ["新题组"]
+    # 旧组的小题也必须一起删掉（group_id 无外键，不会级联）
+    assert db.query(Question).filter_by(question="旧题").count() == 0

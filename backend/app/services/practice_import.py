@@ -974,10 +974,14 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
                 pages = picked_pages
 
         # 重跑：先删这些页对应的题组与小题（group_id 无外键，必须显式删）
+        # 用「页码范围与重跑页有交集」而不是只比 page_start：跨页组可能从第 1 页
+        # 开始、跨到第 2 页；只重跑第 2 页时若不删它，重跑后会多出一份重复题组。
         if retry_pages:
+            lo, hi = min(pages), max(pages)
             old = (db.query(PracticeQuestionGroup)
                    .filter(PracticeQuestionGroup.bank_id == bank.id,
-                           PracticeQuestionGroup.page_start.in_(pages))
+                           PracticeQuestionGroup.page_start <= hi,
+                           PracticeQuestionGroup.page_end >= lo)
                    .all())
             gids = [g.id for g in old]
             if gids:
