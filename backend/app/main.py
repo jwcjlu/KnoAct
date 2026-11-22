@@ -73,6 +73,12 @@ def _ensure_db_tables() -> None:
             _migrate_practice_import()
         except Exception as exc:
             _log.warning("练习册导入迁移失败: %s", exc)
+        try:
+            from .migrate_practice_groups import migrate as _migrate_practice_groups
+
+            _migrate_practice_groups()
+        except Exception as exc:
+            _log.warning("练习册题组迁移失败: %s", exc)
         # 上次进程遗留的「进行中」导入任务：标 failed 并自动续跑
         try:
             from .models import PracticeImportJob

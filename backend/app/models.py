@@ -110,6 +110,7 @@ class Question(Base):
     __tablename__ = "questions"
     __table_args__ = (
         Index("ix_questions_bank_lesson", "bank_id", "lesson_no"),
+        Index("ix_questions_group", "group_id", "seq_in_group"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     bucket_id: Mapped[int] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
@@ -142,6 +143,11 @@ class Question(Base):
         ForeignKey("pdf_documents.id", ondelete="SET NULL"), nullable=True)
     # 图片题：题干主体在图里（几何/统计题），存裁好的题目图路径
     image_path: Mapped[str] = mapped_column(String(512), default="")
+    # 练习册题组：group_id 是裸 INTEGER（不加外键/CASCADE，见 PracticeQuestionGroup 注释）
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    seq_in_group: Mapped[int] = mapped_column(Integer, default=0)
+    is_example: Mapped[bool] = mapped_column(Boolean, default=False)  # 示例行，不入待做
+    work_mode: Mapped[str] = mapped_column(String(24), default="")
 
 
 class Note(Base):
@@ -667,6 +673,45 @@ class PracticeImportJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PracticeQuestionGroup(Base):
+    """练习册题组：一段题干 + 若干小题（跨页合并后的结果）。
+
+    `Question.group_id` 是裸 INTEGER（不声明外键/CASCADE）：存量库不补外键、
+    SQLite 默认不校验，统一在代码里显式删除，保证新旧库行为一致。
+    """
+    __tablename__ = "practice_question_groups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # 页面无「第N课时」标题时为 None（如综合练习页）
+    lesson_no: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    lesson_title: Mapped[str] = mapped_column(String(128), default="")
+    stem: Mapped[str] = mapped_column(LongText, default="")         # 题干（可含有限标记）
+    instruction: Mapped[str] = mapped_column(LongText, default="")  # 引导语/说明
+    work_mode: Mapped[str] = mapped_column(String(24), default="oral")
+    need_process: Mapped[bool] = mapped_column(Boolean, default=False)
+    page_start: Mapped[int] = mapped_column(Integer, default=0)
+    page_end: Mapped[int] = mapped_column(Integer, default=0)
+    source_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pdf_documents.id", ondelete="SET NULL"), nullable=True)
+    incomplete: Mapped[bool] = mapped_column(Boolean, default=False)  # 跨页合并不确定
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PracticeImportPage(Base):
+    """导入时按页记录分析结果，供排查与手动修正页类型。"""
+    __tablename__ = "practice_import_pages"
+    __table_args__ = (UniqueConstraint("document_id", "page_no"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("pdf_documents.id"), index=True)
+    page_no: Mapped[int] = mapped_column(Integer)
+    page_type: Mapped[str] = mapped_column(String(16), default="practice")
+    raw_text: Mapped[str] = mapped_column(LongText, default="")  # 该页 AI 原始输出
+    group_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="ok")  # ok | failed
 
 
 class PracticeAttempt(Base):
