@@ -451,15 +451,27 @@ db.query(PracticeQuestionGroup).filter(
 - **泛化**：`ocr_import` 产出的 draft 带 `work_mode`，判分走 `grade_by_answer_kind`
 - **泛化**：`work_modes` / `subjects` 注册表不依赖具体入口，只依赖 `question_types`
 - **学科**：上传 `语文`/`英语` 练习册时返回 400「该学科解析器尚未实现」（不静默乱导）
-- **格式**：解析出的 `question` 只含白名单标记（`____` / `○` / `□` / 换行缩进 / `![](url)`），
-  不含 `$...$`、不含 HTML 标签
+- **格式**：解析出的 `question` 只含白名单标记（`____` / `○` / `□` / `换行缩进` / `$...$` 基础 LaTeX / `![](url)`），
+  不含 HTML 标签
 - **格式**：竖式题的 `question` 保留 `\n` 与行首空格，前端 `white-space: pre-wrap` 能对齐
 - **格式**：比较大小题的 `○` 原样保留，未被 AI 替换成具体符号
+- **格式**：`$...$` 成对出现；中文/标点/单位不出现在 `$...$` 内部（防前端把中文渲染成红字回退）
 
 Flutter
 - 题组展示：题干 + 示例 + 待做项
 - 按 `input_ui` 渲染对应交互（数字键盘 / 符号选择 / 拍照）
 - `need_process` 的题必须拍照才能提交
+- `math_text` 单元测试：
+  - `$x^2$` → 1 个 `WidgetSpan`，其余文本正确
+  - `$` 不配对（`只有 $一个`）→ 全文按普通文本处理，不吞字符
+  - 短公式降级：`2.5`、`x` 不包 `$` 时就是普通 `TextSpan`（不走 `Math.tex`）
+  - 非法 LaTeX（`\frac{1}{2`）→ `onErrorFallback` 生效，不抛异常
+  - 空串 / 纯中文 → 只产生 `TextSpan`
+- `question_html` 回归：题干里的 `$...$` 不再被 `_stripDollars` 静默剥成 `x^2` 源码
+
+parent-web
+- `renderQuestionHtml` 对 `$...$` 输出 `<span class="math-tex">` 而不是剥掉 `$`
+- 无 KaTeX 脚本时不崩（降级为等宽纯文本）
 
 **容错**
 
@@ -471,6 +483,7 @@ Flutter
 | 跨页合并失败 | 保留两段，标「可能不完整」 |
 | 全书无任何题组 | job 标 failed，提示检查 PDF |
 | 求答案失败 | 该题 `pending`，进待补清单 |
+| 公式渲染失败 | `onErrorFallback` 显示红色原 LaTeX，题目仍可作答 |
 | 旧数据 | 重导前明确提示会清空 |
 
 ### 八、改动文件清单
@@ -498,10 +511,14 @@ Flutter
 | `backend/app/main.py` | 启动跑新迁移（仅 schema）；续跑范围回退到 `total_pages` |
 | `parent-web/app.js` | 题组形式展示；页类型可修正；重新导入二次确认；答案页改为可选 |
 | `student-app/lib/features/bank_exercise/data/bank_models.dart` | 题目模型加 `groupStem`/`examples`/`workMode`/`inputUi`/`answerKind` |
-| `student-app/lib/features/bank_exercise/question_html.dart` | 新增 `____`→输入框、`○`→符号按钮、竖式 `white-space` 保留 |
+| `student-app/lib/core/widgets/math_text.dart` | 新增：`$...$` 切分 + `Math.tex` 行内渲染 + 短公式降级纯文本 + `onErrorFallback` |
+| `student-app/lib/features/bank_exercise/question_html.dart` | 新增 `____`→输入框、`○`→符号按钮、竖式 `white-space` 保留；`_stripDollars` 改为交给 `math_text` 处理（不再剥掉 `$`） |
 | `student-app/lib/features/bank_exercise/ui/bank_exercise_page.dart` | 题组展示 + 按 `inputUi` 渲染 |
 | `student-app/lib/features/practice/`（新增） | 每日一练：题组式、多空、拍照（`photo`/`numeric_list` 只在这里做） |
-| `backend/app/services/practice_page_ai.py` | 提示词加「题目格式约束」（空位 `____`、竖式保留缩进、禁用 `$...$`） |
+| `student-app/pubspec.yaml` | 加 `flutter_math_fork: ^0.7.4`（KaTeX 字体随包，617 KB） |
+| `parent-web/index.html` | 引入 KaTeX（`katex.min.js` + `katex.min.css`；离线部署放 `vendor/`） |
+| `parent-web/app.js` 的 `renderQuestionHtml` | **不再剥掉 `$`**，改为输出 `<span class="math-tex">` 并调 `katex.render` |
+| `backend/app/services/practice_page_ai.py` | 提示词加「题目格式约束」（空位 `____`、竖式保留缩进、数学式用 `$...$` 基础 LaTeX、中文不进 `$`） |
 | `backend/tests/test_practice_groups.py` | 新增，含格式标记测试 |
 
 **关于答案页范围**：新流程用 AI 求答案，`answer_start_page`/`answer_end_page` 不再必需，
@@ -611,26 +628,74 @@ def grade_by_answer_kind(db, question, student_answer="", photo_bytes=None) -> d
 | 填空位 | `____`（已有） | 输入框 |
 | 竖式挖空位 | `□` | 输入框（小） |
 | 比较大小待填 | `○` | 三个按钮 `>` `<` `=` |
-| 分式 | `1/2`（行内斜杠） | 纯文本；六年级若需美观再引 LaTeX |
+| **数学式** | **`$...$`（LaTeX）** | **`Math.tex()` 行内渲染** |
 | 竖式对齐 | 用 `\n` + 行首空格 | 等宽字体 + 保留空白 |
 | 表格 | `\|` 分隔单元格 | 渲染为表格 |
 | 图形 | `![](/uploads/practice_images/xxx.png)` | 现有 `img` 支持 |
 | 单位 | 原样（`km`、`m²`、`cm²`） | 正常文本 |
+
+#### 10.1 LaTeX 渲染（实测通过）
+
+**决策依据**：已用 CanvasKit + release + `--no-web-resources-cdn`（与生产一致）实测
+`flutter_math_fork: ^0.7.4`，结论如下：
+
+| 验证项 | 结果 |
+| --- | --- |
+| 分式 / 根号 / 上标 / `\left(\right)` / `aligned` 多行 | ✅ 全部正确，无 tofu |
+| 中文叙述夹行内公式（380px 卡宽） | ✅ 断行正常、基线对齐 |
+| 非法公式（`\frac{1}{2` 缺右括号） | ✅ `onErrorFallback` 红字显示原文，不崩 |
+| Web release 构建 | ✅ 通过（20s） |
+
+> 包 README 称「CanvasKit 后端预期会破坏」，**该警告已过时**（作者只在 Flutter 早期版本测过）。
+
+**实现约束**
+
+1. **只在数学式位置用 LaTeX**：中文叙述、标点、单位一律普通文本，不塞进 `$...$`。
+2. **短公式降级为纯文本**：字符数 ≤ 6 且不含 `\frac \sqrt ^ _ \times \div` 等结构的
+   （如 `2.5`、`15`、`x`）不包 `$`，直接用普通文本——避免 `WidgetSpan` 整块换行把
+   「（　　）」拆到下一行（实测真实出现的瑕疵）。
+3. **行内公式用 `WidgetSpan(alignment: PlaceholderAlignment.middle)`**；独占一行的
+   竖式/脱式用 `Math.tex(mathStyle: MathStyle.display)` 单独成块。
+4. **必须给 `onErrorFallback`**：返回原文 `Text`（红色），绝不抛异常。
+5. 公式内**不允许换行**；`$` 不配对时按普通文本处理（正则只匹配成对的 `$[^$]+$`）。
+
+**体积代价（实测，可接受）**
+
+| 项 | 数值 |
+| --- | --- |
+| KaTeX 字体（20 个 TTF，随包产出） | 617 KB |
+| `main.dart.js` | 1696 → 2791 KB（gzip 503 → **829 KB，+326 KB**） |
+
+字体由 pubspec 的 asset 自动打包，Web/APK 均无需额外配置。首次加载略慢，之后进缓存。
 
 **AI 输出约束（写进页面分析提示词）**
 
 1. `items[].text` 中的空位**统一用 `____`**（不用「（　）」「(  )」等）
 2. 竖式题保留换行与对齐空格，用 `\n` 分隔行、行首空格保持缩进
 3. 比较大小题把待填的 `○` 原样保留
-4. **严禁使用 `$...$` 数学公式语法**（前端不解析，会原样显示）
-5. 图形引用用 `![](路径)`，路径由后端裁图后回填
+4. **数学式用 `$...$` 包裹 LaTeX**（如 `$\frac{3}{4}$`、`$4x-5.2=5.2$`、
+   `$111.06 \div 0.9 = 123.4$`）；中文、标点、单位**不得**放进 `$...$`
+5. 只用基础 LaTeX：`\frac \sqrt ^ _ \times \div \pm \left( \right) \underline`；
+   **禁用** `\begin{...}` 宏包、`\text{}`、`\color`、`\require` 等需扩展的语法
+6. 图形引用用 `![](路径)`，路径由后端裁图后回填
+
+> 提示词里给的 LaTeX 白名单必须与前端 `Math.tex` 实际支持范围一致；超范围语法会走
+> `onErrorFallback` 露出红色原文，属可接受的可见失败（比静默显示错公式好）。
 
 **双端展示统一**
 
 | 端 | 渲染方式 |
 | --- | --- |
-| 学生端 Flutter | 复用 `question_html.dart` 的分块渲染；新增 `____`→输入框、`○`→符号按钮 |
-| 家长端 parent-web | 同一份标记，用 `white-space: pre-wrap` 保留竖式排版；`____` 显示为下划线 |
+| 学生端 Flutter | 复用 `question_html.dart` 的分块渲染；新增 `____`→输入框、`○`→符号按钮、`$...$`→`Math.tex` |
+| 家长端 parent-web | 同一份标记，用 `white-space: pre-wrap` 保留竖式排版；`____` 显示为下划线；`$...$` 走 KaTeX CDN |
+
+**家长端公式渲染**：`parent-web/app.js` 目前 `renderQuestionHtml` 用
+`.replace(/\$([^$]+)\$/g, '$1')` **主动剥掉 `$`**（第 593 行），必须改为输出
+`<span class="math-tex">...</span>` 并在 `index.html` 引入 KaTeX（CDN，`renderMathInElement`
+或 `katex.render`）。否则家长端会看到 `\frac{3}{4}` 这样的原始 LaTeX 源码。
+
+> 家长端是纯静态单文件，引入 KaTeX CDN 是最小改动；离线部署时需把
+> `katex.min.js` / `katex.min.css` 落到 `parent-web/vendor/` 本地引用。
 
 **`content` 存哪里**：`Question.question`（现有 LongText 字段），保持与题库练习、语文/英语题一致，
 **不新增富文本字段**，避免前端出现两套渲染逻辑。
