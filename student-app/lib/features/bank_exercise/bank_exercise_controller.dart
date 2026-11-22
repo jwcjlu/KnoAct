@@ -74,7 +74,8 @@ class BankExerciseController extends Notifier<BankExerciseState> {
     return const BankExerciseState();
   }
 
-  Future<void> load(int bankId, {List<int>? questionIds, int? taskId}) async {
+  Future<void> load(int bankId,
+      {List<int>? questionIds, int? taskId, List<int>? extraBankIds}) async {
     state = state.copyWith(
       bankId: bankId,
       taskId: taskId,
@@ -84,7 +85,8 @@ class BankExerciseController extends Notifier<BankExerciseState> {
       result: null,
     );
     try {
-      final qs = await _repo.fetchQuestions(bankId, questionIds: questionIds);
+      final qs = await _repo.fetchQuestions(bankId,
+          questionIds: questionIds, extraBankIds: extraBankIds);
       _startedAt = DateTime.now();
       state = state.copyWith(loading: false, questions: qs);
     } catch (e) {

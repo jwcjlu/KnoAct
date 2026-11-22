@@ -366,6 +366,11 @@ def _gen_bank_practice_tasks(db: Session, user_id: int, day: date):
 
     练习册（source=practice_pdf）按「课时」逐日推进：优先练家长设定的当前课时，
     练完就往后走。普通题库卷仍按原来的整卷轮转。
+
+    **一个科目只有一个练习任务**（数据库有唯一约束 `uq_task_user_subject_date_type`），
+    但该任务可以**合并多个卷**的题：家长导入新练习册后，旧卷不会再把新卷挤掉。
+    每个卷抽 `task_bank_practice_count` 道，最多合并 `task_bank_practice_volumes`
+    个卷（默认 2），总量封顶 `task_bank_practice_total_cap`（默认 12）。
     """
     child = db.get(User, user_id)
     if not child or not child.parent_id:
@@ -373,48 +378,88 @@ def _gen_bank_practice_tasks(db: Session, user_id: int, day: date):
     n_pick = _default_count(db, "task_bank_practice_count", 3, child_id=user_id)
     if n_pick <= 0:
         return []
+    max_volumes = _default_count(
+        db, "task_bank_practice_volumes", 2, child_id=user_id)
+    if max_volumes <= 0:
+        max_volumes = 1
+    total_cap = _default_count(
+        db, "task_bank_practice_total_cap", 12, child_id=user_id)
     banks = (
         db.query(QuestionBank)
         .filter_by(user_id=child.parent_id, status="active")
         .order_by(QuestionBank.id)
         .all()
     )
-    created: list[Task] = []
-    used_subjects: set[str] = set()
+
+    # 每个科目收集最多 max_volumes 个卷的题，合成一个任务
+    merged: dict[str, dict] = {}
     for bank in banks:
         if not _bank_include_daily(bank.tags):
             continue
         subj = (bank.subject or "").strip() or "综合"
-        if subj in used_subjects:
+        entry = merged.setdefault(subj, {"banks": [], "items": [], "titles": []})
+        if len(entry["banks"]) >= max_volumes:
             continue
-        if db.query(Task).filter_by(user_id=user_id, subject=subj, date=day, task_type="practice").first():
+        if len(entry["items"]) >= total_cap:
             continue
 
-        picked, lesson_no, lesson_title = _pick_practice_questions(db, bank, user_id, day, n_pick)
+        room = min(n_pick, total_cap - len(entry["items"]))
+        if room <= 0:
+            continue
+        picked, lesson_no, lesson_title = _pick_practice_questions(
+            db, bank, user_id, day, room)
         if not picked:
             continue
 
-        detail = f"每日抽练 · {len(picked)} 道题"
-        if lesson_no is not None:
-            detail = f"{lesson_title or f'第{lesson_no}课时'} · {len(picked)} 道题"
+        entry["banks"].append(bank.id)
+        entry["titles"].append(bank.title)
+        for q in picked:
+            entry["items"].append({
+                "id": q.id,
+                "bank_id": bank.id,
+                "bank_title": bank.title,
+                "lesson_no": lesson_no,
+                "lesson_title": lesson_title,
+            })
 
+    created: list[Task] = []
+    for subj, entry in merged.items():
+        if not entry["items"]:
+            continue
+        # 幂等：该科目今天已有练习任务就跳过
+        if db.query(Task).filter_by(
+                user_id=user_id, subject=subj, date=day,
+                task_type="practice").first():
+            continue
+
+        titles = entry["titles"]
+        title = (f"{titles[0]} 题库练习" if len(titles) == 1
+                 else f"{titles[0]} 等 {len(titles)} 套卷 题库练习")
+        detail = f"每日抽练 · {len(titles)} 套卷 · {len(entry['items'])} 道题"
+        content = {
+            "bank_id": entry["banks"][0],
+            "bank_title": titles[0],
+            "question_ids": [it["id"] for it in entry["items"]],
+            "lesson_no": entry["items"][0]["lesson_no"],
+            "lesson_title": entry["items"][0]["lesson_title"],
+            "groups": _group_context(
+                db, [it["id"] for it in entry["items"]]),
+            # 多卷信息：前端按题 id 归到对应卷
+            "banks": [
+                {"bank_id": bid, "bank_title": t}
+                for bid, t in zip(entry["banks"], titles)
+            ],
+            "items": entry["items"],
+        }
         created.append(Task(
             task_type="practice",
             subject=subj,
-            title=f"{bank.title} 题库练习",
+            title=title,
             detail=detail,
-            content=json.dumps({
-                "bank_id": bank.id,
-                "bank_title": bank.title,
-                "question_ids": [q.id for q in picked],
-                "lesson_no": lesson_no,
-                "lesson_title": lesson_title,
-                "groups": _group_context(db, [q.id for q in picked]),
-            }, ensure_ascii=False),
+            content=json.dumps(content, ensure_ascii=False),
             points=15,
             content_status="published",
         ))
-        used_subjects.add(subj)
     return created
 
 

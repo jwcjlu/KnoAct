@@ -15,7 +15,7 @@ class _CapturingRepo implements BankRepository {
 
   @override
   Future<List<BankQuestion>> fetchQuestions(int bankId,
-      {List<int>? questionIds}) async {
+      {List<int>? questionIds, List<int>? extraBankIds}) async {
     return const [
       BankQuestion(
         id: 1, qtype: 'fill_blank', qtypeCategory: 'blank',

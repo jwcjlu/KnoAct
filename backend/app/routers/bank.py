@@ -349,13 +349,25 @@ def _format_student_answer(answer_row: dict, q: Question) -> str:
 def list_bank_questions(
     bank_id: int,
     ids: str = "",
+    extra_bank_ids: str = "",
     _auth: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from ..core.work_modes import answer_kind_of, input_ui_of
     from ..models import PracticeQuestionGroup
 
-    q = db.query(Question).filter_by(bank_id=bank_id, status="published")
+    # 多卷合并任务：一个 task 里可能含多套卷的题，前端用 extra_bank_ids 带上其余卷。
+    # 只查这些指定卷，避免「传任意 id 就能读到别人的题」。
+    scope = [bank_id]
+    for part in (extra_bank_ids or "").split(","):
+        part = part.strip()
+        if part.isdigit():
+            bid = int(part)
+            if bid not in scope:
+                scope.append(bid)
+
+    q = db.query(Question).filter(
+        Question.bank_id.in_(scope), Question.status == "published")
     if ids.strip():
         qids = [int(x) for x in ids.split(",") if x.strip()]
         if qids:

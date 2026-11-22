@@ -13,7 +13,7 @@ class _GroupedRepo implements BankRepository {
 
   @override
   Future<List<BankQuestion>> fetchQuestions(int bankId,
-      {List<int>? questionIds}) async {
+      {List<int>? questionIds, List<int>? extraBankIds}) async {
     return const [
       // 组 7：找规律，2 个示例 + 1 个多空待做
       BankQuestion(

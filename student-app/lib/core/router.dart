@@ -116,9 +116,16 @@ final routerProvider = Provider<GoRouter>((ref) {
               .map((s) => int.tryParse(s.trim()))
               .whereType<int>()
               .toList();
+          final extraIds = (qp['extra_bank_ids'] ?? '')
+              .split(',')
+              .map((s) => int.tryParse(s.trim()))
+              .whereType<int>()
+              .where((v) => v > 0)
+              .toList();
           return BankExercisePage(
             bankId: int.tryParse(qp['bank_id'] ?? '') ?? 0,
             questionIds: ids,
+            extraBankIds: extraIds,
             taskId: int.tryParse(qp['task_id'] ?? ''),
           );
         },

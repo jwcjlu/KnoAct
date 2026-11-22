@@ -1246,3 +1246,58 @@ def test_groups_from_pages_respects_page_type_override():
     out = _groups_from_pages(page_results, {5: "practice"})
     assert len(out) == 1
     assert out[0]["stem"] == "被误判成目录页"
+
+
+def test_bank_questions_extra_bank_ids(setup_db, db):
+    """多卷合并任务：传 extra_bank_ids 才能取到别的卷的题。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    b1 = QuestionBank(user_id=child.id, title="卷1", subject="数学", grade=5)
+    b2 = QuestionBank(user_id=child.id, title="卷2", subject="数学", grade=5)
+    db.add_all([b1, b2])
+    db.flush()
+    q1 = Question(bank_id=b1.id, user_id=child.id, qtype="oral",
+                  qtype_category="subjective", question="卷1题",
+                  answer="1", status="published", work_mode="oral")
+    q2 = Question(bank_id=b2.id, user_id=child.id, qtype="oral",
+                  qtype_category="subjective", question="卷2题",
+                  answer="2", status="published", work_mode="oral")
+    db.add_all([q1, q2])
+    db.commit()
+
+    # 不带 extra_bank_ids：只拿到卷1的
+    r1 = _bank_client().get(
+        f"/api/banks/{b1.id}/questions?ids={q1.id},{q2.id}", headers=child_h)
+    assert [x["question"] for x in r1.json()] == ["卷1题"]
+
+    # 带上 extra_bank_ids：两卷的都能拿到
+    r2 = _bank_client().get(
+        f"/api/banks/{b1.id}/questions?ids={q1.id},{q2.id}"
+        f"&extra_bank_ids={b2.id}", headers=child_h)
+    assert {x["question"] for x in r2.json()} == {"卷1题", "卷2题"}
+
+
+def test_extra_bank_ids_does_not_leak_other_books(setup_db, db):
+    """extra_bank_ids 只扩大「指定的卷」，不能借此读到没指定的卷。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    b1 = QuestionBank(user_id=child.id, title="卷1", subject="数学", grade=5)
+    b2 = QuestionBank(user_id=child.id, title="卷2", subject="数学", grade=5)
+    b3 = QuestionBank(user_id=child.id, title="卷3", subject="数学", grade=5)
+    db.add_all([b1, b2, b3])
+    db.flush()
+    for b, name in [(b1, "1"), (b2, "2"), (b3, "3")]:
+        db.add(Question(bank_id=b.id, user_id=child.id, qtype="oral",
+                        qtype_category="subjective", question=f"卷{name}题",
+                        answer="1", status="published", work_mode="oral"))
+    db.commit()
+    q3 = db.query(Question).filter_by(bank_id=b3.id).one()
+
+    r = _bank_client().get(
+        f"/api/banks/{b1.id}/questions?ids={q3.id}&extra_bank_ids={b2.id}",
+        headers=child_h)
+    assert r.json() == [], "卷3 没被指定，不该返回它的题"

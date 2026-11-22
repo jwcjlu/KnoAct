@@ -67,6 +67,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       case TaskAction.openBankPractice:
         var bankId = 0;
         var ids = <int>[];
+        var extraBankIds = <int>[];
         try {
           final m = jsonDecode(t.content);
           if (m is Map) {
@@ -75,15 +76,28 @@ class _HomePageState extends ConsumerState<HomePage> {
             if (raw is List) {
               ids = raw.map((e) => (e as num).toInt()).toList();
             }
+            // 多卷合并任务：除主卷外还可能有别的卷，取题时要一起带上
+            final banksRaw = m['banks'];
+            if (banksRaw is List) {
+              for (final b in banksRaw) {
+                if (b is Map) {
+                  final bid = (b['bank_id'] as num?)?.toInt() ?? 0;
+                  if (bid > 0 && bid != bankId) extraBankIds.add(bid);
+                }
+              }
+            }
           }
         } catch (_) {}
         if (bankId <= 0) {
           showMessage(context, '题库任务配置有误，请联系家长');
           break;
         }
+        final extra = extraBankIds.isEmpty
+            ? ''
+            : '&extra_bank_ids=${extraBankIds.join(',')}';
         final q = ids.isEmpty
-            ? 'bank_id=$bankId&task_id=${t.id}'
-            : 'bank_id=$bankId&ids=${ids.join(',')}&task_id=${t.id}';
+            ? 'bank_id=$bankId&task_id=${t.id}$extra'
+            : 'bank_id=$bankId&ids=${ids.join(',')}&task_id=${t.id}$extra';
         context.push(taskRoute('/bank-exercise?$q', returnTo: '/home'));
       case TaskAction.openDrill:
         ref

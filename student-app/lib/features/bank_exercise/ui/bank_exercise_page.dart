@@ -16,11 +16,16 @@ class BankExercisePage extends ConsumerStatefulWidget {
     super.key,
     required this.bankId,
     this.questionIds = const [],
+    this.extraBankIds = const [],
     this.taskId,
   });
 
   final int bankId;
   final List<int> questionIds;
+
+  /// 多卷合并任务里除主卷外的其它卷（取题时一起带上）。
+  final List<int> extraBankIds;
+
   final int? taskId;
 
   @override
@@ -38,6 +43,8 @@ class _BankExercisePageState extends ConsumerState<BankExercisePage> {
     Future.microtask(() => ref.read(bankExerciseControllerProvider.notifier).load(
           widget.bankId,
           questionIds: widget.questionIds.isEmpty ? null : widget.questionIds,
+          extraBankIds:
+              widget.extraBankIds.isEmpty ? null : widget.extraBankIds,
           taskId: widget.taskId,
         ));
   }
