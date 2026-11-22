@@ -135,3 +135,37 @@ def test_photo_failed_is_not_a_wrong_answer(monkeypatch):
                                 question="8.9+4.5", photo_bytes=b"img")
     assert r["is_correct"] is None
     assert r["ai_status"] == "failed"
+
+
+def test_grade_practice_item_reads_orm_fields(setup_db, db, monkeypatch):
+    """薄包装只负责取字段，分派逻辑仍在 grade_by_answer_kind。"""
+    import app.services.practice_grade as pg
+    from app.models import Question, QuestionBank
+    from conftest import make_user
+
+    called = {}
+
+    def _fake(db_, **kwargs):
+        called.update(kwargs)
+        return {"is_correct": True, "ai_status": "ok", "final_answer": "1.2",
+                "steps_plausible": False, "reason": ""}
+
+    monkeypatch.setattr(pg, "grade_by_answer_kind", _fake)
+
+    user = make_user(db)
+    bank = QuestionBank(user_id=user.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=user.id, qtype="fill_blank",
+                 qtype_category="blank", question="1+1=____",
+                 answer="1.2, 1.44", answer_json='{"blanks":["1.2","1.44"]}',
+                 work_mode="pattern")
+    db.add(q)
+    db.commit()
+
+    r = pg.grade_practice_item(db, q, student_answer="1.2, 1.44")
+    assert r["is_correct"] is True
+    assert called["answer_kind"] == "numeric_list"
+    assert called["answer"] == "1.2, 1.44"
+    assert called["answer_json"] == {"blanks": ["1.2", "1.44"]}
+    assert called["blanks"] == ["1.2", "1.44"]

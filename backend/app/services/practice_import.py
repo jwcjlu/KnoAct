@@ -764,7 +764,8 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
             if it.get("kind") == "image":
                 aligned.append({**it, "answer": ""})
                 continue
-            ans = (solved.get(idx_solvable) or "").strip()
+            payload = solved.get(idx_solvable) or {}
+            ans = (payload.get("answer") or "").strip() if isinstance(payload, dict) else ""
             idx_solvable += 1
             if ans:
                 aligned.append({**it, "answer": ans})

@@ -322,7 +322,9 @@ def test_run_import_job_publishes_aligned_and_records_failures(db, monkeypatch):
     # 答案由 AI 求解（不依赖答案页 OCR）
     monkeypatch.setattr(
         "app.services.practice_solve.solve_math_items",
-        lambda db_, items, **kw: {i: "1" for i in range(len(items))},
+        lambda db_, items, **kw: {
+            i: {"kind": "number", "answer": "1"} for i in range(len(items))
+        },
     )
 
     pi.run_import_job(job_id)
@@ -364,7 +366,7 @@ def test_run_import_job_all_ok_marks_done(db, monkeypatch):
     monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_, **kw: pages.get(idx + 1, ""))
     monkeypatch.setattr(
         "app.services.practice_solve.solve_math_items",
-        lambda db_, items, **kw: {0: "2"},
+        lambda db_, items, **kw: {0: {"kind": "number", "answer": "2"}},
     )
 
     pi.run_import_job(job_id)
@@ -792,3 +794,18 @@ def test_build_drafts_legacy_equation_without_blanks_degrades_to_oral():
         document_id=1,
     )
     assert drafts[0].qtype == "oral"
+
+
+def test_solve_math_items_returns_dict_shape(monkeypatch):
+    """返回结构从 dict[int, str] 改为 dict[int, dict]。"""
+    import app.services.practice_solve as ps
+
+    monkeypatch.setattr(ps, "_provider_ready", lambda db: True)
+    monkeypatch.setattr(ps, "_call_solver", lambda db, chunk: {
+        0: {"kind": "number", "answer": "13.4"},
+        1: {"kind": "numeric_list", "blanks": ["1.2", "1.44"]},
+    })
+
+    out = ps.solve_math_items(None, [{"question": "a"}, {"question": "b"}])
+    assert out[0]["answer"] == "13.4"
+    assert out[1]["blanks"] == ["1.2", "1.44"]
