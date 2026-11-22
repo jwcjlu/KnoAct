@@ -351,6 +351,9 @@ def list_bank_questions(
     _auth: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from ..core.work_modes import answer_kind_of, input_ui_of
+    from ..models import PracticeQuestionGroup
+
     q = db.query(Question).filter_by(bank_id=bank_id, status="published")
     if ids.strip():
         qids = [int(x) for x in ids.split(",") if x.strip().isdigit()]
@@ -361,15 +364,39 @@ def list_bank_questions(
     passages = {}
     if pids:
         for p in db.query(ReadingPassage).filter(ReadingPassage.id.in_(pids)).all():
-            passages[p.id] = {"id": p.id, "title": p.title, "content": p.content, "subject": p.subject}
-    return [{
-        "id": item.id, "qtype": item.qtype, "qtype_category": item.qtype_category,
-        "question": item.question, "options": json.loads(item.options or "[]"),
-        "answer": item.answer, "analysis": item.analysis, "difficulty": item.difficulty,
-        "tags": json.loads(item.tags or "{}"),
-        "passage_id": item.passage_id,
-        "passage": passages.get(item.passage_id),
-    } for item in qs]
+            passages[p.id] = {"id": p.id, "title": p.title, "content": p.content,
+                              "subject": p.subject}
+
+    gids = {x.group_id for x in qs if x.group_id}
+    groups = {}
+    if gids:
+        for g in db.query(PracticeQuestionGroup).filter(
+                PracticeQuestionGroup.id.in_(gids)).all():
+            groups[g.id] = g
+
+    out = []
+    for item in qs:
+        g = groups.get(item.group_id)
+        mode = item.work_mode or (g.work_mode if g else "")
+        out.append({
+            "id": item.id, "qtype": item.qtype,
+            "qtype_category": item.qtype_category,
+            "question": item.question, "options": json.loads(item.options or "[]"),
+            "answer": item.answer, "analysis": item.analysis,
+            "difficulty": item.difficulty,
+            "tags": json.loads(item.tags or "{}"),
+            "passage_id": item.passage_id,
+            "passage": item.passage_id and passages.get(item.passage_id),
+            # 题组两级：前端据此展示题干/示例、按 input_ui 渲染
+            "group_id": item.group_id,
+            "group_stem": (g.stem if g else ""),
+            "seq_in_group": item.seq_in_group,
+            "is_example": item.is_example,
+            "work_mode": mode,
+            "input_ui": input_ui_of(mode),
+            "answer_kind": answer_kind_of(mode),
+        })
+    return out
 
 
 @router.post("/submit")
@@ -390,8 +417,25 @@ def submit_bank(req: BankSubmitReq, user: User = Depends(require_learning_user),
             results.append({"question_id": qid, "is_correct": False})
             continue
         answer_json = json.loads(qq.answer_json or "{}")
-        student = {k: a.get(k) for k in ("selected_index", "blanks", "pairs", "text") if a.get(k) is not None}
-        if qq.qtype_category == "subjective":
+        student = {k: a.get(k) for k in ("selected_index", "blanks", "pairs", "text")
+                   if a.get(k) is not None}
+
+        mode = (getattr(qq, "work_mode", "") or "").strip()
+        if mode:
+            # 有 work_mode → 走练习册判分门面（按 answer_kind 分派）
+            from ..services.practice_grade import grade_practice_item
+
+            pr = grade_practice_item(
+                db, qq,
+                student_answer=str(a.get("text") or "").strip(),
+                blanks=a.get("blanks"),
+            )
+            r = {
+                "is_correct": pr.get("is_correct"),
+                "correct_answer_text": qq.answer,
+                "detail": pr,
+            }
+        elif qq.qtype_category == "subjective":
             r = grade_subjective_with_ai(db, answer_json, student)
         else:
             r = grade_question(qq.qtype_category, answer_json, student)

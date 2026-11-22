@@ -446,3 +446,89 @@ def test_retry_deletes_cross_page_group_overlapping_target(setup_db, db, monkeyp
     assert [s.stem for s in survivors] == ["新题组"]
     # 旧组的小题也必须一起删掉（group_id 无外键，不会级联）
     assert db.query(Question).filter_by(question="旧题").count() == 0
+
+
+def _bank_client():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.bank import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_submit_dispatches_by_work_mode(setup_db, db):
+    """有 work_mode 的题走 grade_practice_item（number 判分）。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    # 必须用 parent_child：require_learning_user 会校验家长绑定
+    parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=child.id, qtype="oral",
+                 qtype_category="subjective", question="1+1=____", answer="2",
+                 answer_json="{}", work_mode="oral", status="published")
+    db.add(q)
+    db.commit()
+
+    r = _bank_client().post("/api/banks/submit", headers=child_h, json={
+        "bank_id": bank.id,
+        "answers": [{"question_id": q.id, "text": "2"}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["answers"][0]["is_correct"] is True
+
+
+def test_submit_wrong_answer_is_false(setup_db, db):
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=child.id, qtype="oral",
+                 qtype_category="subjective", question="1+1=____", answer="2",
+                 answer_json="{}", work_mode="oral", status="published")
+    db.add(q)
+    db.commit()
+
+    r = _bank_client().post("/api/banks/submit", headers=child_h, json={
+        "bank_id": bank.id,
+        "answers": [{"question_id": q.id, "text": "3"}],
+    })
+    assert r.status_code == 200
+    assert r.json()["answers"][0]["is_correct"] is False
+
+
+def test_bank_questions_include_group_info(setup_db, db):
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                              stem="直接写出得数", work_mode="pattern",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                 qtype_category="blank", question="1+1=____", answer="2",
+                 status="published", group_id=g.id, seq_in_group=2,
+                 work_mode="pattern")
+    db.add(q)
+    db.commit()
+
+    r = _bank_client().get(f"/api/banks/{bank.id}/questions", headers=child_h)
+    assert r.status_code == 200
+    item = r.json()[0]
+    assert item["group_stem"] == "直接写出得数"
+    assert item["work_mode"] == "pattern"
+    assert item["input_ui"] == "keypad"
+    assert item["answer_kind"] == "numeric_list"
+    assert item["seq_in_group"] == 2
