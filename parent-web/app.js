@@ -248,6 +248,7 @@ function renderNav(){
 }
 function render(){
   document.getElementById('main').innerHTML = renderParent();
+  decorateMath(document.getElementById('main') || document.body);
   if(parentTab==='题库管理') updateReadingPreview();
 }
 
@@ -581,7 +582,52 @@ function removeReadingSub(i){ if(readingSubs.length>1){ captureReadingForm(); re
 function escapeHtml(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-/** 学库宝/tiku 题干：白名单渲染 br/img，剥壳其它标签，去掉 $...$ */
+/**
+ * 把已转义的文本里的 $...$ 换成 KaTeX 占位 span。
+ * 只匹配成对的 $...$（不配对时原样返回，绝不吞字符）。
+ * 注意：入参必须是**已经 escapeHtml 过**的文本，否则 XSS。
+ */
+function markMath(escaped){
+  const src = String(escaped || '');
+  let out = '';
+  let last = 0;
+  const re = /\$([^$]+)\$/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    out += src.slice(last, m.index);
+    const tex = m[1];
+    // data-tex 用 escapeAttr 处理双引号；内容已 escape，安全
+    out += `<span class="math-tex" data-tex="${escapeAttr(tex)}"></span>`;
+    last = m.index + m[0].length;
+  }
+  out += src.slice(last);
+  return out;
+}
+/**
+ * 把 root 内所有 .math-tex 占位渲染成公式。
+ * 没有 KaTeX（例如直接双击打开 index.html）时降级为等宽原文，不抛错。
+ */
+function decorateMath(root){
+  const host = root || document;
+  const nodes = host.querySelectorAll('.math-tex:not([data-rendered])');
+  for (const el of nodes) {
+    const tex = el.getAttribute('data-tex') || '';
+    if (window.katex && tex) {
+      try {
+        katex.render(tex, el, {throwOnError: false, displayMode: false});
+        el.setAttribute('data-rendered', '1');
+        continue;
+      } catch (e) {
+        // 落到下面的降级分支
+      }
+    }
+    el.textContent = tex;
+    el.style.fontFamily = 'ui-monospace, Menlo, Consolas, monospace';
+    el.style.color = '#c05b4a';
+    el.setAttribute('data-rendered', '1');
+  }
+}
+/** 学库宝/tiku 题干：白名单渲染 br/img，剥壳其它标签，$...$ 转为 KaTeX 占位 */
 function renderQuestionHtml(raw){
   const src = String(raw||'');
   const tpl = document.createElement('template');
@@ -590,7 +636,7 @@ function renderQuestionHtml(raw){
     let out = '';
     node.childNodes.forEach(n=>{
       if(n.nodeType === 3){
-        out += escapeHtml(String(n.textContent||'').replace(/\$([^$]+)\$/g, '$1'));
+        out += markMath(escapeHtml(String(n.textContent||'')));
         return;
       }
       if(n.nodeType !== 1) return;
@@ -1689,6 +1735,7 @@ function paintXkbModal(){
       <button type="button" class="btn-primary" ${n < 1 || xkbPicker.previewLoading ? 'disabled' : ''} onclick="confirmXuekubaoImportSelected()">导入已选 (${n})</button>
     </div>
   </div>`;
+    decorateMath(el);
     return;
   }
   const bankSubj = xkbBankSubject();
