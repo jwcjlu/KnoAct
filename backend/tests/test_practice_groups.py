@@ -1178,3 +1178,71 @@ def test_bank_questions_by_ids_include_group_examples(setup_db, db):
     flags = {x["question"]: x["is_example"] for x in got}
     assert flags["示例A"] is True and flags["示例B"] is True
     assert flags["待做"] is False
+
+
+def test_reparse_endpoint_accepts_explicit_pages(setup_db, db, monkeypatch):
+    """页类型改回 practice 后要能指定页重跑（不是只重跑失败页）。"""
+    from app.models import PracticeImportJob
+    from app.routers import practice_import as pi_router
+
+    job_id, _bank_id, _doc_id = _mk_job(db, "reparse", 3, "n.pdf")
+
+    called = {}
+    monkeypatch.setattr(
+        pi_router, "run_import_job",
+        lambda jid, pages=None: called.update(jid=jid, pages=pages),
+        raising=False,
+    )
+    # run_import_job 是 background task，TestClient 会同步执行它
+    parent_h = None
+    job = db.get(PracticeImportJob, job_id)
+    from app.models import User
+    parent = db.get(User, job.user_id)
+    from conftest import auth_headers
+
+    r = _practice_client().post(
+        f"/api/practice-import/jobs/{job_id}/reparse",
+        headers=auth_headers(parent),
+        json={"pages": [2]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert r.json()["reparse_pages"] == [2]
+    assert called.get("pages") == [2]
+
+
+def test_reparse_endpoint_rejects_empty_pages(setup_db, db):
+    from app.models import PracticeImportJob, User
+    from conftest import auth_headers
+
+    job_id, _bank_id, _doc_id = _mk_job(db, "reparse2", 2, "o.pdf")
+    job = db.get(PracticeImportJob, job_id)
+    parent = db.get(User, job.user_id)
+
+    r = _practice_client().post(
+        f"/api/practice-import/jobs/{job_id}/reparse",
+        headers=auth_headers(parent),
+        json={"pages": []},
+    )
+    assert r.status_code == 200
+    assert r.json()["ok"] is False
+
+
+def test_groups_from_pages_respects_page_type_override():
+    """家长改过的页类型必须覆盖本次 AI 判断，否则改完永远不生效。"""
+    from app.services.practice_import import _groups_from_pages
+
+    page_results = [
+        (5, {"page_type": "toc", "groups": [
+            {"stem": "被误判成目录页", "instruction": "", "work_mode": "oral",
+             "need_process": False, "continues_next_page": False,
+             "items": [{"seq": 1, "y": 0.1, "text": "1+1=____",
+                        "answer_hint": "", "is_example": False}]},
+        ], "image_questions": []}),
+    ]
+    # 不改 → 被当作 toc 跳过
+    assert _groups_from_pages(page_results) == []
+    # 家长改回 practice → 要能建组
+    out = _groups_from_pages(page_results, {5: "practice"})
+    assert len(out) == 1
+    assert out[0]["stem"] == "被误判成目录页"

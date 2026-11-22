@@ -1056,13 +1056,29 @@ async function patchPageType(documentId, pageNo, pageType){
   const r = await api(
     `/api/practice-import/pages/${pageNo}?document_id=${documentId}`,
     {method:'PATCH', body:{page_type: pageType}});
-  if(r && r.page_type){
-    toast(`第 ${pageNo} 页已改为「${r.page_type}」，请点击「重新导入」生效`);
+  if(!r || !r.page_type){
+    toast('修改失败');
+    return;
+  }
+  const jobId = practiceImportJob && practiceImportJob.id;
+  if(!jobId){
+    toast(`第 ${pageNo} 页已改为「${r.page_type}」（还没有导入任务，无法重跑）`);
     await loadPracticePages(documentId);
     render();
-  } else {
-    toast('修改失败');
+    return;
   }
+  // 改完直接重跑这一页：后端会以库里的 page_type 为准（覆盖本次 AI 判断）
+  const rr = await api(`/api/practice-import/jobs/${jobId}/reparse`,
+    {method:'POST', body:{pages:[pageNo]}});
+  if(rr && rr.ok){
+    toast(`第 ${pageNo} 页已改为「${r.page_type}」，正在重新解析…`);
+    practiceImportJob = null;
+    pollPracticeJob(jobId);
+  } else {
+    toast(`第 ${pageNo} 页已改为「${r.page_type}」，但重跑失败：${(rr && rr.message) || '未知错误'}`);
+  }
+  await loadPracticePages(documentId);
+  render();
 }
 
 async function loadPracticeBanks(){

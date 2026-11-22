@@ -302,6 +302,39 @@ def retry_job(
     return {"ok": True, "retry_pages": pages}
 
 
+class ReparsePagesReq(BaseModel):
+    pages: list[int]
+
+
+@router.post("/api/practice-import/jobs/{job_id}/reparse")
+def reparse_pages(
+    job_id: int,
+    req: ReparsePagesReq,
+    background: BackgroundTasks,
+    user: User = Depends(require_role("parent", "admin")),
+    db: Session = Depends(get_db),
+):
+    """重跑指定页（用于「页类型改回 practice 后重新解析」）。
+
+    与 `/retry` 的区别：`/retry` 只重跑 AI 识别失败的页；这里由家长显式指定
+    页码，即使该页上次「成功」也会重跑——因为页类型可能被家长改过。
+    """
+    job = db.get(PracticeImportJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"error": "job_not_found"})
+    ensure_user_access(user, job.user_id, db)
+
+    want = sorted({int(p) for p in (req.pages or [])})
+    if not want:
+        return {"ok": False, "message": "没有指定要重跑的页"}
+
+    job.status = "pending"
+    job.error = ""
+    db.commit()
+    background.add_task(run_import_job, job.id, want)
+    return {"ok": True, "reparse_pages": want}
+
+
 @router.get("/api/practice-import/missing-answers")
 def missing_answers(
     bank_id: int = Query(...),

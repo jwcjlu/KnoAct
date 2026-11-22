@@ -319,11 +319,21 @@ def _kind_of(work_mode: str) -> str:
     }.get(work_mode, "other")
 
 
-def _groups_from_pages(page_results: list[tuple[int, dict]]) -> list[dict]:
-    """把各页分析结果展开成待合并的题组列表（带 page_start/page_end/key）。"""
+def _groups_from_pages(
+    page_results: list[tuple[int, dict]],
+    page_type_override: dict[int, str] | None = None,
+) -> list[dict]:
+    """把各页分析结果展开成待合并的题组列表（带 page_start/page_end/key）。
+
+    `page_type_override`：家长在页类型面板改过的值（`{page_no: page_type}`）。
+    有覆盖时以**库里的值**为准——否则家长把误判成 toc 的页改回 practice 后，
+    重跑仍会按 AI 的判断跳过，那个按钮就成了「按了没反应」。
+    """
+    override = page_type_override or {}
     groups: list[dict] = []
     for pno, result in page_results:
-        if result.get("page_type") != "practice":
+        page_type = override.get(pno) or result.get("page_type")
+        if page_type != "practice":
             continue
         for idx, g in enumerate(result.get("groups") or []):
             items = [{**it, "page": pno} for it in (g.get("items") or [])]
@@ -593,6 +603,14 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
             if picked_pages:
                 pages = picked_pages
 
+        # 家长在页类型面板改过的值：必须在分析前读，因为分析循环会用本次 AI 的判断
+        # 覆盖 PracticeImportPage，之后再读就永远是「本次判断」了。
+        stored_types = {
+            r.page_no: r.page_type
+            for r in db.query(PracticeImportPage)
+            .filter(PracticeImportPage.document_id == doc.id).all()
+        }
+
         # 重跑：先删这些页对应的题组与小题（group_id 无外键，必须显式删）
         # 用「重跑页集合」逐个取交集，绝不能用 min/max 包络区间——
         # 第 3 页和第 40 页失败时，包络会连带删掉 4..39 页的题。
@@ -676,7 +694,7 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
             _tick(job_id, idx, len(pages), seen_items)
 
         # 跨页合并（图片题自成一组，不参与合并）
-        groups = _groups_from_pages(page_results)
+        groups = _groups_from_pages(page_results, stored_types)
         groups = merge_cross_page_groups(groups) + image_groups
         groups.sort(key=lambda g: (g["page_start"], g["key"]))
 
