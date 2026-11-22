@@ -40,11 +40,31 @@ _PAGE_SYSTEM = (
     "1. 空位统一用 ____（不要用「（　）」「(  )」）。竖式里的方格挖空保留原样 □。\n"
     "2. 数学式用 $...$ 包裹基础 LaTeX，例如 $111.06 \\div 0.9 = 123.4$、$\\frac{3}{4}$。\n"
     "3. 中文叙述、标点、单位不得放进 $...$ 内部。\n"
-    "4. 只用基础 LaTeX：\\frac \\sqrt ^ _ \\times \\div \\pm \\left( \\right) \\underline；"
-    "禁用 \\begin{...}、\\text{}、\\color、\\require。\n"
+    "4. 可用 LaTeX：\\frac \\sqrt ^ _ \\times \\div \\pm \\left( \\right) \\underline "
+    "\\text{} \\underbrace \\cdots \\begin{cases}。\n"
+    "   不要用需要额外宏包的语法（\\color、\\require 等）。\n"
     "5. 多行竖式/脱式：一行一个 $...$，行间用 \\n 分隔，不要用 \\begin{aligned}。\n"
     "6. 页面上需要看图才能作答的题（图形、统计图、方格图、钟面、展开图）放进 "
     "image_questions，给纵向范围，不要试图用文字还原。\n"
+    "\n"
+    "【空位绝不能写在 $...$ 里面】\n"
+    "____ 必须放在 $...$ 外面，$...$ 内只能是纯粹的数学表达式。\n"
+    "  错误：$a \\times b = ($____$)$；   ← 把公式劈成两半，渲染会坏\n"
+    "  正确：$a \\times b =$ ____\n"
+    "  正确：$a \\times b =$（____）\n"
+    "  正确：$x =$ ____\n"
+    "\n"
+    "【一道题里有多个空】\n"
+    "如果一道题要填几个空（例如「则 a×b=（　）；a÷b=（　）」、"
+    "「求下面各图形的面积」（几个图形各一个空）），按以下规则：\n"
+    "- groups[].stem 只放大题题干/公共材料，**不要把待填的题目本身也写进 stem**。\n"
+    "- items[] 每个空一条，text 只写该空对应的部分（如「$a \\times b =$ ____」）。\n"
+    "- 一题只有 1 个空时，stem 与 items[0].text 的内容不重复：把题目放在 items[0].text。\n"
+    "\n"
+    "【work_mode 判断提示】\n"
+    "字母表示数/用字母找规律（如 a=0.00…01 求 a×b）→ letter_pattern；\n"
+    "数字序列找规律并推算 → pattern；比较两个数/带单位比较大小 → compare / unit_compare；\n"
+    "图形各部分的面积/周长 → geometry。"
 )
 
 _PAGE_PROMPT = "分析这一页练习册图片，按 system 要求返回 JSON。只输出 JSON，不要解释。"
@@ -80,13 +100,56 @@ def _empty(*, parse_failed: bool = False) -> dict:
     }
 
 
+_SPLIT_PAREN_RE = re.compile(r"\$([^$]*?)\(\s*\$\s*_{2,}\s*\$\s*\)\s*\$")
+_SPLIT_PLAIN_RE = re.compile(r"\$([^$]*?)\$\s*_{2,}\s*\$([^$]*)\$")
+_MATH_PAIR_RE = re.compile(r"\$([^$]*)\$")
+
+
+def _dig_out_blank(m) -> str:
+    inner = m.group(1)
+    if "__" not in inner:
+        return m.group(0)
+    head, _, tail = inner.partition("__")
+    head = head.rstrip()
+    while head.endswith("(") or head.endswith("（"):
+        head = head[:-1].rstrip()
+    tail = tail.lstrip("_").lstrip()
+    while tail.startswith(")") or tail.startswith("）"):
+        tail = tail[1:].lstrip()
+    out = f"${head}$ ____"
+    if tail:
+        out += f" ${tail}$"
+    return out
+
+
+def _fix_blank_inside_math(text: str) -> str:
+    r"""把写进 `$...$` 内部、或把公式劈开的空位挪到外面。
+
+    模型有时会输出 `$a \times b = ($____$)$`：`____` 落在 `$` 之间，
+    公式被劈成两段（`($` 与 `)$`），前端渲染会坏。这里统一改成
+    `$a \times b =$ ____`。
+
+    三步，只会命中明确的坏形态；已经正确的文本原样返回（过度改写更危险）：
+    1. `$X ($____$)$`        → `$X (____)$`
+    2. `$X $____$ Y$`        → `$X $ ____ $Y$`
+    3. `$X (____) $` / `$X ____$` → `$X$ ____`
+    """
+    if not text or "$" not in text:
+        return text
+    t = _SPLIT_PAREN_RE.sub(lambda m: f"${m.group(1)}(____)$", text)
+    t = _SPLIT_PLAIN_RE.sub(
+        lambda m: f"${m.group(1)}$ ____ ${m.group(2)}$", t)
+    return _MATH_PAIR_RE.sub(_dig_out_blank, t)
+
+
 def _norm_item(raw: dict, fallback_seq: int) -> dict:
     seq = _safe_int(raw.get("seq"))
     return {
         "seq": seq if seq is not None else fallback_seq,
         "y": _safe_float(raw.get("y"), 0.0),
-        "text": str(raw.get("text") or "").strip(),
-        "answer_hint": str(raw.get("answer_hint") or "").strip(),
+        "text": _fix_blank_inside_math(str(raw.get("text") or "").strip()),
+        "answer_hint": _fix_blank_inside_math(
+            str(raw.get("answer_hint") or "").strip()),
         "is_example": bool(raw.get("is_example")),
     }
 

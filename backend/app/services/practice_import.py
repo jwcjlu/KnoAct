@@ -437,6 +437,8 @@ def _solve_groups(db, groups: list[dict], *, on_progress=None) -> None:
             solve_items.append({
                 "question": it.get("text") or "",
                 "work_mode": g["work_mode"],
+                # 题干里可能定义了解题条件（如 a=0.00…01），求解器必须看到
+                "stem": g.get("stem") or "",
             })
             solve_refs.append(it)
 

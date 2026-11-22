@@ -588,3 +588,48 @@ def test_derive_page_range_explicit_question_end_wins():
         answer_start_page=96, answer_end_page=107, total_pages=107)
     assert (q_start, q_end) == (3, 40)
 
+def test_call_solver_includes_group_stem(monkeypatch):
+    """字母规律题的 a、b 定义在题干里，求解器必须看到，否则只会答 'ab'。"""
+    import app.services.ai as ai_mod
+    import app.services.practice_solve as ps
+
+    captured = {}
+
+    class _P:
+        name = "openai"
+
+        def generate(self, prompt, system="", json_mode=False):
+            captured["prompt"] = prompt
+            return '{"answers":[{"index":0,"kind":"number","answer":"0.0125"}]}'
+
+    monkeypatch.setattr(ai_mod, "get_provider",
+                        lambda db, child_id=None: _P(), raising=False)
+    out = ps._call_solver(
+        None,
+        [{"question": r"$a \times b =$ ____",
+          "stem": r"若 $a = 0.\underbrace{00\cdots00}_{2020\text{个}0}1$"}],
+    )
+    assert "材料" in captured["prompt"], captured["prompt"]
+    assert "underbrace" in captured["prompt"], "题干内容应传给求解器"
+    assert out[0]["answer"] == "0.0125"
+
+
+def test_call_solver_omits_redundant_stem(monkeypatch):
+    """题干与题目相同时不要重复贴两遍（省 token）。"""
+    import app.services.ai as ai_mod
+    import app.services.practice_solve as ps
+
+    captured = {}
+
+    class _P:
+        name = "openai"
+
+        def generate(self, prompt, system="", json_mode=False):
+            captured["prompt"] = prompt
+            return '{"answers":[{"index":0,"kind":"number","answer":"1"}]}'
+
+    monkeypatch.setattr(ai_mod, "get_provider",
+                        lambda db, child_id=None: _P(), raising=False)
+    ps._call_solver(None, [{"question": "1+1=____", "stem": "1+1=____"}])
+    assert "材料" not in captured["prompt"]
+    assert captured["prompt"].count("1+1=____") == 1

@@ -131,3 +131,65 @@ def test_analyze_page_calls_vision_json(setup_db, db, monkeypatch):
     # 提示词里的 LaTeX 必须是单反斜杠（json 里才写 \\div）
     assert "\\div" in called["system"]
     assert "\\\\div" not in called["system"]
+
+
+def test_prompt_allows_text_and_underbrace(setup_db, db, monkeypatch):
+    r"""\text{} / \underbrace / \begin{cases} 在 KaTeX 与 flutter_math_fork 里都能渲染
+    （实测），提示词不应禁用它们——禁用会让模型把「2020个0」这类中文标注写错。"""
+    import app.services.parsers.math_page as mp
+
+    called = {}
+
+    def _fake_vision(db_, image_bytes, system, prompt, **kw):
+        called["system"] = system
+        return '{"page_type":"practice","groups":[],"image_questions":[]}'
+
+    monkeypatch.setattr(mp, "vision_json", _fake_vision)
+    mp.analyze_page(db, b"\x89PNG", subject="数学")
+    sys_prompt = called["system"]
+
+    assert r"\text{}" in sys_prompt, "应允许 \\text{}"
+    assert r"\underbrace" in sys_prompt, "应允许 \\underbrace"
+    # 不应把它们列在「禁用」里
+    forbid_line = next((ln for ln in sys_prompt.splitlines() if "禁用" in ln), "")
+    assert r"\text{}" not in forbid_line
+    assert r"\underbrace" not in forbid_line
+
+
+def test_prompt_explains_multi_blank_split(setup_db, db, monkeypatch):
+    """一题多空时要拆成多条 item，且 stem 不与 item.text 重复。"""
+    import app.services.parsers.math_page as mp
+
+    called = {}
+    monkeypatch.setattr(
+        mp, "vision_json",
+        lambda db_, img, system, prompt, **kw: (
+            called.update(system=system)
+            or '{"page_type":"practice","groups":[],"image_questions":[]}'))
+    mp.analyze_page(db, b"\x89PNG")
+
+    assert "多个空" in called["system"]
+    assert "不要把待填的题目本身也写进 stem" in called["system"]
+
+
+def test_fix_blank_inside_math():
+    r"""模型把 ____ 写进 $...$ 里会把公式劈成两半，必须挪出来。"""
+    from app.services.parsers.math_page import parse_page_analysis
+
+    def one(text):
+        return parse_page_analysis(json.dumps({
+            "page_type": "practice",
+            "groups": [{"stem": "", "work_mode": "letter_pattern",
+                        "items": [{"seq": 1, "y": 0.1, "text": text}]}],
+            "image_questions": [],
+        }))["groups"][0]["items"][0]["text"]
+
+    # 真实踩到的坏形态
+    assert one(r"$a \times b = ($____$)$；") == r"$a \times b =$ ____；"
+    assert one(r"$x = ($____$)$") == r"$x =$ ____"
+    # 已经正确的不要动
+    assert one(r"$a \times b =$ ____") == r"$a \times b =$ ____"
+    # 含正常公式的空位不要动
+    assert one(r"$1111.05 \div 0.9 =$ ____") == r"$1111.05 \div 0.9 =$ ____"
+    # 没有空位不动
+    assert one(r"$1.08 \div 0.9 = 1.2$") == r"$1.08 \div 0.9 = 1.2$"

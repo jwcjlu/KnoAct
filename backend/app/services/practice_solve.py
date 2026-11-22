@@ -19,7 +19,15 @@ _SOLVE_SYSTEM = (
     "- 单答案填 kind=number, answer=最终结果（保留原题小数位，不写单位、不写过程）。\n"
     "- 一题多空填 kind=numeric_list，blanks 按空位顺序排列，不要填 answer。\n"
     "- 比较大小填 kind=symbol，answer 是 > < = 之一。\n"
-    "index 与输入编号严格对应。示例行不要计算。"
+    "index 与输入编号严格对应。示例行不要计算。\n"
+    "\n"
+    "【必须真的算出数值】\n"
+    "- 题目给了「材料」时（用字母定义、单位换算规则等），要把材料代进去算成具体数值，"
+    "**不要**把答案写回字母或算式。\n"
+    "  例如材料说 a=0.00…01（2020个0）、b=0.00…0125（2022个0），问 a×b，"
+    "答案应是数值 0.000…，不是 \"ab\"。\n"
+    "- 算不出具体数值（题目本身要求写表达式）时，answer 填表达式原文。\n"
+    "- 结果是循环小数时用原题要求的形式；无法确定就留空（宁缺勿错）。"
 )
 
 _JSON_RE = re.compile(r"\{[\s\S]*\}")
@@ -83,7 +91,15 @@ def _call_solver(db, chunk: list[dict]) -> dict[int, dict]:
     from .ai import get_provider
 
     provider = get_provider(db)
-    lines = [f"{i}. {it.get('question', '')}" for i, it in enumerate(chunk)]
+    lines = []
+    for i, it in enumerate(chunk):
+        stem = (it.get("stem") or "").strip()
+        q = (it.get("question") or "").strip()
+        if stem and stem != q:
+            # 字母规律等题型的条件写在题组题干里，不带上就没法算
+            lines.append(f"{i}. 材料：{stem}\n   题目：{q}")
+        else:
+            lines.append(f"{i}. {q}")
     prompt = (
         "算出下面每道题的最终答案，index 从 0 开始按顺序编号。\n"
         + "\n".join(lines)
