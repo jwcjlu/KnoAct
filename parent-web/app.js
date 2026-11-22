@@ -287,6 +287,11 @@ async function switchChild(id){
   try{ localStorage.setItem(CHILD_KEY, String(uid)); }catch(e){}
   goalRows = []; reportRows = []; masteryReport = null; parentTasks = [];
   buckets = []; bucketId = null;
+  // 进度面板按孩子取数，切换孩子后要重取（否则显示上一个孩子的进度）
+  progressRows = [];
+  if(progressDocId !== null){
+    try{ await loadProgressOverview(); }catch(e){}
+  }
   await loadBuckets();
   // 非孩子 Tab 只刷新下拉框，避免整页重绘冲掉未保存的输入
   childSwitching = true; CHILD_TABS.includes(parentTab) ? render() : renderChildSelect();
@@ -2537,6 +2542,7 @@ function renderPdfTab(){
       <div class="pdf-info"><div class="nm">${d.filename}</div><div class="meta">${d.subject}${d.grade?(' · '+d.grade+'年级'):''}${d.edition?(' · '+d.edition):''} · ${d.lesson_count} 课 · 已审核 ${d.audited_count} 课</div></div>
       <div class="pdf-actions">
         <button class="btn-ghost" onclick="openDocBind(${d.id})">绑定孩子</button>
+        <button class="btn-ghost" onclick="openProgressPanel(${d.id})">学习进度</button>
         <button class="btn-ghost" onclick="openDoc(${d.id})">查看/审核</button>
         <button class="btn-ghost" onclick="openAudioPanel(${d.id})">教材音频</button>
         <button class="btn-ghost" onclick="resplitDoc(${d.id})">重新拆分</button>
@@ -2546,6 +2552,7 @@ function renderPdfTab(){
   const empty = pdfDocs.length===0 ? `<div style="text-align:center;padding:32px 0;color:#8e9691">还没有上传教材，点击下方按钮开始</div>` : rows;
   return `<div class="parent-grid">
     ${renderDocBind()}
+    ${renderProgressPanel()}
     ${renderAudioPanel()}
     <div class="parent-panel" style="grid-column:1/-1">
       <div class="head"><div class="ic blue">${icon('book',20)}</div><div><h3>教材管理</h3><div class="sub">上传 PDF，自动拆课；审核通过的课程进入孩子词库</div></div></div>
@@ -3114,8 +3121,74 @@ async function toggleDocBind(documentId, userId, checked){
   render();
 }
 
-function renderDocBind(){
-  if(bindDocId === null) return '';
+// ---- 学习进度（按「孩子 + 教材」调整）----
+let progressDocId = null;      // 当前打开进度面板的教材
+let progressRows = [];         // [{document_id, document_name, subject, current, total, current_lesson_id, lessons:[...]}]
+
+async function openProgressPanel(documentId){
+  progressDocId = documentId;
+  await loadProgressOverview();
+  render();
+}
+
+async function loadProgressOverview(){
+  progressRows = [];
+  if(!uid) return;
+  const r = await api(`/api/progress/overview?user_id=${uid}`);
+  let items = (r && r.items) || [];
+  if(progressDocId != null){
+    items = items.filter(it => String(it.document_id) === String(progressDocId));
+  }
+  progressRows = items;
+}
+
+/** 把某孩子在某本教材上的进度设到指定课。 */
+async function saveProgressLesson(documentId, lessonId){
+  if(!uid || !lessonId) return;
+  const r = await api('/api/progress/adjust', {method:'POST', body:{
+    user_id: uid, lesson_id: Number(lessonId), document_id: Number(documentId),
+  }});
+  if(r && r.current_lesson_id){
+    toast(`进度已设为第 ${r.current}/${r.total} 课`);
+    await loadProgressOverview();
+  } else {
+    toast('设置失败');
+  }
+  render();
+}
+
+function renderProgressPanel(){
+  if(progressDocId === null) return '';
+  const rows = progressRows.map(it => {
+    const opts = (it.lessons || []).map((l, i) =>
+      `<option value="${l.id}" ${l.id === it.current_lesson_id ? 'selected' : ''}>${i + 1}. ${escapeAttr(l.title || '未命名')}${l.audit_status === 'approved' ? '' : '（未审核）'}</option>`
+    ).join('');
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--line3)">
+      <div style="font-weight:600;font-size:14px">${escapeAttr(it.document_name)}</div>
+      <div style="font-size:12px;color:var(--gray2);margin:4px 0 8px">
+        ${escapeAttr(it.subject)}${it.grade ? ' · ' + it.grade + '年级' : ''}${it.edition ? ' · ' + escapeAttr(it.edition) : ''}
+        · 当前第 <b style="color:var(--green2)">${it.current}</b> / ${it.total} 课
+      </div>
+      <select style="border:1px solid var(--line3);border-radius:10px;padding:8px 12px;font-size:13px;max-width:520px;width:100%"
+              onchange="saveProgressLesson(${it.document_id}, this.value)">
+        ${opts}
+      </select>
+    </div>`;
+  }).join('');
+  return `<div class="parent-panel" style="grid-column:1/-1">
+    <div class="head"><div class="ic blue">${icon('chart',20)}</div>
+      <div><h3>学习进度</h3><div class="sub">按「孩子 + 教材」分别设置当前课；听写、每日任务都跟着这个课走</div></div>
+      <button class="btn-ghost" style="margin-left:auto" onclick="progressDocId=null;progressRows=[];render()">关闭</button>
+    </div>
+    <div class="bd">
+      ${uid
+        ? (rows || '<div style="color:#8e9691;padding:8px 0">这本教材还没有拆出课程，或还没有绑定孩子</div>')
+        : '<div style="color:#8e9691;padding:8px 0">请先在右上角选择孩子</div>'}
+    </div>
+  </div>`;
+}
+
+function renderDocBind(){  if(bindDocId === null) return '';
   const rows = children.map(c=>`
     <label style="display:flex;align-items:center;gap:8px;padding:6px 0">
       <input type="checkbox" ${boundUsers.includes(c.id)?'checked':''} onchange="toggleDocBind(${bindDocId}, ${c.id}, this.checked)">

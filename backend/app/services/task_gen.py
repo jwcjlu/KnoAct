@@ -25,22 +25,40 @@ def _content_lesson_ids(db: Session, subject: str, document_ids: list[int], up_t
 
 
 def _current_lesson(db: Session, subject: str, user_id: int):
-    """按科返回当前课：只在孩子绑定的教材里选；LearningProgress 匹配 (user_id, subject)
-    则用它（须在绑定范围内），否则回退绑定教材该科第一课。未绑定任何教材则返回 None。"""
-    bound_doc_ids = [r[0] for r in db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
+    """按科返回当前课：只在孩子绑定的教材里选。
+
+    进度按 (user_id, document_id) 存，一个学科可能有多本教材；
+    这里优先用「该科有进度的那本」，否则取绑定教材里该科的第一本。
+    """
+    bound_doc_ids = [r[0] for r in
+                     db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
     if not bound_doc_ids:
         return None
-    prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
-    lessons = (db.query(Lesson)
-               .filter(Lesson.subject == subject, Lesson.document_id.in_(bound_doc_ids))
-               .order_by(Lesson.id).all())
-    if not lessons:
-        return None
-    if prog and prog.current_lesson_id:
-        for l in lessons:
-            if l.id == prog.current_lesson_id:
-                return l
-    return lessons[0]
+
+    from .learning_progress import get_progress
+
+    # 优先：绑定教材范围内、有 progress 的那本。
+    # 老记录（document_id 为 NULL）也要认：把它当作「该科唯一进度」。
+    rows = (db.query(LearningProgress)
+            .filter_by(user_id=user_id, subject=subject).all())
+    lesson = None
+    for row in rows:
+        if not row.current_lesson_id:
+            continue
+        if row.document_id is not None and row.document_id not in bound_doc_ids:
+            continue
+        cand = db.get(Lesson, row.current_lesson_id)
+        if cand is not None and (row.document_id is None
+                                 or cand.document_id in bound_doc_ids):
+            lesson = cand
+            break
+
+    if lesson is None:
+        lesson = (db.query(Lesson)
+                  .filter(Lesson.subject == subject,
+                          Lesson.document_id.in_(bound_doc_ids))
+                  .order_by(Lesson.id).first())
+    return lesson
 
 
 def _default_count(db: Session, key: str, fallback: int, child_id=None) -> int:

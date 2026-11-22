@@ -75,12 +75,21 @@ class LessonAudio(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class LearningProgress(Base):
+    """孩子在**某本教材**上的学习进度。
+
+    唯一键是 (user_id, document_id)：同一个孩子可以同时学语文的两本教材，
+    各自独立推进。`subject` 保留（冗余，便于按学科查询），`document_id` 为空的
+    老记录仍按 (user_id, subject) 回退，保证存量数据可用。
+    """
     __tablename__ = "learning_progress"
     __table_args__ = (
-        UniqueConstraint("user_id", "subject", name="uq_progress_user_subject"),
+        UniqueConstraint("user_id", "document_id", name="uq_progress_user_document"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # 老数据没有 document_id（NULL）；新数据必须有。SQLite/MySQL 的唯一约束都允许多个 NULL。
+    document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pdf_documents.id"), nullable=True, index=True)
     subject: Mapped[str] = mapped_column(String(16), default="语文")  # '语文' | '英语' | '数学'
     current_lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), nullable=True)
 

@@ -50,13 +50,9 @@ def dictation_words(subject: str = "语文",
                     _user: User = Depends(require_learning_user),
                     db: Session = Depends(get_db)):
     # 只取当前课的生词（与 task_gen._current_lesson 口径一致），而非全库所有已审核课
-    prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
-    lessons = db.query(Lesson).filter_by(subject=subject).order_by(Lesson.id).all()
-    lesson = None
-    if lessons:
-        if prog and prog.current_lesson_id:
-            lesson = next((l for l in lessons if l.id == prog.current_lesson_id), None)
-        lesson = lesson or lessons[0]
+    from ..services.task_gen import _current_lesson
+
+    lesson = _current_lesson(db, subject, user_id)
     if lesson is None:
         return []
     words = db.query(WordBank).filter_by(lesson_id=lesson.id).all()
@@ -322,9 +318,11 @@ def learning_lessons(subject: str = "语文",
                      db: Session = Depends(get_db)):
     """个性化学习选课列表：返回该学科所有课（含教材来源、当前进度标记）。"""
     from ..models import PdfDocument
+    from ..services.task_gen import _current_lesson
+
     lessons = db.query(Lesson).filter_by(subject=subject).order_by(Lesson.id).all()
-    prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
-    current_id = prog.current_lesson_id if prog else None
+    cur = _current_lesson(db, subject, user_id)
+    current_id = cur.id if cur else None
     out = []
     for l in lessons:
         doc = db.get(PdfDocument, l.document_id)
@@ -413,20 +411,13 @@ def assignment_grade(req: AssignmentGradeReq, user: User = Depends(require_learn
             record_attempt(db, req.user_id, "knowledge", kpid, bool(a.get("is_correct")),
                            bucket_id=bid)
     if passed:
-        lessons = db.query(Lesson).filter_by(subject=req.subject).order_by(Lesson.id).all()
-        prog = db.query(LearningProgress).filter_by(user_id=req.user_id, subject=req.subject).first()
-        if not prog:
-            prog = LearningProgress(user_id=req.user_id, subject=req.subject, current_lesson_id=None)
-            db.add(prog)
-        if lessons:
-            ids = [l.id for l in lessons]
-            cur = prog.current_lesson_id
-            if cur in ids:
-                idx = ids.index(cur)
-                nxt = ids[idx + 1] if idx + 1 < len(ids) else ids[-1]
-            else:
-                nxt = ids[0]
-            prog.current_lesson_id = nxt
+        from ..services.learning_progress import advance_lesson
+        from ..services.task_gen import _current_lesson
+
+        # 推进「这次考的那本教材」的进度
+        cur = _current_lesson(db, req.subject, req.user_id)
+        doc_id = cur.document_id if cur else None
+        advance_lesson(db, req.user_id, doc_id, req.subject)
         db.commit()
     return {"passed": passed, "rate": rate, "threshold": threshold,
             "correct": correct, "total": total, "results": results}
