@@ -772,3 +772,23 @@ def test_build_drafts_symbol_has_no_blanks_requirement():
     d = drafts[0]
     assert d.answer == ">"
     assert d.answer_json == {}
+
+
+def test_build_drafts_legacy_fill_without_blanks_degrades_to_oral():
+    """旧路径（无 work_mode）的 fill 题切不出 blanks 时降级成 oral，
+    否则它既没有 blanks 又保持 fill_blank，会被发布闸门永久挡住。"""
+    # 没有 blanks_of 回调、也没有 work_mode → 空数为 0 → 切不出 blanks
+    drafts = build_drafts(
+        [{"kind": "fill", "question": "$1+1=$", "answer": "2"}],
+        document_id=1,
+    )
+    assert drafts[0].qtype == "oral"
+    assert drafts[0].answer_json == {}
+
+
+def test_build_drafts_legacy_equation_without_blanks_degrades_to_oral():
+    drafts = build_drafts(
+        [{"kind": "equation", "question": "$4x - 5.2 = 5.2$", "answer": "2.6"}],
+        document_id=1,
+    )
+    assert drafts[0].qtype == "oral"

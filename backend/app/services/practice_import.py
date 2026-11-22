@@ -468,15 +468,16 @@ def build_drafts(
             if idx is not None:
                 d.answer_json = {"correct_index": int(idx)}
         elif not mode:
-            # 旧路径：fill_blank 按空数切分答案。
-            # 现有调用方通过 blanks_of 回调传空数，必须兼容。
+            # 旧路径（题库/OCR 链路，items 没有 work_mode）：
+            # fill_blank 按空数切答案；切不出 blanks 就降级成 oral——
+            # 否则该题既没有 blanks 又保持 fill_blank，会被发布闸门永久挡住。
             if qtype in ("fill_blank", "cloze"):
                 n = int((blanks_of(q) if blanks_of else 0)
                         or q.get("blanks_count") or 0)
                 old_blanks = split_blanks(d.answer, n) if n else None
                 if old_blanks:
                     d.answer_json = {"blanks": old_blanks}
-                elif n:
+                else:
                     d.qtype = "oral"
 
         out.append(d)
