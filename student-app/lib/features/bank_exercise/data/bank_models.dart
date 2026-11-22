@@ -47,6 +47,15 @@ class BankQuestion {
     this.analysis = '',
     this.passageId,
     this.passage,
+    this.groupId,
+    this.groupStem = '',
+    this.seqInGroup = 0,
+    this.isExample = false,
+    this.workMode = '',
+    this.inputUi = '',
+    this.answerKind = '',
+    this.answer = '',
+    this.blankCount = 1,
   });
 
   final int id;
@@ -57,6 +66,19 @@ class BankQuestion {
   final String analysis;
   final int? passageId;
   final ReadingPassageInfo? passage;
+  final int? groupId;
+  final String groupStem;
+  final int seqInGroup;
+  final bool isExample;
+  final String workMode;
+  final String inputUi;
+  final String answerKind;
+
+  /// 标准答案（多空题为逗号拼接）。家长端/核对用；判分在后端。
+  final String answer;
+
+  /// 该题要填几个空（后端 `blank_count`）。多空题据此渲染多个输入框。
+  final int blankCount;
 
   factory BankQuestion.fromJson(Map<String, dynamic> json) {
     final optsRaw = json['options'];
@@ -78,6 +100,15 @@ class BankQuestion {
       analysis: '${json['analysis'] ?? ''}',
       passageId: (json['passage_id'] as num?)?.toInt(),
       passage: passage,
+      groupId: (json['group_id'] as num?)?.toInt(),
+      groupStem: '${json['group_stem'] ?? ''}',
+      seqInGroup: (json['seq_in_group'] as num?)?.toInt() ?? 0,
+      isExample: json['is_example'] == true,
+      workMode: '${json['work_mode'] ?? ''}',
+      inputUi: '${json['input_ui'] ?? ''}',
+      answerKind: '${json['answer_kind'] ?? ''}',
+      answer: '${json['answer'] ?? ''}',
+      blankCount: (json['blank_count'] as num?)?.toInt() ?? 1,
     );
   }
 }
