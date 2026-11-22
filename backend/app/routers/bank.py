@@ -2,7 +2,7 @@
 import json
 import os
 import re
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import date as date_type
 from typing import Any
 
@@ -156,6 +156,10 @@ def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft]
             question_no=(d.question_no or None),
             source_document_id=d.source_document_id,
             image_path=d.image_path or "",
+            group_id=d.group_id,
+            seq_in_group=d.seq_in_group,
+            is_example=d.is_example,
+            work_mode=d.work_mode,
         )
         db.add(q)
         db.flush()
@@ -180,7 +184,10 @@ def _dict_to_draft(item: dict) -> QuestionDraft | None:
     q = (item.get("question") or "").strip()
     if not q:
         return None
-    return QuestionDraft(
+    # 先按 dataclass 字段名透传全部字段（避免漏字段），再对基础字段做归一化
+    allowed = {f.name for f in fields(QuestionDraft)}
+    base = {k: v for k, v in item.items() if k in allowed}
+    base.update(
         qtype=(item.get("qtype") or "short_answer").strip(),
         question=q,
         options=item.get("options") or [],
@@ -192,6 +199,7 @@ def _dict_to_draft(item: dict) -> QuestionDraft | None:
         passage_title=(item.get("passage_title") or "").strip(),
         passage_content=(item.get("passage_content") or "").strip(),
     )
+    return QuestionDraft(**base)
 
 
 def _assert_draft_subject(bank: QuestionBank, drafts: list[QuestionDraft]) -> None:
