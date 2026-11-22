@@ -449,7 +449,8 @@ db.query(PracticeQuestionGroup).filter(
 - **回归**：找规律题 = 1 个题组 + 4 个待做小题 + 3 个示例
 - **回归**：脱式题 `need_process=true`，只填数值不算完成
 - **泛化**：`ocr_import` 产出的 draft 带 `work_mode`，判分走 `grade_by_answer_kind`
-- **泛化**：`work_modes` 注册表不依赖任何具体入口（只依赖 `question_types`）
+- **泛化**：`work_modes` / `subjects` 注册表不依赖具体入口，只依赖 `question_types`
+- **学科**：上传 `语文`/`英语` 练习册时返回 400「该学科解析器尚未实现」（不静默乱导）
 
 Flutter
 - 题组展示：题干 + 示例 + 待做项
@@ -472,7 +473,9 @@ Flutter
 
 | 文件 | 改动 |
 | --- | --- |
-| `backend/app/core/work_modes.py` | 新增：`WorkModeSpec` + 注册表 |
+| `backend/app/core/work_modes.py` | 新增：`WorkModeSpec` + 数学题型注册表 |
+| `backend/app/core/subjects.py` | 新增：`SubjectSpec` 学科注册表（数学实现，语文/英语占位） |
+| `backend/app/services/parsers/math_page.py` | 新增：数学页面分析（提示词 + 结果解析） |
 | `backend/app/models.py` | 新增 `PracticeQuestionGroup`、`PracticeImportPage`；`Question` 加 4 列（裸 `group_id`） |
 | `backend/app/migrate_practice_groups.py` | 新增：建表（`create_all` 兜底）+ 加 4 列 + 建 `ix_questions_group`（**不删数据**） |
 | `backend/app/core/source_adapter.py` | `QuestionDraft` 加 `group_id`/`seq_in_group`/`is_example`/`work_mode` |
@@ -514,50 +517,79 @@ q_end = (job.question_end_page
 2. `routers/practice_import.py:_job_payload()` 计算 `question_pages`
 3. `main.py` 启动续跑时计算 `failed_pages` 范围
 
-### 九、与其他数学入口的泛化关系
+### 九、按学科泛化
 
-项目里现在有 4 条独立的数学题生成/解析路径，互不共享：
+**本期只做数学**，但结构按学科预留，以后加语文/英语不用重构。
 
-| 入口 | 用途 | 本期处理 |
+#### 9.1 学科注册表
+
+```python
+# core/subjects.py
+@dataclass(frozen=True)
+class SubjectSpec:
+    id: str                        # 数学 | 语文 | 英语
+    label: str
+    parser_id: str                 # 该学科用哪个页面解析器
+    work_mode_ids: tuple[str, ...]  # 该学科可用的题型（来自 work_modes 注册表）
+
+SUBJECTS: dict[str, SubjectSpec] = {
+    "数学": SubjectSpec("数学", "数学", "math_page", (
+        "oral", "vertical", "step", "equation", "pattern", "compare",
+        "unit_compare", "fill_vertical", "letter_pattern", "geometry",
+        "app", "choice", "judge", "other")),
+    # 以下本期不实现，仅占位表明扩展点
+    "语文": SubjectSpec("语文", "语文", "text_page", (
+        "pinyin", "dictation", "fill_blank", "reading", "comprehension", "other")),
+    "英语": SubjectSpec("英语", "英语", "text_page", (
+        "word_spelling", "listening", "cloze", "reading", "choice", "other")),
+}
+```
+
+#### 9.2 分层：通用编排 + 学科专用解析
+
+```
+services/practice_import.py          通用编排（建组/跨页合并/求答案/发布/待补）
+      │  按 subject 取 parser_id
+      ├─ services/parsers/math_page.py      ← 本期实现
+      └─ services/parsers/text_page.py      ← 语文/英语，以后实现
+```
+
+| 层 | 是否学科无关 | 本期状态 |
 | --- | --- | --- |
-| `services/practice_import.py` | 练习册 PDF 导入 | **重写**（题组 + 注册表） |
-| `services/ocr_import.py` `structure_questions_from_text` | 卷子拍照导入题库 | **对齐**：提示词改为输出 `work_mode` |
-| `services/math_gen.py` `generate_math_questions_split` | 每日任务现场出题 | 不动（语义是「出题」不是「解析」） |
-| `question_gen.py` / `knowledge_quiz.py` | 语文/英语题 | 不动 |
+| 导入编排（建组、跨页、发布、待补） | **是** | 实现（通用） |
+| 数据模型 `PracticeQuestionGroup` + `Question` | **是** | 实现（通用） |
+| 题型结构 `WorkModeSpec` | **是**（结构） | 实现（数学 14 种） |
+| 页面分析提示词 | 否 | 数学一份 |
+| 判分分派 `math_grade.py` | 否 | 数学一份 |
+| 学科注册表 `subjects.py` | **是** | 实现（语文/英语仅占位） |
 
-**抽取的公共层**（本期做）
+**为什么数据模型可以通用**：题组本身就是「一段题干 + 若干小题」，
+语文的「阅读短文 + 5 道小题」、英语的「完形填空 + 若干空」都天然是题组，
+`Question.answer_kind` 也够用（语文用 `text`，英语填空用 `numeric_list` 的近亲 `blanks`）。
 
-1. **`core/work_modes.py`** — 题型注册表（`WorkModeSpec`），所有数学入口共用
-2. **`services/math_grade.py`** — 统一判分入口，替代散落的判分调用
+#### 9.3 与现有数学入口的关系
+
+| 入口 | 本期处理 |
+| --- | --- |
+| `services/practice_import.py` | **重写**（走 `math_page` 解析器） |
+| `services/ocr_import.py`（卷子拍照） | **对齐**：提示词加 `work_mode`，判分走统一门面 |
+| `services/math_gen.py`（现场出题） | 不动（语义是「出题」不是「解析」） |
+| `question_gen.py` / `knowledge_quiz.py`（语文英语题） | 不动（本期不碰非数学解析） |
+
+**统一判分门面**（数学本期，其他学科以后加同构的）
 
 ```python
 # services/math_grade.py
 def grade_by_answer_kind(db, question, student_answer="", photo_bytes=None) -> dict:
-    """按 answer_kind 分派。所有数学入口都走它。
-
-    - number / equation        → grade_math_answer()
-    - numeric_list             → 逐空比较
-    - symbol / choice          → 精确匹配（归一化全半角）
-    - text                     → grade_subjective()
-    - photo（或 need_process） → grade_math_work_photo()
-    """
+    """按 answer_kind 分派：number/numeric_list/symbol/choice/text/photo。"""
 ```
 
-**`ocr_import` 对齐方式**（收益最大的改动：卷子拍照导入立刻获得题型识别）
+#### 9.4 以后接语文/英语要做什么（不在本期）
 
-- `_STRUCTURE_SYSTEM` 增加字段：`work_mode`（取自注册表）、`need_process`、`is_example`
-- 产出仍是 `QuestionDraft`，但带上 `work_mode`；入库后判分自动走 `grade_by_answer_kind`
-- 不引入题组概念（拍照卷子通常一题一组，暂不需要）
-
-**不做泛化的部分及理由**
-
-| 入口 | 不做的理由 |
-| --- | --- |
-| `math_gen` 现场出题 | 语义是「按教材内容出新题」，不是「解析已有题目」；提示词完全不同 |
-| `question_gen` / `knowledge_quiz` | 语文/英语题，题型体系不同（阅读、cloze 等） |
-
-**未来扩展路径**：若以后要让现场出题也带 `work_mode`，只需在其返回的 draft 上加字段，
-判分自动复用 `grade_by_answer_kind`，无需改判分代码。
+1. `work_modes` 加语文/英语题型（如 `pinyin` 拼音、`cloze` 完形）
+2. 写 `parsers/text_page.py`（提示词不同，输出结构相同）
+3. 写 `language_grade.py`（拼音/书写判分规则与数值不同）
+4. **数据模型、导入编排、跨页合并、发布闸门、待补清单零改动**
 
 ## 后续可扩展（不在本次范围）
 
