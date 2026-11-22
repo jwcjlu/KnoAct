@@ -50,3 +50,27 @@ def test_photo_kinds_map_to_camera():
 
 def test_all_fourteen_modes_present():
     assert len(REGISTRY) == 14
+
+
+from app.core.subjects import SUBJECTS, is_implemented
+from app.core.subjects import spec_of as subject_spec
+
+
+def test_math_subject_covers_registry_exactly():
+    """数学学科声明的题型必须与 work_modes 注册表完全一致（不多不少）。"""
+    math = SUBJECTS["数学"]
+    assert set(math.work_mode_ids) == set(REGISTRY)
+
+
+def test_placeholder_subjects_are_marked_unimplemented():
+    for name in ("语文", "英语"):
+        assert SUBJECTS[name].implemented is False
+        assert is_implemented(name) is False
+
+
+def test_math_is_implemented():
+    assert is_implemented("数学") is True
+
+
+def test_unknown_subject_falls_back_to_math():
+    assert subject_spec("").id == "数学"
