@@ -213,6 +213,11 @@ def build_drafts(
         # answer_json：发布闸门与判分都依赖它
         blanks = [str(x).strip() for x in (q.get("blanks") or []) if str(x).strip()]
         if kind == "numeric_list":
+            if not blanks and d.answer:
+                # 单空「找规律」题：solver 常按 number 返回单值、不带 blanks。
+                # 没有这一层兜底，该题会既过不了发布闸门、又不进「待补答案」
+                # （待补清单只查 answer == ""），结果静默消失。
+                blanks = [d.answer]
             if blanks:
                 d.answer_json = {"blanks": blanks}
         elif kind == "choice":
@@ -648,6 +653,14 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
                 _tick(job_id, idx, len(pages), seen_items)
                 continue
 
+            # 模型返回的不是可用 JSON：记为该页失败，不能伪装成「空白练习页」
+            # （否则 job 会标 done、0 题、还不可重试）
+            if result.get("parse_failed"):
+                failed_pages.append(pno)
+                _record_page(db, doc.id, pno, "practice", "", 0, "failed")
+                _tick(job_id, idx, len(pages), seen_items)
+                continue
+
             page_results.append((pno, result))
             _record_page(
                 db, doc.id, pno, result.get("page_type") or "practice",
@@ -666,6 +679,14 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
         groups = _groups_from_pages(page_results)
         groups = merge_cross_page_groups(groups) + image_groups
         groups.sort(key=lambda g: (g["page_start"], g["key"]))
+
+        # 全书一道题都没识别出来 → 明确失败，别让家长看到「导入 0 题」却以为成功
+        if not groups:
+            job.failed_pages = json.dumps(sorted(failed_pages or pages))
+            job.status = "failed"
+            job.error = "未识别到任何题目，请检查 PDF 是否为练习册或点击重试"
+            db.commit()
+            return
 
         job.status = "aligning"
         job.question_count = sum(len(g["items"]) for g in groups)

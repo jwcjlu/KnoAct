@@ -909,3 +909,63 @@ def test_retry_noncontiguous_pages_keeps_untouched_pages(setup_db, db, monkeypat
     assert "p6 的题" in texts
     assert "p2 的题" not in texts
     assert "p5 的题" not in texts
+
+
+def test_run_import_job_fails_when_no_groups_found(setup_db, db, monkeypatch):
+    """全书一道题都没识别出来 → job 必须标 failed 且可重试，
+    不能让家长看到「导入 0 道题」还以为成功了。"""
+    from app.models import PracticeImportJob
+    from app.services import practice_import as pi
+
+    job_id, _bank_id, _doc_id = _mk_job(db, "rj9", 1, "k.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    # 模型抽风：返回一段散文，不是 JSON
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "practice", "groups": [],
+                            "image_questions": [], "parse_failed": True})
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    job = db.get(PracticeImportJob, job_id)
+    assert job.status == "failed"
+    assert job.failed_pages == "[1]"
+
+
+def test_run_import_job_fails_on_empty_book(setup_db, db, monkeypatch):
+    """页分析成功但一道题都没有（例如整本都是目录）→ 也要标 failed。"""
+    from app.models import PracticeImportJob
+    from app.services import practice_import as pi
+
+    job_id, _bank_id, _doc_id = _mk_job(db, "rj10", 1, "l.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "blank", "groups": [],
+                            "image_questions": [], "parse_failed": False})
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    job = db.get(PracticeImportJob, job_id)
+    assert job.status == "failed"
+    assert "未识别到任何题目" in job.error
+
+
+def test_numeric_list_single_blank_falls_back_to_answer():
+    """找规律单空题：solver 只给 answer 不给 blanks 时，也要能过发布闸门。"""
+    from app.services.practice_import import _is_aligned, build_drafts
+
+    drafts = build_drafts(
+        [{"kind": "fill", "question": "$1111.05 \\div 0.9 =$ ____",
+          "answer": "1234.5", "work_mode": "pattern", "is_example": False,
+          "seq_in_group": 1, "group_id": 1}],
+        document_id=1,
+    )
+    d = drafts[0]
+    assert d.answer_json.get("blanks") == ["1234.5"]

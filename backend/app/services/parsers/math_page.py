@@ -66,8 +66,18 @@ def _safe_int(v) -> int | None:
         return None
 
 
-def _empty() -> dict:
-    return {"page_type": "practice", "groups": [], "image_questions": []}
+def _empty(*, parse_failed: bool = False) -> dict:
+    """安全的空结构。
+
+    `parse_failed=True` 表示「AI 的返回根本不是可用 JSON」，与「这页确实空白」
+    必须能区分：否则模型抽风会被记成 ok 的空白页，job 标 done、0 题、还不可重试。
+    """
+    return {
+        "page_type": "practice",
+        "groups": [],
+        "image_questions": [],
+        "parse_failed": parse_failed,
+    }
 
 
 def _norm_item(raw: dict, fallback_seq: int) -> dict:
@@ -119,20 +129,24 @@ def _norm_image(raw: dict) -> dict | None:
 
 
 def parse_page_analysis(raw: str) -> dict:
-    """AI 原始输出 → 规范化 dict。任何异常都返回安全的空结构，绝不抛。"""
+    """AI 原始输出 → 规范化 dict。任何异常都返回安全的空结构，绝不抛。
+
+    解析失败时返回 `parse_failed=True` 的空结构，供编排层记为该页失败
+    （而不是当成一页「没有题目的练习页」）。
+    """
     try:
         data = json.loads(raw or "")
     except (ValueError, TypeError):
         m = _JSON_RE.search(raw or "")
         if not m:
-            return _empty()
+            return _empty(parse_failed=True)
         try:
             data = json.loads(m.group(0))
         except (ValueError, TypeError):
-            return _empty()
+            return _empty(parse_failed=True)
 
     if not isinstance(data, dict):
-        return _empty()
+        return _empty(parse_failed=True)
 
     page_type = str(data.get("page_type") or "").strip()
     if page_type not in PAGE_TYPES:
@@ -154,7 +168,12 @@ def parse_page_analysis(raw: str) -> dict:
                 if norm:
                     images.append(norm)
 
-    return {"page_type": page_type, "groups": groups, "image_questions": images}
+    return {
+        "page_type": page_type,
+        "groups": groups,
+        "image_questions": images,
+        "parse_failed": False,
+    }
 
 
 def analyze_page(db, image_bytes: bytes, *, subject: str = "数学") -> dict:
