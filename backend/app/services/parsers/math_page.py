@@ -54,6 +54,13 @@ _PAGE_SYSTEM = (
     "  正确：$a \\times b =$（____）\n"
     "  正确：$x =$ ____\n"
     "\n"
+    "【不要输出裸露的 LaTeX 命令】\n"
+    "像 \\underline{\\hspace{2cm}}、\\hspace、\\text{} 这类命令**必须包在 $...$ 里**，\n"
+    "否则会以源码形式显示给孩子。\n"
+    "  错误：$603 - 239 =$\n        \\underline{\\hspace{2cm}}   ← 裸命令，会显示反斜杠\n"
+    "  正确：$603 - 239 =$ ____                ← 用空位标记更简单\n"
+    "  正确：$603 - 239 = \\underline{\\hspace{2cm}}$\n"
+    "\n"
     "【一道题里有多个空】\n"
     "如果一道题要填几个空（例如「则 a×b=（　）；a÷b=（　）」、"
     "「求下面各图形的面积」（几个图形各一个空）），按以下规则：\n"
@@ -105,6 +112,46 @@ _SPLIT_PLAIN_RE = re.compile(r"\$([^$]*?)\$\s*_{2,}\s*\$([^$]*)\$")
 _MATH_PAIR_RE = re.compile(r"\$([^$]*)\$")
 
 
+_BARE_LATEX_RE = re.compile(
+    r"(\\underline\s*\{(?:[^{}]|\{[^{}]*\})*\}"   # \underline{...}（允许一层嵌套）
+    r"|\\hspace\s*\{[^{}]*\}"
+    r"|\\text\s*\{[^{}]*\})")
+
+
+def _wrap_bare_latex(text: str) -> str:
+    r"""把裸露在 `$...$` 外的 LaTeX 命令包进 `$...$`。
+
+    模型常把「填空题横线」写成 `$603-239=$\n\underline{\hspace{2cm}}`——
+    后半截没被 `$` 包住，浏览器会把 `\underline...` 原样显示成源码。
+
+    实现要点：
+    - **真的跟踪是否在数学模式内**（数它前面有几个 `$`）。只用 `(?<!\$)`
+      不够：`$603 - 239 = \underline{...}$` 里 `\underline` 左邻是空格，
+      会被误判成裸命令而重复包裹，把公式弄坏。
+    - **整体匹配**：`\underline{\hspace{2cm}}` 必须一次性命中，
+      否则分开包会得到 `$\underline{$\hspace{2cm}$}$`。
+    """
+    if not text or "\\" not in text:
+        return text
+
+    out: list[str] = []
+    last = 0
+    in_math = False
+    for m in _BARE_LATEX_RE.finditer(text):
+        # 更新数学模式状态：看 [last, m.start()) 之间有几个 $
+        segment = text[last:m.start()]
+        if segment.count("$") % 2 == 1:
+            in_math = not in_math
+        out.append(segment)
+        if in_math:
+            out.append(m.group(1))
+        else:
+            out.append(f"${m.group(1)}$")
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
 def _dig_out_blank(m) -> str:
     inner = m.group(1)
     if "__" not in inner:
@@ -142,14 +189,46 @@ def _fix_blank_inside_math(text: str) -> str:
     return _MATH_PAIR_RE.sub(_dig_out_blank, t)
 
 
+
+_STRAY_OP_RE = re.compile(r"\$[ \t]*(?:\\times|\\div|\\pm|×|÷|\+)[ \t]*\$[ \t]*")
+
+
+def _clean_markup(text: str) -> str:
+    """统一清洗模型给出的题干标记。
+
+    顺序：修被劈开的公式 → 包住裸 LaTeX → 去掉竖式排版残留的孤立运算符。
+    最后一类来自竖式题：模型会把竖式里对齐用的 `×` 抄成独立一段
+    （`$204 \\times 75 =$\\n$\\times$ ____`），展示时题目下面会多出一个乘号。
+    """
+    t = _wrap_bare_latex(_fix_blank_inside_math((text or "").strip()))
+    # 只在「该片段紧跟着空位/行首/行尾」时才算残留，避免误删正常算式
+    t = _STRAY_OP_RE.sub(
+        lambda m: "" if _is_stray_op(text, m) else m.group(0), t)
+    return re.sub(r"[ \t]{2,}", " ", t).strip()
+
+
+def _is_stray_op(text: str, m) -> bool:
+    """判断这个 `$运算符$` 是不是竖式排版残留。
+
+    判据：它所在行除了它和空位标记之外没有别的东西。
+    """
+    line_start = text.rfind("\n", 0, m.start()) + 1
+    line_end = text.find("\n", m.end())
+    if line_end < 0:
+        line_end = len(text)
+    line = text[line_start:line_end]
+    rest = (line[:m.start() - line_start] + line[m.end() - line_start:])
+    rest = rest.replace("_", "").strip()
+    return rest == ""
+
+
 def _norm_item(raw: dict, fallback_seq: int) -> dict:
     seq = _safe_int(raw.get("seq"))
     return {
         "seq": seq if seq is not None else fallback_seq,
         "y": _safe_float(raw.get("y"), 0.0),
-        "text": _fix_blank_inside_math(str(raw.get("text") or "").strip()),
-        "answer_hint": _fix_blank_inside_math(
-            str(raw.get("answer_hint") or "").strip()),
+        "text": _clean_markup(str(raw.get("text") or "")),
+        "answer_hint": _clean_markup(str(raw.get("answer_hint") or "")),
         "is_example": bool(raw.get("is_example")),
     }
 

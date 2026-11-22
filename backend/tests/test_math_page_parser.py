@@ -193,3 +193,43 @@ def test_fix_blank_inside_math():
     assert one(r"$1111.05 \div 0.9 =$ ____") == r"$1111.05 \div 0.9 =$ ____"
     # 没有空位不动
     assert one(r"$1.08 \div 0.9 = 1.2$") == r"$1.08 \div 0.9 = 1.2$"
+
+
+def test_wrap_bare_latex():
+    r"""裸露在 $ 外的 \underline / \hspace / \text 会显示成源码，要自动包住。"""
+    from app.services.parsers.math_page import parse_page_analysis
+
+    def one(text):
+        return parse_page_analysis(json.dumps({
+            "page_type": "practice",
+            "groups": [{"stem": "", "work_mode": "vertical",
+                        "items": [{"seq": 1, "y": 0.1, "text": text}]}],
+            "image_questions": [],
+        }))["groups"][0]["items"][0]["text"]
+
+    # 真实踩到的：竖式题横线写在 $ 外
+    got = one("$603 - 239 =$\n\\underline{\\hspace{2cm}}")
+    assert r"$\underline{\hspace{2cm}}$" in got, got
+    assert "$603 - 239 =$\n$" in got, got
+
+    # 已经包好的不动
+    same = r"$603 - 239 = \underline{\hspace{2cm}}$"
+    assert one(same) == same
+
+    # 裸 \text{}
+    assert one(r"共 \text{个}") == r"共 $\text{个}$"
+
+    # 普通文本不动
+    assert one("求涂色部分的面积") == "求涂色部分的面积"
+
+
+def test_clean_markup_drops_stray_operator():
+    r"""竖式题会把对齐用的 × 抄成独立一段（$204 \times 75 =$\n$\times$ ____），要删掉。"""
+    from app.services.parsers.math_page import _clean_markup
+
+    assert _clean_markup("$204 \\times 75 =$\n$\\times$ ____") == "$204 \\times 75 =$\n____"
+    # 正常算式里的 × 不能删
+    assert _clean_markup("$a \\times b =$ ____") == "$a \\times b =$ ____"
+    assert _clean_markup("$3 \\times 4 = 12$") == "$3 \\times 4 = 12$"
+    # 无运算符的普通文本不动
+    assert _clean_markup("求涂色部分的面积") == "求涂色部分的面积"
