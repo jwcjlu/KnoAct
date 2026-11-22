@@ -92,13 +92,17 @@ class _HomePageState extends ConsumerState<HomePage> {
           showMessage(context, '题库任务配置有误，请联系家长');
           break;
         }
-        final extra = extraBankIds.isEmpty
-            ? ''
-            : '&extra_bank_ids=${extraBankIds.join(',')}';
-        final q = ids.isEmpty
-            ? 'bank_id=$bankId&task_id=${t.id}$extra'
-            : 'bank_id=$bankId&ids=${ids.join(',')}&task_id=${t.id}$extra';
-        context.push(taskRoute('/bank-exercise?$q', returnTo: '/home'));
+        // 注意：path 与 query 必须分开传。若把 "?a=1&b=2" 整串塞进 path，
+        // Uri(path: ...) 会把 ? 转义成 %3F，路由就匹配不上、点了没反应。
+        final query = <String, String>{
+          'bank_id': '$bankId',
+          if (ids.isNotEmpty) 'ids': ids.join(','),
+          if (extraBankIds.isNotEmpty)
+            'extra_bank_ids': extraBankIds.join(','),
+          'task_id': '${t.id}',
+        };
+        context.push(taskRoute('/bank-exercise',
+            returnTo: '/home', query: query));
       case TaskAction.openDrill:
         ref
             .read(drillControllerProvider.notifier)
