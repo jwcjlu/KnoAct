@@ -687,14 +687,260 @@ def _answers_of(answer_items: list[dict]) -> list[dict]:
     return out
 
 
-def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
-    """后台执行导入。retry_pages 非空时只重跑这些页。
+def _kind_of(work_mode: str) -> str:
+    """work_mode → build_drafts 的 kind 参数。
 
-    新开 Session：BackgroundTasks 执行时请求级 session 已失效。
+    ⚠️ 实际已不参与 qtype 决策：`build_drafts` 在 `work_mode` 非空时直接用
+    `legacy_qtype_of(mode)`，`kind` 只被 `work_mode` 为空的旧路径读取。
+    保留它只为让 item dict 结构稳定（旧路径/调试时还能看到 kind）。
+    """
+    return {
+        "oral": "oral", "equation": "equation", "pattern": "fill",
+        "letter_pattern": "fill", "compare": "fill", "unit_compare": "fill",
+        "vertical": "vertical", "step": "step", "fill_vertical": "vertical",
+        "geometry": "image", "app": "app", "choice": "other", "judge": "other",
+        "other": "other",
+    }.get(work_mode, "other")
+
+
+def _groups_from_pages(page_results: list[tuple[int, dict]]) -> list[dict]:
+    """把各页分析结果展开成待合并的题组列表（带 page_start/page_end/key）。"""
+    groups: list[dict] = []
+    for pno, result in page_results:
+        if result.get("page_type") != "practice":
+            continue
+        for idx, g in enumerate(result.get("groups") or []):
+            items = [{**it, "page": pno} for it in (g.get("items") or [])]
+            groups.append({
+                "key": f"{pno}-{idx:02d}",     # 两位补零，字符串排序也正确
+                "page_start": pno,
+                "page_end": pno,
+                "stem": g.get("stem") or "",
+                "instruction": g.get("instruction") or "",
+                "lesson_no": g.get("lesson_no"),
+                "lesson_title": g.get("lesson_title") or "",
+                "work_mode": g.get("work_mode") or "other",
+                "need_process": bool(g.get("need_process")),
+                "continues_next_page": bool(g.get("continues_next_page")),
+                "incomplete": False,
+                "items": items,
+            })
+    return groups
+
+
+def _image_group(pno: int, info: dict, pdf_path: str) -> dict | None:
+    """裁出图片题的图，返回一个自成一组、items 只有 1 条的题组。"""
+    from .practice_image import crop_question_image
+
+    out = (
+        f"uploads/practice_images/p{pno}_"
+        f"{int(info['start'] * 100)}_{int(info['end'] * 100)}.png"
+    )
+    saved = crop_question_image(pdf_path, pno - 1, info["start"], info["end"], out)
+    if not saved:
+        return None
+    title = info.get("title") or f"第{pno}页 图形题"
+    return {
+        "key": f"{pno}-img",
+        "page_start": pno,
+        "page_end": pno,
+        "stem": title,
+        "instruction": "",
+        "lesson_no": None,
+        "lesson_title": "",
+        "work_mode": "geometry",
+        "need_process": True,
+        "continues_next_page": False,
+        "incomplete": False,
+        "items": [{
+            "seq": 1, "y": info["start"], "text": title,
+            "answer_hint": "", "is_example": False,
+            "page": pno, "image_path": saved,
+        }],
+    }
+
+
+def _read_upload(path: str) -> bytes:
+    import os
+
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return b""
+
+
+def _extract_answer(raw: str) -> str:
+    """从视觉模型的 JSON 里取 answer。"""
+    try:
+        data = json.loads(raw or "{}")
+    except (ValueError, TypeError):
+        m = re.search(r"\{[\s\S]*\}", raw or "")
+        if not m:
+            return ""
+        try:
+            data = json.loads(m.group(0))
+        except (ValueError, TypeError):
+            return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("answer") or "").strip()
+
+
+def _solve_groups(db, groups: list[dict], *, on_progress=None) -> None:
+    """按组求答案，结果写回 it["answer"] / it["blanks"] / it["correct_index"]。
+
+    示例行跳过（页面已印答案，用它自己的 answer_hint）。
+    图片题（有 image_path）走视觉求答案；纯文本题走 solve_math_items。
+    """
+    from .ai import vision_json
+    from .practice_solve import solve_math_items
+
+    # 1) 文本题：按 answer_kind 分流
+    solve_items: list[dict] = []
+    solve_refs: list[dict] = []
+    choice_refs: list[dict] = []
+    for g in groups:
+        for it in g["items"]:
+            if it.get("is_example") or it.get("image_path"):
+                continue
+            # 示例行以外的题才求解
+            if g["work_mode"] in ("choice", "judge"):
+                choice_refs.append(it)
+                continue
+            solve_items.append({
+                "question": it.get("text") or "",
+                "work_mode": g["work_mode"],
+            })
+            solve_refs.append(it)
+
+    # 2) 选择题：单独问「正确选项是哪个」
+    for it in choice_refs:
+        it["correct_index"] = _solve_choice(db, it.get("text") or "")
+        if it["correct_index"] is not None:
+            it["answer"] = _LETTERS[it["correct_index"]] if (
+                it["correct_index"] < len(_LETTERS)) else ""
+
+    solved = solve_math_items(db, solve_items, on_progress=on_progress) if solve_items else {}
+    for idx, payload in solved.items():
+        if 0 <= idx < len(solve_refs):
+            ref = solve_refs[idx]
+            ref["answer"] = payload.get("answer") or ""
+            ref["blanks"] = payload.get("blanks") or []
+
+    # 3) 图片题：把裁出的 PNG 送视觉模型算答案
+    for g in groups:
+        for it in g["items"]:
+            if not it.get("image_path") or it.get("is_example"):
+                continue
+            if (it.get("answer") or "").strip():
+                continue
+            try:
+                raw = vision_json(
+                    db,
+                    _read_upload(it["image_path"]),
+                    system="你是小学数学老师。看图片里的题目，只输出 JSON："
+                           '{"answer":"最终结果数字"}。算不出就输出 {"answer":""}。',
+                    prompt="算出这道题的最终答案。",
+                )
+                it["answer"] = _extract_answer(raw)
+            except Exception:
+                it["answer"] = ""     # 进「待补答案」由家长填
+
+
+_LETTERS = "ABCD"
+
+
+def _solve_choice(db, question: str) -> int | None:
+    """让模型选出正确选项（0 起）。失败返回 None（该题进待补，不瞎猜）。"""
+    if not question.strip():
+        return None
+    try:
+        from .ai import get_provider
+
+        provider = get_provider(db)
+        if provider.name == "fake":
+            return None
+        raw = provider.generate(
+            prompt=(
+                "下面是一道选择题，请判断正确选项。只输出 JSON："
+                '{"correct":"A"}，correct 只能是 A/B/C/D。\n\n' + question
+            ),
+            system="你是小学数学老师，负责判断选择题的正确选项。只输出 JSON。",
+            json_mode=True,
+        )
+        data = json.loads(raw or "{}")
+        letter = str(data.get("correct") or "").strip().upper()
+        return _LETTERS.index(letter) if letter in _LETTERS else None
+    except Exception:
+        return None
+
+
+def _record_page(db, document_id: int, page_no: int, page_type: str,
+                 raw_text: str, group_count: int, status: str) -> None:
+    """落一行页记录（唯一约束 document_id+page_no，用 upsert 语义）。"""
+    from ..models import PracticeImportPage
+
+    row = (db.query(PracticeImportPage)
+           .filter_by(document_id=document_id, page_no=page_no).first())
+    if row is None:
+        row = PracticeImportPage(document_id=document_id, page_no=page_no)
+        db.add(row)
+    row.page_type = page_type
+    row.raw_text = raw_text[:60000]
+    row.group_count = group_count
+    row.status = status
+    db.commit()
+
+
+def _tick(job_id: int, done: int, total: int, items: int) -> None:
+    """独立 session 刷进度（长分析期间主 session 缓存会过期）。"""
+    from ..database import SessionLocal as _SL
+    from ..models import PracticeImportJob as _Job
+
+    s2 = _SL()
+    try:
+        j2 = s2.get(_Job, job_id)
+        if j2 is not None:
+            j2.done_pages = min(done, total)
+            j2.question_count = items
+            s2.commit()
+    except Exception:
+        s2.rollback()
+    finally:
+        s2.close()
+
+
+def _set_counts(job_id: int, *, aligned: int, questions: int) -> None:
+    from ..database import SessionLocal as _SL
+    from ..models import PracticeImportJob as _Job
+
+    s2 = _SL()
+    try:
+        j2 = s2.get(_Job, job_id)
+        if j2 is not None:
+            j2.aligned_count = aligned
+            j2.question_count = questions
+            s2.commit()
+    except Exception:
+        s2.rollback()
+    finally:
+        s2.close()
+
+
+def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
+    """后台执行导入：逐页视觉分析 → 跨页合并 → 求答案 → 建题组 → 挂小题 → 发布。
+
+    `retry_pages` 非空时只重跑这些页（会先删掉这些页对应的旧题组与小题）。
     """
     from ..database import SessionLocal
-    from ..models import PdfDocument, PracticeImportJob, QuestionBank
+    from ..models import (
+        PdfDocument, PracticeImportJob, PracticeImportPage,
+        PracticeQuestionGroup, Question, QuestionBank,
+    )
     from ..routers.bank import _persist_drafts
+    from .parsers.math_page import analyze_page
+    from .practice_image import render_page_png
 
     db = SessionLocal()
     try:
@@ -710,113 +956,151 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
             return
 
         job.status = "ocr"
-        # 重跑时清零上一轮的统计，避免面板显示旧数字
         job.aligned_count = 0
         job.question_count = 0
         job.published_count = 0
         db.commit()
 
         q_start = job.question_start_page or 1
-        q_end = job.question_end_page or (job.answer_start_page or 1) - 1
-        a_start = job.answer_start_page or 1
-        a_end = job.answer_end_page or a_start
-
-        total_pages = (q_end - q_start + 1) + (a_end - a_start + 1)
-
-        def _progress(done: int, items_so_far: list[dict]) -> None:
-            """每页 OCR 完就刷新进度：done_pages 与已识别题数。
-
-            独立 session：长时间 OCR 期间主 session 缓存会过期。
-            """
-            from ..database import SessionLocal as _SL
-            from ..models import PracticeImportJob as _Job
-
-            s2 = _SL()
-            try:
-                j2 = s2.get(_Job, job_id)
-                if j2 is not None:
-                    j2.done_pages = min(done, total_pages)
-                    j2.question_count = len(items_so_far)
-                    s2.commit()
-            except Exception:
-                s2.rollback()
-            finally:
-                s2.close()
-
+        # 答案页可选：没填就用 total_pages 兜底（三处派生逻辑必须字面一致）
+        q_end = job.question_end_page or job.total_pages or q_start
+        if q_end < q_start:
+            q_end = q_start
+        pages = list(range(q_start, q_end + 1))
         if retry_pages:
-            q_pages = [p for p in retry_pages if q_start <= p <= q_end]
-            # 重跑前删掉这些页的旧题，避免重复入库
-            from ..models import Question as _Q
+            wanted = set(retry_pages)
+            picked_pages = [p for p in pages if p in wanted]
+            if picked_pages:
+                pages = picked_pages
 
-            db.query(_Q).filter(
-                _Q.bank_id == bank.id,
-                _Q.lesson_no.in_(q_pages) if q_pages else False,
+        # 重跑：先删这些页对应的题组与小题（group_id 无外键，必须显式删）
+        if retry_pages:
+            old = (db.query(PracticeQuestionGroup)
+                   .filter(PracticeQuestionGroup.bank_id == bank.id,
+                           PracticeQuestionGroup.page_start.in_(pages))
+                   .all())
+            gids = [g.id for g in old]
+            if gids:
+                db.query(Question).filter(
+                    Question.group_id.in_(gids)).delete(synchronize_session=False)
+                db.query(PracticeQuestionGroup).filter(
+                    PracticeQuestionGroup.id.in_(gids)).delete(
+                    synchronize_session=False)
+            db.query(PracticeImportPage).filter(
+                PracticeImportPage.document_id == doc.id,
+                PracticeImportPage.page_no.in_(pages),
             ).delete(synchronize_session=False)
             db.commit()
-        else:
-            q_pages = list(range(q_start, q_end + 1))
 
-        q_items, q_failed = _parse_pages(
-            db, doc.storage_path, q_pages, on_progress=_progress)
-
-        # 答案用 AI 求解：不依赖答案页 OCR，也不会因页间错位而整体错配
-        job.status = "aligning"
-        job.question_count = len(q_items)
-        db.commit()
-
-        from .practice_solve import solve_math_items
-
-        # 解题阶段也要报进度：按批回调刷新 aligned_count（前端显示「已对齐」）
-        def _solve_progress(done: int, total: int) -> None:
-            from ..database import SessionLocal as _SL
-            from ..models import PracticeImportJob as _Job
-
-            s2 = _SL()
-            try:
-                j2 = s2.get(_Job, job_id)
-                if j2 is not None:
-                    j2.aligned_count = done
-                    j2.question_count = total
-                    s2.commit()
-            except Exception:
-                s2.rollback()
-            finally:
-                s2.close()
-
-        # 图片题没有可解的算式，答案留空（进「待补答案」由家长填）
-        solvable = [it for it in q_items if it.get("kind") != "image"]
-        solved = (
-            solve_math_items(db, solvable, on_progress=_solve_progress)
-            if solvable else {}
-        )
-        aligned: list[dict] = []
-        idx_solvable = 0
-        for it in q_items:
-            if it.get("kind") == "image":
-                aligned.append({**it, "answer": ""})
+        # 逐页分析
+        page_results: list[tuple[int, dict]] = []
+        failed_pages: list[int] = []
+        image_groups: list[dict] = []
+        seen_items = 0
+        for idx, pno in enumerate(pages, start=1):
+            img = render_page_png(doc.storage_path, pno - 1, dpi=150)
+            if not img:
+                failed_pages.append(pno)
+                _record_page(db, doc.id, pno, "practice", "", 0, "failed")
+                _tick(job_id, idx, len(pages), seen_items)
                 continue
-            payload = solved.get(idx_solvable) or {}
-            ans = (payload.get("answer") or "").strip() if isinstance(payload, dict) else ""
-            idx_solvable += 1
-            if ans:
-                aligned.append({**it, "answer": ans})
-        job.aligned_count = len(aligned)
+            try:
+                result = analyze_page(db, img, subject=bank.subject or "数学")
+            except Exception:
+                failed_pages.append(pno)
+                _record_page(db, doc.id, pno, "practice", "", 0, "failed")
+                _tick(job_id, idx, len(pages), seen_items)
+                continue
+
+            page_results.append((pno, result))
+            _record_page(
+                db, doc.id, pno, result.get("page_type") or "practice",
+                json.dumps(result, ensure_ascii=False),
+                len(result.get("groups") or []), "ok",
+            )
+            for info in result.get("image_questions") or []:
+                g = _image_group(pno, info, doc.storage_path)
+                if g:
+                    image_groups.append(g)
+            seen_items += sum(len(g.get("items") or [])
+                              for g in (result.get("groups") or []))
+            _tick(job_id, idx, len(pages), seen_items)
+
+        # 跨页合并（图片题自成一组，不参与合并）
+        groups = _groups_from_pages(page_results)
+        groups = merge_cross_page_groups(groups) + image_groups
+        groups.sort(key=lambda g: (g["page_start"], g["key"]))
+
+        job.status = "aligning"
+        job.question_count = sum(len(g["items"]) for g in groups)
         db.commit()
 
-        drafts = build_drafts(aligned, document_id=job.document_id)
-        _persist_drafts(db, bank, drafts, "practice_pdf")
-        # 必须在 persist 之后设置：_persist_drafts 会把 manual 改成 third_party
-        bank.source = "practice_pdf"
+        _solve_groups(
+            db, groups,
+            on_progress=lambda done, total: _set_counts(
+                job_id, aligned=done, questions=total),
+        )
+        job.aligned_count = sum(
+            1 for g in groups for it in g["items"] if (it.get("answer") or "").strip()
+        )
         db.commit()
 
+        # 题组先建，小题后挂
+        all_drafts = []
+        for g in groups:
+            row = PracticeQuestionGroup(
+                bank_id=bank.id, user_id=bank.user_id,
+                lesson_no=g.get("lesson_no"),
+                lesson_title=g.get("lesson_title") or "",
+                stem=g.get("stem") or "",
+                instruction=g.get("instruction") or "",
+                work_mode=g.get("work_mode") or "other",
+                need_process=bool(g.get("need_process")),
+                page_start=g["page_start"], page_end=g["page_end"],
+                source_document_id=job.document_id,
+                incomplete=bool(g.get("incomplete")),
+            )
+            db.add(row)
+            db.flush()
+
+            items = []
+            for seq, it in enumerate(g["items"], start=1):
+                # 示例行的答案来自页面印好的 answer_hint（AI 不重算）
+                answer = (it.get("answer") or it.get("answer_hint") or "").strip()
+                items.append({
+                    "kind": _kind_of(g["work_mode"]),
+                    "question": it.get("text") or "",
+                    "answer": answer,
+                    "blanks": it.get("blanks") or [],
+                    "correct_index": it.get("correct_index"),
+                    "seq_in_group": seq,
+                    "is_example": bool(it.get("is_example")),
+                    "work_mode": g.get("work_mode") or "other",
+                    "lesson_no": g.get("lesson_no") or g["page_start"],
+                    "lesson_title": g.get("lesson_title") or "",
+                    "image_path": it.get("image_path") or "",
+                    "page": g["page_start"],
+                    "group_id": row.id,
+                })
+            all_drafts.extend(build_drafts(items, document_id=job.document_id))
+        db.commit()
+
+        _persist_drafts(db, bank, all_drafts, "practice_pdf")
+        bank.source = "practice_pdf"     # _persist_drafts 会把 manual 改成 third_party
+        db.commit()
+
+        # 示例行也发布：前端要读它来展示「印好的示例」，但不进每日一练
+        # （task_gen._pick_practice_questions 过滤 is_example == False）
+        db.query(Question).filter(
+            Question.bank_id == bank.id, Question.is_example.is_(True)
+        ).update({"status": "published"}, synchronize_session=False)
         job.published_count = publish_aligned(db, bank.id)
+        db.commit()
 
-        failed = sorted(q_failed)
-        job.failed_pages = json.dumps(failed)
-        total = q_end - q_start + 1
-        job.done_pages = max(0, total - len(failed))
-        job.status = "failed" if failed else "done"
-        job.error = f"{len(failed)} 页识别失败，可重试" if failed else ""
+        job.failed_pages = json.dumps(sorted(failed_pages))
+        job.done_pages = max(0, len(pages) - len(failed_pages))
+        job.status = "failed" if failed_pages else "done"
+        job.error = f"{len(failed_pages)} 页识别失败，可重试" if failed_pages else ""
         db.commit()
     except Exception as exc:  # noqa: BLE001
         try:

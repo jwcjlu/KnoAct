@@ -200,3 +200,197 @@ def test_is_aligned_empty_answer_never_published(setup_db, db):
         q = Question(qtype="oral", qtype_category="subjective", question="x",
                      answer="", answer_json="{}", work_mode=mode)
         assert _is_aligned(q) is False, mode
+
+
+import json  # noqa: E402
+
+
+def _mk_job(db, prefix, pages, doc_name):
+    """建 parent + bank + document + job，返回 (job_id, bank_id, doc_id)。"""
+    from app.models import PdfDocument, PracticeImportJob, QuestionBank
+    from conftest import make_account
+
+    parent = make_account(db, f"{prefix}_p", role="parent")
+    doc = PdfDocument(filename=doc_name, subject="数学",
+                      storage_path=f"D:/tmp/{doc_name}", content_kind="practice")
+    db.add(doc)
+    db.flush()
+    bank = QuestionBank(user_id=parent.id, title="练习册", subject="数学",
+                        grade=5, source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    job = PracticeImportJob(user_id=parent.id, bank_id=bank.id, document_id=doc.id,
+                            total_pages=pages, question_start_page=1,
+                            question_end_page=pages)
+    db.add(job)
+    db.commit()
+    return job.id, bank.id, doc.id
+
+
+def test_run_import_job_creates_groups_and_items(setup_db, db, monkeypatch):
+    """2 页 → 1 个题组（跨页合并）+ 4 个小题（3 示例 + 1 待做）。"""
+    from app.models import PracticeQuestionGroup, Question
+    from app.services import practice_import as pi
+
+    job_id, bank_id, _doc_id = _mk_job(db, "rj1", 2, "b.pdf")
+
+    page1 = {
+        "page_type": "practice",
+        "groups": [{
+            "stem": "不计算，运用规律直接写出得数",
+            "instruction": "", "lesson_no": 3,
+            "lesson_title": "第3课时 一个数除以小数",
+            "work_mode": "pattern", "need_process": False,
+            "continues_next_page": True,
+            "items": [
+                {"seq": 1, "y": 0.2, "text": "$1.08 \\div 0.9 = 1.2$",
+                 "answer_hint": "1.2", "is_example": True},
+                {"seq": 2, "y": 0.4, "text": "$11.106 \\div 0.9 = 12.34$",
+                 "answer_hint": "12.34", "is_example": True},
+            ],
+        }],
+        "image_questions": [],
+    }
+    page2 = {
+        "page_type": "practice",
+        "groups": [{
+            "stem": "不计算，运用规律直接写出得数",
+            "instruction": "", "lesson_no": 3,
+            "lesson_title": "第3课时 一个数除以小数",
+            "work_mode": "pattern", "need_process": False,
+            "continues_next_page": False,
+            "items": [
+                {"seq": 3, "y": 0.2, "text": "$111.06 \\div 0.9 = 123.4$",
+                 "answer_hint": "123.4", "is_example": True},
+                {"seq": 4, "y": 0.4, "text": "$1111.05 \\div 0.9 =$ ____",
+                 "answer_hint": "", "is_example": False},
+            ],
+        }],
+        "image_questions": [],
+    }
+
+    # render_page_png 收到的是 pno-1（0-based），所以 fake 的键是 0/1
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: f"png{idx}".encode())
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {0: page1, 1: page2}[int(img[-1:])])
+    # 该组是 pattern（answer_kind=numeric_list），必须返回 blanks，
+    # 否则 answer_json={} → 发布闸门挡下 → todo[0].status 不会是 published
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {
+            0: {"kind": "numeric_list", "blanks": ["1234.5"],
+                "answer": "1234.5"},
+        },
+    )
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    from app.models import PracticeImportJob
+
+    job = db.get(PracticeImportJob, job_id)
+    assert job.status == "done", job.error
+
+    groups = db.query(PracticeQuestionGroup).filter_by(bank_id=bank_id).all()
+    assert len(groups) == 1
+    assert groups[0].page_start == 1 and groups[0].page_end == 2
+    assert groups[0].lesson_no == 3
+    assert groups[0].lesson_title == "第3课时 一个数除以小数"
+
+    qs = (db.query(Question).filter_by(bank_id=bank_id)
+          .order_by(Question.seq_in_group).all())
+    assert len(qs) == 4
+    assert sum(1 for q in qs if q.is_example) == 3
+    todo = [q for q in qs if not q.is_example]
+    assert len(todo) == 1
+    assert todo[0].group_id == groups[0].id
+    assert todo[0].answer == "1234.5"
+    assert json.loads(todo[0].answer_json)["blanks"] == ["1234.5"]
+    assert todo[0].status == "published"
+    # 示例行也发布（前端要读它来展示），但不进每日一练（Task 15 过滤）
+    assert all(q.status == "published" for q in qs if q.is_example)
+
+
+def test_run_import_job_skips_non_practice_pages(setup_db, db, monkeypatch):
+    """目录页/答案页不入库，但要留页记录。"""
+    from app.models import PracticeImportPage, PracticeQuestionGroup, Question
+    from app.services import practice_import as pi
+
+    job_id, bank_id, doc_id = _mk_job(db, "rj2", 2, "c.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "toc", "groups": [],
+                            "image_questions": []})
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    assert db.query(PracticeQuestionGroup).filter_by(bank_id=bank_id).count() == 0
+    assert db.query(Question).filter_by(bank_id=bank_id).count() == 0
+    pages = db.query(PracticeImportPage).filter_by(document_id=doc_id).all()
+    assert len(pages) == 2
+    assert all(p.page_type == "toc" for p in pages)
+
+
+def test_run_import_job_records_page_rows(setup_db, db, monkeypatch):
+    from app.models import PracticeImportPage
+    from app.services import practice_import as pi
+
+    job_id, _bank_id, doc_id = _mk_job(db, "rj3", 1, "d.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "practice",
+                            "groups": [{
+                                "stem": "", "instruction": "", "lesson_no": None,
+                                "lesson_title": "", "work_mode": "oral",
+                                "need_process": False,
+                                "continues_next_page": False,
+                                "items": [{"seq": 1, "y": 0.1, "text": "1+1=____",
+                                           "answer_hint": "", "is_example": False}],
+                            }],
+                            "image_questions": []})
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {0: {"kind": "number", "answer": "2"}},
+    )
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    pages = db.query(PracticeImportPage).filter_by(document_id=doc_id).all()
+    assert len(pages) == 1
+    assert pages[0].page_no == 1
+    assert pages[0].page_type == "practice"
+    assert pages[0].group_count == 1
+
+
+def test_run_import_job_marks_failed_page(setup_db, db, monkeypatch):
+    """AI 抛异常时该页标失败，job 标 failed 且可重试。"""
+    from app.models import PracticeImportJob, PracticeImportPage
+    from app.services import practice_import as pi
+
+    job_id, _bank_id, doc_id = _mk_job(db, "rj4", 1, "e.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+
+    def _boom(db_, img, **kw):
+        raise RuntimeError("vision down")
+
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page", _boom)
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    job = db.get(PracticeImportJob, job_id)
+    assert job.status == "failed"
+    assert job.failed_pages == "[1]"
+    pages = db.query(PracticeImportPage).filter_by(document_id=doc_id).all()
+    assert pages[0].status == "failed"

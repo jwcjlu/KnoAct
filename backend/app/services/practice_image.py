@@ -65,6 +65,20 @@ def detect_image_questions(db, pdf_path: str, page_index: int) -> list[dict]:
     return [info] if info else []
 
 
+def render_page_png(pdf_path: str, page_index: int, dpi: int = 150) -> bytes:
+    """把 PDF 某页渲染成 PNG 字节流（page_index 0-based）。失败返回 b""。
+
+    整页分析用：一次视觉调用同时拿到 OCR 文本与结构，取代旧的
+    `_ocr_text` + `detect_image_questions` 两次调用。
+    """
+    from .pdf_split import _render_page_png
+
+    try:
+        return _render_page_png(pdf_path, page_index, dpi=dpi)
+    except Exception:
+        return b""
+
+
 def crop_question_image(
     pdf_path: str,
     page_index: int,
