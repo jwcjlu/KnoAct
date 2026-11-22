@@ -58,7 +58,7 @@
 
 ```
 PDF 页图
-  ↓  每页 1 次视觉调用（OCR + 结构化合并返回）
+  ↓  ai.vision_json(db, png, system, prompt)   ← 新增，图片 + JSON 一次搞定
 页面分析结果 { page_type, groups[], image_questions[] }
   ↓  全书扫完，统一跨页合并
 题组列表
@@ -168,7 +168,15 @@ work_mode: Mapped[str] = mapped_column(String(24), default="")
 
 ### 四、AI 页面分析输出约定
 
-每页一次视觉调用，返回：
+**调用契约**：每页一次 `ai.vision_json(db, page_png_bytes, system=_PAGE_SYSTEM, prompt=_PAGE_PROMPT)`
+→ 返回 JSON 字符串。
+
+> 为什么必须新增 `vision_json`：`services/ai.py` 现有的 `generate(prompt, system, json_mode)`
+> **只接受文本**（无图片入参），`ocr_image(db, image_bytes, instruction)` 能带图
+> **但不支持 `json_mode`、也不接受 system**。整页分析两者都要，所以新增一个薄函数
+> （内部复用 `ocr_image` 的 `image_url` + base64 组装）。
+
+每页返回：
 
 ```json
 {
@@ -220,9 +228,9 @@ work_mode: Mapped[str] = mapped_column(String(24), default="")
 
 > **图片题的答案从哪来**：裁图题组只有标题、没有题面文字，`solve_math_items` 看不到图，
 > 纯文本求答案必然失败。因此图片题**求答案时把裁出的 PNG 一并送视觉模型**
-> （`provider.generate` 走 `ocr_image` 同款视觉通道，带上题干标题+图片）；
-> 仍失败则该题 `pending`、进「待补答案」由家长手动补。**不采用「自动跳过」**——
-> `photo`/`geometry` 的 `answer` 恒非空是发布闸门的前提。
+> （调 `ai.vision_json()`，带上题干标题 + 图片；**不是** `provider.generate`，
+> 后者无图片入参）；仍失败则该题 `pending`、进「待补答案」由家长手动补。
+> **不采用「自动跳过」**——`photo`/`geometry` 的 `answer` 恒非空是发布闸门的前提。
 
 **`practice_image.detect_image_questions` 的调整**：
 - 新契约下页级 `image_questions` 由 `parsers/math_page.py` 一次返回（不再是独立调用）
@@ -394,8 +402,11 @@ Question.answer_json = '{"blanks": ["1.2", "1.44", "1.728", "2.0736"]}'  # 判�
 现有实现返回 `dict[int, str]`（单值）。改为：
 
 ```python
-def solve_practice_items(db, items: list[dict], *, on_progress=None) -> dict[int, dict]:
-    """返回 {列表下标: {"kind": "number|numeric_list|symbol", "answer": str, "blanks": [...]}}"""
+def solve_math_items(db, items: list[dict], *, on_progress=None) -> dict[int, dict]:
+    """保留原函数名；仅返回类型由 dict[int, str] 改为 dict[int, dict]。
+
+    返回 {列表下标: {"kind": "number|numeric_list|symbol", "answer": str, "blanks": [...]}}
+    """
 ```
 
 - `number` → `{"answer": "13.4"}`
@@ -476,7 +487,8 @@ db.query(PracticeQuestionGroup).filter(
 - **题组入库**：导入后 `group_id` 非空，且题组数 = 跨页合并后的组数
 - **重导入幂等**：同一 doc 重导后题组不累积（旧组显式删除）
 - **答案页可选**：`answer_start_page=None` 时仍能跑满 `total_pages`
-- **回归**：找规律题 = 1 个题组 + 4 个待做小题 + 3 个示例
+- **回归（对齐 §4 样例）**：找规律题 = 1 个题组、共 **4 个 items**（3 个 `is_example`
+  + 1 个待做），且待做项 `question` 以 `____` 结尾
 - **回归**：脱式题 `need_process=true`，只填数值不算完成
 - **泛化**：`ocr_import` 产出的 draft 带 `work_mode`，判分走 `grade_by_answer_kind`
 - **泛化**：`work_modes` / `subjects` 注册表不依赖具体入口，只依赖 `question_types`
@@ -534,23 +546,24 @@ parent-web
 | --- | --- |
 | `backend/app/core/work_modes.py` | 新增：`WorkModeSpec` + 数学题型注册表 |
 | `backend/app/core/subjects.py` | 新增：`SubjectSpec` 学科注册表（数学实现，语文/英语占位） |
-| `backend/app/services/parsers/math_page.py` | 新增：数学整页分析——**提示词 + 结果解析 + 调用 `provider.generate(json_mode=True)`**（§4/§9.2 引用的「页面分析」都指这个文件） |
+| `backend/app/services/parsers/math_page.py` | 新增：数学整页分析——`_PAGE_SYSTEM`/`_PAGE_PROMPT`（含题目格式约束：空位 `____`、竖式 `□` 保留、每行独立 `$...$`、数学式用基础 LaTeX、中文不进 `$`；§四 的 JSON 示例即 few-shot 样例）+ 结果解析 + 调 `ai.vision_json()`。§4/§9.2 引用的「页面分析」都指这个文件 |
 | `backend/app/models.py` | 新增 `PracticeQuestionGroup`、`PracticeImportPage`；`Question` 加 4 列（裸 `group_id`） |
+| `backend/app/services/ai.py` | **新增 `vision_json(db, image_bytes, system, prompt) -> str`**：现有 `generate()` 只收文本、`ocr_image()` 不支持 JSON，整页分析必须两者兼有。实现照 `ocr_image` 的 `image_url` 组装方式，另加 `response_format={"type":"json_object"}` 与 `system` 消息 |
 | `backend/app/migrate_practice_groups.py` | 新增：建表（`create_all` 兜底）+ 加 4 列 + 建 `ix_questions_group`（**不删数据**） |
 | `backend/app/core/source_adapter.py` | `QuestionDraft` 加 `group_id`/`seq_in_group`/`is_example`/`work_mode` |
 | `backend/app/routers/bank.py` | `_persist_drafts` 透传 4 个新字段；`GET /{bank_id}/questions` 返回题组题干/示例/`work_mode`/`input_ui`/`answer_kind`；`POST /submit` 有 `work_mode` 时改走 `grade_practice_item` |
-| `backend/app/services/parsers/math_page.py` | 提示词加「题目格式约束」（空位 `____`、竖式 `□` 保留、每行独立 `$...$`、数学式用基础 LaTeX、中文不进 `$`）；§四 的 JSON 示例即 few-shot 样例 |
 | `backend/app/services/practice_grade.py` | 新增：按 `answer_kind` 分派判分（`grade_by_answer_kind` 的**薄包装**，负责把 `Question`/`PracticeQuestionGroup` 的字段拆出来） |
 | `backend/app/services/math_grade.py` | 新增：**所有数学入口共用的判分门面**（`grade_by_answer_kind`，唯一一份按 `answer_kind` 分派的实现） |
 | `backend/app/services/ocr_import.py` | 对齐：`_STRUCTURE_SYSTEM` 增 `work_mode`/`need_process`/`is_example`；`content` 白名单补 `$...$`（与 §十 一致）；判分改走 `math_grade` |
 | `backend/app/services/practice_solve.py` | **保留函数名 `solve_math_items`**，返回类型改为 `dict[int, dict]`；同步改 `tests/test_practice_import.py` 的 monkeypatch |
-| `backend/app/services/practice_image.py` | **删除** `detect_image_questions()`（其 `_IMAGE_HINT_RE` 实际在 `practice_import.py:479`，随该文件重写一并移除）；保留 `crop_question_image()` |
+| `backend/app/services/practice_image.py` | **删除** `detect_image_questions()`；保留 `crop_question_image()` |
+| `backend/app/services/practice_import.py` | 重写：页面分析 + 跨页合并 + **先建题组再挂小题**；`retry_pages` 同步删旧题组；**`_strip_answer` 加 `is_example` 参数并感知 `$` 边界**（见 §10.2）；同时移除 `_IMAGE_HINT_RE`（在旧文件第 479 行）；**删除** `parse_lesson_page`/`_split_row`/`parse_answer_page`/`align_answers`/`align_by_order` 及其测试 |
 | `backend/app/routers/practice_import.py` | 题组浏览；待补清单过滤 `is_example`；页类型查询与修改；重新导入清理入口 |
 | `backend/app/routers/practice.py` | `/preview` 返回题组题干；**新增** `/records` 与 `/answer-photo` |
 | `backend/app/routers/pdf.py` | `delete_document` 时显式删除该 doc 的题组与页记录 |
 | `backend/app/services/task_gen.py` | 抽题按**小题**，带出题组题干与示例 |
 | `backend/app/main.py` | 启动跑新迁移（仅 schema）；续跑范围回退到 `total_pages` |
-| `parent-web/app.js` | 题组形式展示；页类型可修正；重新导入二次确认；答案页改为可选；`renderQuestionHtml` 对 `$...$` 输出 `math-tex` 占位并由 `decorateMath` 渲染；`____`→下划线、`○`→符号占位、`□`→小空框 |
+| `parent-web/app.js` | 题组形式展示；页类型可修正；重新导入二次确认；答案页改为可选；`renderQuestionHtml` 不再剥 `$`，输出 `<span class="math-tex" data-tex>` 并由新增的 `decorateMath(root)` 调 `katex.render`；`____`→下划线、`○`→符号占位、`□`→小空框 |
 | `student-app/lib/features/bank_exercise/data/bank_models.dart` | 题目模型加 `groupStem`/`examples`/`workMode`/`inputUi`/`answerKind` |
 | `student-app/lib/core/widgets/math_text.dart` | 新增：`$...$` 切分 + `Math.tex` 行内渲染 + 短公式降级纯文本 + `onErrorFallback` |
 | `student-app/lib/features/bank_exercise/question_html.dart` | 新增 `____`→输入框、`○`→符号按钮、`□`→小输入框（竖式用）、竖式行首空白保留；`_stripDollars` 改为委托 `math_text`（不再静默剥 `$`） |
@@ -559,9 +572,7 @@ parent-web
 | `student-app/pubspec.yaml` | **已加** `flutter_math_fork: ^0.7.4`（工作区现有改动，KaTeX 字体随包 617 KB） |
 | `parent-web/vendor/katex/`（新增） | `katex.min.js` + `katex.min.css` + `fonts/`（本地内置，不走 CDN） |
 | `parent-web/index.html` | 引入 `vendor/katex/katex.min.css` 与 `katex.min.js` |
-| `parent-web/app.js` | `renderQuestionHtml` 不再剥 `$`，输出 `<span class="math-tex" data-tex>`；新增 `decorateMath(root)` 调 `katex.render`；`____`→下划线、`○`→符号占位 |
 | `parent-web/Dockerfile` | **必须改**：`COPY index.html app.js ./` + `COPY vendor/ .../vendor/`（否则镜像 404 静默降级） |
-| `backend/app/services/practice_import.py` | 重写：页面分析 + 跨页合并 + **先建题组再挂小题**；`retry_pages` 同步删旧题组；**`_strip_answer` 加 `is_example` 参数并感知 `$` 边界**（见 §10.2）；**删除** `parse_lesson_page`/`_split_row`/`parse_answer_page`/`align_answers`/`align_by_order` 及其测试 |
 | `backend/tests/test_practice_groups.py` | 新增，含格式标记测试 |
 
 **关于答案页范围**：新流程用 AI 求答案，`answer_start_page`/`answer_end_page` 不再必需，
@@ -631,8 +642,10 @@ services/practice_import.py          通用编排（建组/跨页合并/求答�
 | 学科注册表 `subjects.py` | **是** | 实现（语文/英语仅占位） |
 
 **为什么数据模型可以通用**：题组本身就是「一段题干 + 若干小题」，
-语文的「阅读短文 + 5 道小题」、英语的「完形填空 + 若干空」都天然是题组，
-`Question.answer_kind` 也够用（语文用 `text`，英语填空用 `numeric_list` 的近亲 `blanks`）。
+语文的「阅读短文 + 5 道小题」、英语的「完形填空 + 若干空」都天然是题组。
+判分所需的 `answer_kind` **不落库**，而是由 `work_mode` 查注册表得到
+（语文用 `text`；英语填空将来加一个 `blanks` 类 `answer_kind`，届时同步扩
+`grade_by_answer_kind` 的分派表）。
 
 #### 9.3 与现有数学入口的关系
 
@@ -676,7 +689,7 @@ def grade_by_answer_kind(db, question, student_answer="", photo_bytes=None) -> d
 | 竖式/脱式的多行 | 每行一个 `$...$`，行间用 `\n` | 逐行 `Math.tex` + 行首空格保留（**不用** `\begin{aligned}`） | ✅ |
 | 图形 | `![](/uploads/practice_images/xxx.png)` | 现有 `img` 支持 | ✅ 已有 |
 | 单位 | 原样（`km`、`m²`、`cm²`） | 正常文本 | ✅ 已有 |
-| 表格 | ——（不引入表格标记） | ⛔ 不做（见下） |
+| 表格 | ——（不引入表格标记） | ——（不做） | ⛔ 不做（见下） |
 
 > **表格题本期整块裁图**：练习册里的统计表/方格表用 `image_questions` 裁图，
 > 建组时 `work_mode` 用**已注册的 `geometry`**（`photo`/`camera`，判分走拍照），
