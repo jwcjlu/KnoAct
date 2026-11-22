@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..core.access import ensure_user_access, require_learning_user
 from ..core.deps import require_role
+from ..core.work_modes import answer_kind_of, input_ui_of
 from ..database import get_db
 from ..models import PdfDocument, PdfPage, PracticeImportJob, Question, QuestionBank, User
 from ..services.model_config import resolve as resolve_model
@@ -70,6 +71,28 @@ def _vision_ready(db: Session) -> bool:
     return r.provider != "fake" and bool(r.api_key) and bool(r.base_url)
 
 
+def _derive_page_range(
+    *, question_start_page, question_end_page,
+    answer_start_page, answer_end_page, total_pages: int,
+) -> tuple[int, int]:
+    """派生题面页范围。
+
+    答案页可选：不填答案页时题面页到最后一页为止。
+    ⚠️ 绝不能写成 `(answer_start_page or 1) - 1` —— 答案页为 None 时会得到 0 页。
+    提供了答案页则收窄到答案页之前，少跑几次视觉调用。
+    """
+    q_start = int(question_start_page or 1)
+    if q_start < 1:
+        q_start = 1
+    q_end = question_end_page
+    if not q_end and answer_start_page:
+        q_end = int(answer_start_page) - 1
+    q_end = int(q_end or total_pages or q_start)
+    if q_end < q_start:
+        q_end = q_start
+    return q_start, q_end
+
+
 @router.post("/api/banks/practice-book")
 def create_practice_book(
     req: PracticeBookReq,
@@ -107,15 +130,17 @@ def import_practice_pdf(
 ):
     bank = _require_own_bank(bank_id, user, db)
 
+    from ..core.subjects import is_implemented
+
+    if not is_implemented(bank.subject):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{bank.subject or '该'}学科练习册解析器尚未实现（当前仅支持数学）",
+        )
+
     def _int(s: str) -> int | None:
         s = (s or "").strip()
         return int(s) if s.isdigit() else None
-
-    a_start, a_end = _int(answer_start_page), _int(answer_end_page)
-    if not a_start or not a_end:
-        raise HTTPException(
-            status_code=400, detail="必须填写答案页起止页（扫描版无法自动识别）"
-        )
 
     if not _vision_ready(db):
         raise HTTPException(
@@ -160,13 +185,20 @@ def import_practice_pdf(
     db.commit()
 
     total = len(pages)
-    if a_start < 1 or a_end > total or a_start > a_end:
-        raise HTTPException(
-            status_code=400, detail=f"答案页范围非法：文档共 {total} 页"
-        )
+    a_start, a_end = _int(answer_start_page), _int(answer_end_page)
+    if a_start is not None and a_end is not None:
+        if a_start < 1 or a_end > total:
+            raise HTTPException(status_code=400, detail="答案页范围不合法")
+        if a_start > a_end:
+            raise HTTPException(status_code=400, detail="答案页起止顺序不对")
 
-    q_start = _int(question_start_page) or 1
-    q_end = _int(question_end_page) or (a_start - 1)
+    q_start, q_end = _derive_page_range(
+        question_start_page=_int(question_start_page),
+        question_end_page=_int(question_end_page),
+        answer_start_page=a_start,
+        answer_end_page=a_end,
+        total_pages=total,
+    )
 
     job = PracticeImportJob(
         user_id=user.id,
@@ -188,8 +220,13 @@ def import_practice_pdf(
 
 def _job_payload(job) -> dict:
     """统一的进度负载（含题面页范围，前端据此显示「第 N/M 页」）。"""
-    q_start = job.question_start_page or 1
-    q_end = job.question_end_page or (job.answer_start_page or 1) - 1
+    q_start, q_end = _derive_page_range(
+        question_start_page=job.question_start_page,
+        question_end_page=job.question_end_page,
+        answer_start_page=job.answer_start_page,
+        answer_end_page=job.answer_end_page,
+        total_pages=job.total_pages,
+    )
     return {
         "id": job.id,
         "status": job.status,
@@ -275,7 +312,8 @@ def missing_answers(
         .filter(
             Question.bank_id == bank.id,
             Question.status == "pending",
-            Question.answer == "",
+            (Question.answer == "") | (Question.answer.is_(None)),
+            Question.is_example.is_(False),     # 示例行不是待做题
         )
         .order_by(Question.lesson_no, Question.question_no)
         .all()
@@ -384,6 +422,12 @@ def list_practice_questions(
                 "qtype": r.qtype,
                 "status": r.status,
                 "image_url": _image_url(r.image_path),
+                "work_mode": r.work_mode or "",
+                "answer_kind": answer_kind_of(r.work_mode or ""),
+                "input_ui": input_ui_of(r.work_mode or ""),
+                "group_id": r.group_id,
+                "seq_in_group": r.seq_in_group,
+                "is_example": r.is_example,
             }
             for r in rows
         ],
@@ -418,3 +462,43 @@ def lessons(
             for no, title, cnt in rows
         ]
     }
+
+
+class PageTypeReq(BaseModel):
+    page_type: str
+
+
+_PAGE_TYPES = ("practice", "toc", "answer_key", "cover", "blank")
+
+
+@router.get("/api/practice-import/pages")
+def list_pages(document_id: int, _auth: User = Depends(require_learning_user),
+               db: Session = Depends(get_db)):
+    """列出某文档已分析的页（供家长排查/修正页类型）。"""
+    from ..models import PracticeImportPage
+
+    rows = (db.query(PracticeImportPage)
+            .filter_by(document_id=document_id)
+            .order_by(PracticeImportPage.page_no).all())
+    return {"pages": [{
+        "page_no": r.page_no, "page_type": r.page_type,
+        "group_count": r.group_count, "status": r.status,
+    } for r in rows]}
+
+
+@router.patch("/api/practice-import/pages/{page_no}")
+def patch_page_type(page_no: int, req: PageTypeReq, document_id: int,
+                    _auth: User = Depends(require_role("parent", "admin")),
+                    db: Session = Depends(get_db)):
+    """把某页的类型改掉（如 toc → practice），供之后重新解析该页。"""
+    from ..models import PracticeImportPage
+
+    if req.page_type not in _PAGE_TYPES:
+        raise HTTPException(400, f"page_type 必须是 {_PAGE_TYPES} 之一")
+    row = (db.query(PracticeImportPage)
+           .filter_by(document_id=document_id, page_no=page_no).first())
+    if row is None:
+        raise HTTPException(404, "该页没有分析记录")
+    row.page_type = req.page_type
+    db.commit()
+    return {"page_no": row.page_no, "page_type": row.page_type}

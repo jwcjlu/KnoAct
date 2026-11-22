@@ -961,11 +961,15 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
         job.published_count = 0
         db.commit()
 
-        q_start = job.question_start_page or 1
-        # 答案页可选：没填就用 total_pages 兜底（三处派生逻辑必须字面一致）
-        q_end = job.question_end_page or job.total_pages or q_start
-        if q_end < q_start:
-            q_end = q_start
+        from ..routers.practice_import import _derive_page_range
+
+        q_start, q_end = _derive_page_range(
+            question_start_page=job.question_start_page,
+            question_end_page=job.question_end_page,
+            answer_start_page=job.answer_start_page,
+            answer_end_page=job.answer_end_page,
+            total_pages=job.total_pages or 1,
+        )
         pages = list(range(q_start, q_end + 1))
         if retry_pages:
             wanted = set(retry_pages)

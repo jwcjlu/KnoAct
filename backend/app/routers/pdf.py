@@ -423,6 +423,22 @@ def delete_document(document_id: int, _auth: User = Depends(require_role("parent
     db.query(Textbook).filter_by(document_id=document_id).delete(synchronize_session=False)
     db.query(UserDocument).filter_by(document_id=document_id).delete(synchronize_session=False)
 
+    # 练习册导入产物无外键级联，必须显式清理
+    from ..models import PracticeImportPage, PracticeQuestionGroup, Question
+
+    gids = [g.id for g in db.query(PracticeQuestionGroup)
+            .filter_by(source_document_id=document_id).all()]
+    if gids:
+        db.query(Question).filter(Question.group_id.in_(gids)).delete(
+            synchronize_session=False)
+        db.query(PracticeQuestionGroup).filter(
+            PracticeQuestionGroup.id.in_(gids)).delete(synchronize_session=False)
+    db.query(PracticeImportPage).filter_by(document_id=document_id).delete(
+        synchronize_session=False)
+    db.query(Question).filter(Question.source_document_id == document_id).delete(
+        synchronize_session=False)
+    db.flush()
+
     # 记录磁盘文件路径，用于删除
     storage = doc.storage_path
     page_dir = f"uploads/{doc.id}_pages"

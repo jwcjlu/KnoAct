@@ -82,6 +82,7 @@ def _ensure_db_tables() -> None:
         # 上次进程遗留的「进行中」导入任务：标 failed 并自动续跑
         try:
             from .models import PracticeImportJob
+            from .routers.practice_import import _derive_page_range
 
             stuck = (
                 db.query(PracticeImportJob)
@@ -90,10 +91,14 @@ def _ensure_db_tables() -> None:
             )
             auto = []
             for j in stuck:
-                q_end = j.question_end_page or (j.answer_start_page or 1) - 1
-                j.failed_pages = json.dumps(
-                    list(range(j.question_start_page or 1, q_end + 1))
+                q_start, q_end = _derive_page_range(
+                    question_start_page=j.question_start_page,
+                    question_end_page=j.question_end_page,
+                    answer_start_page=j.answer_start_page,
+                    answer_end_page=j.answer_end_page,
+                    total_pages=j.total_pages,
                 )
+                j.failed_pages = json.dumps(list(range(q_start, q_end + 1)))
                 j.status = "pending"
                 j.error = ""
                 j.done_pages = 0

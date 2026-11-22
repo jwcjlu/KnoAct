@@ -532,3 +532,188 @@ def test_bank_questions_include_group_info(setup_db, db):
     assert item["input_ui"] == "keypad"
     assert item["answer_kind"] == "numeric_list"
     assert item["seq_in_group"] == 2
+
+
+def _practice_client():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.practice_import import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_missing_answers_excludes_examples(setup_db, db):
+    """示例行不该出现在「待补答案」清单里（孩子不用做）。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    parent, child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="fill_blank",
+                    qtype_category="blank", question="示例", answer="",
+                    status="pending", is_example=True, work_mode="pattern"))
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做", answer="",
+                    status="pending", is_example=False, work_mode="pattern"))
+    db.commit()
+
+    r = _practice_client().get(
+        f"/api/practice-import/missing-answers?bank_id={bank.id}",
+        headers=parent_h)
+    assert r.status_code == 200
+    assert [i["question"] for i in r.json()["items"]] == ["待做"]
+
+
+def test_questions_endpoint_returns_work_mode(setup_db, db):
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    parent, _child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=parent.id,
+                    qtype="fill_blank", qtype_category="blank",
+                    question="1+1=____", answer="2", status="published",
+                    work_mode="pattern"))
+    db.commit()
+
+    r = _practice_client().get(
+        f"/api/practice-import/questions?bank_id={bank.id}", headers=parent_h)
+    assert r.status_code == 200
+    item = r.json()["items"][0]
+    assert item["work_mode"] == "pattern"
+    assert item["answer_kind"] == "numeric_list"
+    assert item["input_ui"] == "keypad"
+
+
+def test_page_types_endpoint(setup_db, db):
+    from app.models import PdfDocument, PracticeImportPage
+    from conftest import make_account, auth_headers
+
+    parent = make_account(db, "pg_p", role="parent")
+    doc = PdfDocument(filename="e.pdf", subject="数学", storage_path="D:/e.pdf",
+                      content_kind="practice")
+    db.add(doc)
+    db.flush()
+    db.add(PracticeImportPage(document_id=doc.id, page_no=1, page_type="toc",
+                              group_count=0))
+    db.add(PracticeImportPage(document_id=doc.id, page_no=2,
+                              page_type="practice", group_count=3))
+    db.commit()
+
+    r = _practice_client().get(
+        f"/api/practice-import/pages?document_id={doc.id}",
+        headers=auth_headers(parent))
+    assert r.status_code == 200
+    pages = r.json()["pages"]
+    assert [p["page_no"] for p in pages] == [1, 2]
+    assert pages[0]["page_type"] == "toc"
+
+
+def test_patch_page_type(setup_db, db):
+    from app.models import PdfDocument, PracticeImportPage
+    from conftest import make_account, auth_headers
+
+    parent = make_account(db, "pp_p", role="parent")
+    doc = PdfDocument(filename="f.pdf", subject="数学", storage_path="D:/f.pdf",
+                      content_kind="practice")
+    db.add(doc)
+    db.flush()
+    db.add(PracticeImportPage(document_id=doc.id, page_no=1, page_type="toc"))
+    db.commit()
+
+    r = _practice_client().patch(
+        f"/api/practice-import/pages/1?document_id={doc.id}",
+        headers=auth_headers(parent), json={"page_type": "practice"})
+    assert r.status_code == 200
+    assert r.json()["page_type"] == "practice"
+
+    db.expire_all()
+    row = db.query(PracticeImportPage).filter_by(document_id=doc.id,
+                                                 page_no=1).one()
+    assert row.page_type == "practice"
+
+
+def test_patch_page_type_rejects_unknown(setup_db, db):
+    from app.models import PdfDocument, PracticeImportPage
+    from conftest import make_account, auth_headers
+
+    parent = make_account(db, "pu_p", role="parent")
+    doc = PdfDocument(filename="h.pdf", subject="数学", storage_path="D:/h.pdf",
+                      content_kind="practice")
+    db.add(doc)
+    db.flush()
+    db.add(PracticeImportPage(document_id=doc.id, page_no=1, page_type="toc"))
+    db.commit()
+
+    r = _practice_client().patch(
+        f"/api/practice-import/pages/1?document_id={doc.id}",
+        headers=auth_headers(parent), json={"page_type": "garbage"})
+    assert r.status_code == 400
+
+
+def test_import_rejects_unimplemented_subject(setup_db, db):
+    """语文/英语练习册返回 400，不静默按数学解析。"""
+    from app.models import QuestionBank
+    from conftest import parent_child
+
+    parent, _child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="语文练习册",
+                        subject="语文", grade=5, source="practice_pdf")
+    db.add(bank)
+    db.commit()
+
+    r = _practice_client().post(
+        f"/api/banks/{bank.id}/import-practice-pdf",
+        headers=parent_h,
+        files={"file": ("a.pdf", b"%PDF-1.4 fake", "application/pdf")},
+        data={"answer_start_page": "1", "answer_end_page": "2"},
+    )
+    assert r.status_code == 400
+    assert "尚未实现" in r.json()["detail"]
+
+
+def test_delete_document_cleans_practice_rows(setup_db, db):
+    """删练习册文档时，题组/页记录/小题都要清掉（无外键级联）。"""
+    from app.models import (
+        PdfDocument, PracticeImportPage, PracticeQuestionGroup, Question,
+        QuestionBank,
+    )
+    from app.routers.pdf import delete_document
+    from conftest import make_account
+
+    parent = make_account(db, "del_p", role="parent")
+    doc = PdfDocument(filename="g.pdf", subject="数学",
+                      storage_path="D:/g.pdf", content_kind="practice")
+    db.add(doc)
+    db.flush()
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=parent.id, stem="x",
+                              work_mode="oral", page_start=1, page_end=1,
+                              source_document_id=doc.id)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="oral",
+                    qtype_category="subjective", question="1+1", answer="2",
+                    group_id=g.id, source_document_id=doc.id))
+    db.add(PracticeImportPage(document_id=doc.id, page_no=1))
+    db.commit()
+    doc_id = doc.id
+
+    delete_document(document_id=doc_id, db=db)
+
+    db.expire_all()
+    assert db.query(PracticeImportPage).filter_by(document_id=doc_id).count() == 0
+    assert db.query(PracticeQuestionGroup).filter_by(
+        source_document_id=doc_id).count() == 0
+    assert db.query(Question).filter_by(source_document_id=doc_id).count() == 0
