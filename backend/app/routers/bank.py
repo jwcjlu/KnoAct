@@ -453,6 +453,14 @@ def submit_bank(req: BankSubmitReq, user: User = Depends(require_learning_user),
                 student_answer=student_answer,
                 blanks=blanks,
             )
+            # answer_kind=text（如 work_mode="other" 的兜底题）math_grade 只返回
+            # pending 并注明「需主观判分」。这里必须回落主观判分，否则最需要兜底
+            # 的那类题孩子写完答案永远拿不到任何反馈。
+            if pr.get("ai_status") == "pending" and kind == "text":
+                ref = {"sample": qq.answer} if qq.answer else answer_json
+                sub = grade_subjective_with_ai(db, ref, student)
+                pr = {**pr, "is_correct": sub.get("is_correct"),
+                      "reason": sub.get("detail") or pr.get("reason", "")}
             r = {
                 "is_correct": pr.get("is_correct"),
                 "correct_answer_text": qq.answer,

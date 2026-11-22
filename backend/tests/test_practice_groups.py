@@ -969,3 +969,40 @@ def test_numeric_list_single_blank_falls_back_to_answer():
     )
     d = drafts[0]
     assert d.answer_json.get("blanks") == ["1234.5"]
+
+
+def test_submit_other_mode_falls_back_to_subjective(setup_db, db, monkeypatch):
+    """work_mode=other（answer_kind=text）的题要回落主观判分，
+    否则孩子写完答案永远拿不到反馈。"""
+    from app.models import Question, QuestionBank
+    from app.routers import bank as bank_mod
+    from conftest import parent_child
+
+    called = {}
+
+    def _fake_subjective(db_, answer_json, student):
+        called["answer_json"] = answer_json
+        called["student"] = student
+        return {"is_correct": True, "correct_answer_text": "答：12 个",
+                "detail": "意思正确"}
+
+    monkeypatch.setattr(bank_mod, "grade_subjective_with_ai", _fake_subjective)
+
+    _parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=child.id, qtype="short_answer",
+                 qtype_category="subjective", question="一共多少个？",
+                 answer="答：12 个", answer_json="{}", work_mode="other",
+                 status="published")
+    db.add(q)
+    db.commit()
+
+    r = _bank_client().post("/api/banks/submit", headers=child_h, json={
+        "bank_id": bank.id,
+        "answers": [{"question_id": q.id, "text": "12个"}],
+    })
+    assert r.status_code == 200, r.text
+    assert called["student"]["text"] == "12个"
+    assert r.json()["answers"][0]["is_correct"] is True
