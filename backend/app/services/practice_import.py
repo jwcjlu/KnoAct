@@ -6,6 +6,8 @@ import copy
 import json
 import re
 
+from sqlalchemy import and_, or_
+
 from ..core.source_adapter import QuestionDraft
 
 def split_blanks(answer_text: str, count: int) -> list[str] | None:
@@ -587,15 +589,32 @@ def run_import_job(job_id: int, retry_pages: list[int] | None = None) -> None:
                 pages = picked_pages
 
         # 重跑：先删这些页对应的题组与小题（group_id 无外键，必须显式删）
-        # 用「页码范围与重跑页有交集」而不是只比 page_start：跨页组可能从第 1 页
-        # 开始、跨到第 2 页；只重跑第 2 页时若不删它，重跑后会多出一份重复题组。
+        # 用「重跑页集合」逐个取交集，绝不能用 min/max 包络区间——
+        # 第 3 页和第 40 页失败时，包络会连带删掉 4..39 页的题。
+        # 命中的组若跨到未重跑的页，就把整段页纳入重跑范围，保证「整组重建」
+        # 而不是删掉一半（否则未重跑页的 items 会永久丢失）。
         if retry_pages:
-            lo, hi = min(pages), max(pages)
+            def _overlaps(p: set[int]):
+                return or_(*[
+                    and_(PracticeQuestionGroup.page_start <= pno,
+                         PracticeQuestionGroup.page_end >= pno)
+                    for pno in sorted(p)
+                ])
+
+            wanted = set(pages)
             old = (db.query(PracticeQuestionGroup)
                    .filter(PracticeQuestionGroup.bank_id == bank.id,
-                           PracticeQuestionGroup.page_start <= hi,
-                           PracticeQuestionGroup.page_end >= lo)
+                           _overlaps(wanted))
                    .all())
+            # 组跨到未重跑页 → 这些页也一起重建，避免只删一半
+            for g in old:
+                wanted.update(range(g.page_start, g.page_end + 1))
+            old = [g for g in
+                   (db.query(PracticeQuestionGroup)
+                    .filter(PracticeQuestionGroup.bank_id == bank.id,
+                            _overlaps(wanted))
+                    .all())]
+            pages = sorted(wanted)
             gids = [g.id for g in old]
             if gids:
                 db.query(Question).filter(

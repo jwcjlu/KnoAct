@@ -440,11 +440,13 @@ def test_retry_deletes_cross_page_group_overlapping_target(setup_db, db, monkeyp
     pi.run_import_job(job_id, retry_pages=[2])
 
     db.expire_all()
-    # 旧的跨页组必须消失（它跨到了重跑的第 2 页）
+    # 旧组跨到重跑的第 2 页，会被整组删除并重建（第 1 页也一起重建，
+    # 否则第 1 页的 items 会永久丢失）。所以现在两页各建一个组。
     # 注意：SQLite 会复用被删行的 id，所以不能按 id 断言，要按 stem 判断
     survivors = db.query(PracticeQuestionGroup).filter_by(bank_id=bank_id).all()
-    assert [s.stem for s in survivors] == ["新题组"]
-    # 旧组的小题也必须一起删掉（group_id 无外键，不会级联）
+    assert [s.stem for s in survivors] == ["新题组", "新题组"]
+    assert {s.page_start for s in survivors} == {1, 2}
+    # 旧组的小题必须一起删掉（group_id 无外键，不会级联）
     assert db.query(Question).filter_by(question="旧题").count() == 0
 
 
@@ -810,3 +812,100 @@ def test_group_context_includes_examples(setup_db, db):
     assert len(ctx) == 1
     assert ctx[0]["stem"] == "不计算，运用规律直接写出得数"
     assert ctx[0]["examples"][0]["question"] == "示例1"
+
+
+def test_submit_chooses_field_by_answer_kind(setup_db, db):
+    """前端 choice 送 selected_index、blank 送 blanks；只读 text 会全判错。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    # compare: symbol，前端会走 blank 送 blanks
+    q_sym = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                     qtype_category="blank", question="30.5 ○ 3.05",
+                     answer=">", answer_json="{}", work_mode="compare",
+                     status="published")
+    # choice：前端送 selected_index
+    q_ch = Question(bank_id=bank.id, user_id=child.id, qtype="single_choice",
+                    qtype_category="choice", question="哪个是质数？",
+                    answer="B", answer_json='{"correct_index":1}',
+                    work_mode="choice", status="published")
+    # equation：number，前端走 blank 送 blanks
+    q_eq = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="4x-5.2=5.2",
+                    answer="2.6", answer_json="{}", work_mode="equation",
+                    status="published")
+    db.add_all([q_sym, q_ch, q_eq])
+    db.commit()
+
+    r = _bank_client().post("/api/banks/submit", headers=child_h, json={
+        "bank_id": bank.id,
+        "answers": [
+            {"question_id": q_sym.id, "blanks": [">"]},
+            {"question_id": q_ch.id, "selected_index": 1},
+            {"question_id": q_eq.id, "blanks": ["2.6"]},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    got = {x["question_id"]: x["is_correct"] for x in r.json()["answers"]}
+    assert got[q_sym.id] is True
+    assert got[q_ch.id] is True
+    assert got[q_eq.id] is True
+    assert r.json()["score"] == 3
+
+
+def test_retry_noncontiguous_pages_keeps_untouched_pages(setup_db, db, monkeypatch):
+    """重试第 2、5 页时，第 3、4 页的题必须保留（不能用 min/max 包络删）。"""
+    from app.models import (
+        PracticeImportJob, PracticeQuestionGroup, Question, QuestionBank,
+    )
+    from app.services import practice_import as pi
+
+    job_id, bank_id, _doc_id = _mk_job(db, "rj8", 6, "j.pdf")
+    bank = db.get(QuestionBank, bank_id)
+
+    for pno in (1, 2, 3, 4, 5, 6):
+        g = PracticeQuestionGroup(bank_id=bank.id, user_id=bank.user_id,
+                                  stem=f"p{pno} 的组", work_mode="oral",
+                                  page_start=pno, page_end=pno)
+        db.add(g)
+        db.flush()
+        db.add(Question(bank_id=bank.id, user_id=bank.user_id, qtype="oral",
+                        qtype_category="subjective",
+                        question=f"p{pno} 的题", answer="1",
+                        group_id=g.id, status="published"))
+    db.commit()
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "practice",
+                            "groups": [{"stem": "new", "instruction": "",
+                                        "lesson_no": None, "lesson_title": "",
+                                        "work_mode": "oral", "need_process": False,
+                                        "continues_next_page": False,
+                                        "items": [{"seq": 1, "y": 0.1,
+                                                   "text": "new=____",
+                                                   "answer_hint": "",
+                                                   "is_example": False}]}],
+                            "image_questions": []})
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {0: {"kind": "number", "answer": "9"}},
+    )
+
+    pi.run_import_job(job_id, retry_pages=[2, 5])
+
+    db.expire_all()
+    texts = sorted(q.question for q in db.query(Question).filter_by(bank_id=bank_id))
+    # 1、3、4、6 页原题必须还在；2、5 页被重建
+    assert "p1 的题" in texts
+    assert "p3 的题" in texts, f"第 3 页的题被误删了: {texts}"
+    assert "p4 的题" in texts, f"第 4 页的题被误删了: {texts}"
+    assert "p6 的题" in texts
+    assert "p2 的题" not in texts
+    assert "p5 的题" not in texts

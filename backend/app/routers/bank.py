@@ -423,12 +423,35 @@ def submit_bank(req: BankSubmitReq, user: User = Depends(require_learning_user),
         mode = (getattr(qq, "work_mode", "") or "").strip()
         if mode:
             # 有 work_mode → 走练习册判分门面（按 answer_kind 分派）
+            from ..core.work_modes import answer_kind_of
             from ..services.practice_grade import grade_practice_item
+
+            # 前端按 qtype_category 送不同字段：
+            #   choice  → selected_index（单选取 int，多选为 list）
+            #   blank   → blanks（数组）
+            #   其它    → text
+            # 只取 text 会让 number/symbol/numeric_list/choice 全部拿到空串，
+            # 结果「答对也判错」并进错题本。
+            kind = answer_kind_of(mode)
+            raw_blanks = a.get("blanks")
+            selected = a.get("selected_index")
+            if kind == "choice" and selected is not None:
+                # 多选送 list，取第一个下标即可（本期不判多选）
+                if isinstance(selected, (list, tuple)):
+                    selected = selected[0] if selected else None
+                student_answer = "" if selected is None else str(selected)
+                blanks = []
+            elif isinstance(raw_blanks, list) and raw_blanks:
+                student_answer = ",".join(str(x) for x in raw_blanks)
+                blanks = raw_blanks
+            else:
+                student_answer = str(a.get("text") or "").strip()
+                blanks = None
 
             pr = grade_practice_item(
                 db, qq,
-                student_answer=str(a.get("text") or "").strip(),
-                blanks=a.get("blanks"),
+                student_answer=student_answer,
+                blanks=blanks,
             )
             r = {
                 "is_correct": pr.get("is_correct"),
