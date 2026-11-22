@@ -431,7 +431,12 @@ def _pick_practice_questions(db: Session, bank, user_id: int, day: date, n_pick:
         .filter(Question.is_example.is_(False))   # 示例行不是待做题
         .order_by(Question.lesson_no, Question.id)
     )
-    all_q = base.all()
+    # photo 类题（竖式/脱式/应用/图形）需拍照作答，拍照链路未实现，本期不布置，
+    # 否则孩子答了没有任何反馈。answer_kind 由 work_mode 查表得来，不能写进 SQL。
+    from ..core.work_modes import answer_kind_of
+
+    all_q = [q for q in base.all()
+             if answer_kind_of(q.work_mode) != "photo"]
     if not all_q:
         return [], None, ""
 

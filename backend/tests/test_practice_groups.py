@@ -1087,3 +1087,40 @@ def test_job_payload_includes_document_id(setup_db, db):
     job = db.get(PracticeImportJob, job_id)
     payload = _job_payload(job)
     assert payload["document_id"] == doc_id
+
+
+def test_pick_practice_questions_excludes_photo_kinds(setup_db, db):
+    """拍照类题（vertical/step/app/geometry）本期不布置：没有拍照链路，
+    抽到只会让孩子「答了没反馈」。"""
+    from datetime import date
+
+    from app.models import Question, QuestionBank
+    from app.services.task_gen import _pick_practice_questions
+    from conftest import make_account
+
+    child = make_account(db, "tk_photo", role="child")
+    bank = QuestionBank(user_id=child.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    # 口算（number，该抽）
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="oral",
+                    qtype_category="subjective", question="口算题", answer="2",
+                    status="published", lesson_no=1, is_example=False,
+                    work_mode="oral"))
+    # 竖式（photo，本期不抽）
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="calculation",
+                    qtype_category="blank", question="竖式题", answer="364",
+                    status="published", lesson_no=1, is_example=False,
+                    work_mode="vertical"))
+    # 应用题（photo，本期不抽）
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="application",
+                    qtype_category="subjective", question="应用题", answer="12",
+                    status="published", lesson_no=1, is_example=False,
+                    work_mode="app"))
+    db.commit()
+
+    picked, _lesson_no, _title = _pick_practice_questions(
+        db, bank, child.id, date(2026, 11, 22), 10)
+    assert [q.question for q in picked] == ["口算题"], \
+        f"photo 类题不该被抽中，实际抽到 {[q.question for q in picked]}"
