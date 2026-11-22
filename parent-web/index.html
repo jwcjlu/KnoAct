@@ -448,7 +448,8 @@
   .pdf-row{display:flex;align-items:center;flex-wrap:wrap;gap:12px 16px;border:1px solid #e7e9e6;border-radius:16px;padding:14px 16px}
   .pdf-row .ic{width:44px;height:44px;border-radius:12px;background:var(--blue-soft);color:var(--blue2);display:grid;place-items:center;flex-shrink:0}
   .pdf-row .pdf-info{flex:1 1 180px;min-width:0}
-  .pdf-row .nm{font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+  /* 题目正文要保留竖式的换行与行首空格（规格 §10）；行数靠 max-height 兜住 */
+  .pdf-row .nm{font-size:14px;font-weight:700;white-space:pre-wrap;word-break:break-word;max-width:100%}
   .pdf-row .meta{margin-top:2px;font-size:12px;color:#8e9691}
   .pdf-row .st,.pdf-row .pdf-actions{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px;font-size:12px;font-weight:600;flex:0 1 auto;max-width:100%}
   .pdf-row .st.processing{color:var(--orange2)}

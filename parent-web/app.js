@@ -603,6 +603,42 @@ function markMath(escaped){
   out += src.slice(last);
   return out;
 }
+
+/**
+ * 把扁平的题目数组按 group_id 聚成题组。
+ * 无 group_id 的历史题聚成一组（stem 为空），保证旧卷也能显示。
+ * 返回 [{groupId, stem, lessonTitle, examples:[], items:[]}, ...]，组内按 seq_in_group 排序。
+ *
+ * 已知限制：题目列表是分页的（50/页），若一个题组跨过页边界，
+ * 它的题干会在两页各显示一次。题组通常只有几道小题，实际很少触发；
+ * 若日后需要严格处理，改成服务端按 group_id 聚合返回。
+ */
+function groupPracticeQuestions(list){
+  const groups = new Map();
+  for (const q of (list || [])) {
+    const gid = q.group_id == null ? 'legacy' : String(q.group_id);
+    if (!groups.has(gid)) {
+      groups.set(gid, {
+        groupId: q.group_id,
+        stem: String(q.group_stem || ''),
+        lessonTitle: String(q.lesson_title || ''),
+        examples: [],
+        items: [],
+      });
+    }
+    const g = groups.get(gid);
+    (q.is_example ? g.examples : g.items).push(q);
+  }
+  const bySeq = (a, b) => (a.seq_in_group || 0) - (b.seq_in_group || 0);
+  const out = [];
+  for (const g of groups.values()) {
+    g.examples.sort(bySeq);
+    g.items.sort(bySeq);
+    out.push(g);
+  }
+  return out;
+}
+
 /**
  * 把 root 内所有 .math-tex 占位渲染成公式。
  * 没有 KaTeX（例如直接双击打开 index.html）时降级为等宽原文，不抛错。
@@ -1179,23 +1215,41 @@ function practiceQuestionRows(){
   if(!practiceQuestions.length){
     return '<div style="color:#8e9691;padding:12px 0">还没有题目。导入完成后这里会列出全部题目。</div>';
   }
-  return practiceQuestions.map(q => `
-    <div class="pdf-row">
-      <div class="pdf-info">
-        <div class="nm">${escapeAttr(String(q.question || ''))}</div>
-        <div class="meta">
-          ${escapeAttr(String(q.lesson_title || ''))}
-          · 答案 <b style="color:var(--green2)">${escapeAttr(String(q.answer || '（缺）'))}</b>
+  const groups = groupPracticeQuestions(practiceQuestions);
+  return groups.map(g => {
+    const head = g.stem
+      ? `<div style="margin:14px 0 6px;font-weight:700;font-size:13px;color:#3b4642">
+           ${markMath(escapeHtml(g.stem))}
+         </div>`
+      : (g.groupId == null
+          ? '<div style="margin:14px 0 6px;font-weight:700;font-size:13px;color:#8e9691">历史导入的题目</div>'
+          : '');
+    const examples = g.examples.length
+      ? `<div style="margin:0 0 8px;padding:8px 10px;background:#f6f8f6;border-radius:8px;
+                     font-size:12px;color:#5c6761">
+           <div style="font-weight:600;margin-bottom:4px">已印好的示例（孩子不用做）</div>
+           ${g.examples.map(e => `<div>${markMath(escapeHtml(String(e.question||'')))}</div>`).join('')}
+         </div>`
+      : '';
+    const rows = g.items.map(q => `
+      <div class="pdf-row">
+        <div class="pdf-info">
+          <div class="nm">${markMath(escapeHtml(String(q.question || '')))}</div>
+          <div class="meta">
+            ${escapeAttr(String(q.lesson_title || ''))}
+            · 答案 <b style="color:var(--green2)">${escapeAttr(String(q.answer || '（缺）'))}</b>
+          </div>
+          ${q.image_url ? `<img src="${API}${escapeAttr(q.image_url)}" alt="题图" loading="lazy"
+              style="display:block;margin-top:8px;max-width:360px;width:100%;border:1px solid var(--line3);border-radius:8px">` : ''}
         </div>
-        ${q.image_url ? `<img src="${API}${escapeAttr(q.image_url)}" alt="题图" loading="lazy"
-            style="display:block;margin-top:8px;max-width:360px;width:100%;border:1px solid var(--line3);border-radius:8px">` : ''}
-      </div>
-      <div class="pdf-actions">
-        <span style="font-size:11px;color:${q.status==='published'?'var(--green2)':'#c05b4a'}">
-          ${q.status==='published'?'已发布':'未发布'}
-        </span>
-      </div>
-    </div>`).join('');
+        <div class="pdf-actions">
+          <span style="font-size:11px;color:${q.status==='published'?'var(--green2)':'#c05b4a'}">
+            ${q.status==='published'?'已发布':'未发布'}
+          </span>
+        </div>
+      </div>`).join('');
+    return `<div>${head}${examples}${rows}</div>`;
+  }).join('');
 }
 
 function filterPracticeQuestions(lessonNo){
