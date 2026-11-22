@@ -674,15 +674,43 @@ Expected: FAIL — `AttributeError: 'QuestionDraft' object has no attribute 'gro
 
 - [ ] **Step 5: 修 `_dict_to_draft` 丢字段**
 
-`backend/app/routers/bank.py:177` 现在是逐字段手写回填，会丢练习册字段。
-改为按 dataclass 字段名过滤（`bank.py` 顶部补 `from dataclasses import fields`）：
+`bank.py:181` 的 `_dict_to_draft` 现在逐字段手写回填，会丢练习册字段。
+
+⚠️ **注意它不只是「过滤字段」**：真实签名为 `(item: dict) -> QuestionDraft | None`，
+且有两个既有行为必须保留（`POST /import-drafts` 的调用方 `:541` 靠 `if d:` 过滤空条目）：
+
+1. 非 dict 条目 → 返回 `None`
+2. `question` 为空 → 返回 `None`
+3. 基础字段归一化（`qtype` 默认 `short_answer`、`answer`/`analysis` 等 `strip()`）
+
+所以**不能**换成裸的三行版本。正确做法是「先按 dataclass 字段名透传，再覆盖归一化」：
 
 ```python
-def _dict_to_draft(d: dict) -> QuestionDraft:
-    """dict → QuestionDraft。按 dataclass 字段名过滤，避免漏字段。"""
+def _dict_to_draft(item: dict) -> QuestionDraft | None:
+    if not isinstance(item, dict):
+        return None
+    q = (item.get("question") or "").strip()
+    if not q:
+        return None
+    # 先按 dataclass 字段名透传全部字段（避免漏字段），再对基础字段做归一化
     allowed = {f.name for f in fields(QuestionDraft)}
-    return QuestionDraft(**{k: v for k, v in (d or {}).items() if k in allowed})
+    base = {k: v for k, v in item.items() if k in allowed}
+    base.update(
+        qtype=(item.get("qtype") or "short_answer").strip(),
+        question=q,
+        options=item.get("options") or [],
+        answer_json=item.get("answer_json") or {},
+        answer=(item.get("answer") or "").strip(),
+        analysis=(item.get("analysis") or "").strip(),
+        difficulty=(item.get("difficulty") or "medium"),
+        tags=item.get("tags") if isinstance(item.get("tags"), dict) else {},
+        passage_title=(item.get("passage_title") or "").strip(),
+        passage_content=(item.get("passage_content") or "").strip(),
+    )
+    return QuestionDraft(**base)
 ```
+
+`bank.py` 顶部把已有的 `from dataclasses import asdict` 改成 `from dataclasses import asdict, fields`。
 
 - [ ] **Step 6: 运行确认通过**
 

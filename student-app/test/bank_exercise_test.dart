@@ -11,7 +11,8 @@ class FakePassageBankRepository implements BankRepository {
   Future<List<PracticeBank>> listPracticeBanks() async => const [];
 
   @override
-  Future<List<BankQuestion>> fetchQuestions(int bankId, {List<int>? questionIds}) async {
+  Future<List<BankQuestion>> fetchQuestions(int bankId,
+      {List<int>? questionIds, List<int>? extraBankIds}) async {
     const p = ReadingPassageInfo(id: 3, title: '小蝌蚪找妈妈', content: '小蝌蚪 **游啊游**。');
     return const [
       BankQuestion(
@@ -37,7 +38,8 @@ class FakeHtmlBankRepository implements BankRepository {
   Future<List<PracticeBank>> listPracticeBanks() async => const [];
 
   @override
-  Future<List<BankQuestion>> fetchQuestions(int bankId, {List<int>? questionIds}) async {
+  Future<List<BankQuestion>> fetchQuestions(int bankId,
+      {List<int>? questionIds, List<int>? extraBankIds}) async {
     return const [
       BankQuestion(
         id: 15,
@@ -61,7 +63,8 @@ class FakeBankRepository implements BankRepository {
   Future<List<PracticeBank>> listPracticeBanks() async => const [];
 
   @override
-  Future<List<BankQuestion>> fetchQuestions(int bankId, {List<int>? questionIds}) async {
+  Future<List<BankQuestion>> fetchQuestions(int bankId,
+      {List<int>? questionIds, List<int>? extraBankIds}) async {
     return const [
       BankQuestion(
         id: 1,

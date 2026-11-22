@@ -6,7 +6,8 @@ import 'bank_models.dart';
 
 abstract class BankRepository {
   Future<List<PracticeBank>> listPracticeBanks();
-  Future<List<BankQuestion>> fetchQuestions(int bankId, {List<int>? questionIds});
+  Future<List<BankQuestion>> fetchQuestions(int bankId,
+      {List<int>? questionIds, List<int>? extraBankIds});
   Future<BankSubmitResult> submit({required int bankId, required List<Map<String, dynamic>> answers});
 }
 
@@ -22,11 +23,17 @@ class ApiBankRepository implements BankRepository {
   }
 
   @override
-  Future<List<BankQuestion>> fetchQuestions(int bankId, {List<int>? questionIds}) async {
-    final query = questionIds != null && questionIds.isNotEmpty
-        ? {'ids': questionIds.join(',')}
-        : null;
-    final data = await _api.get('/api/banks/$bankId/questions', query: query);
+  Future<List<BankQuestion>> fetchQuestions(int bankId,
+      {List<int>? questionIds, List<int>? extraBankIds}) async {
+    final q = <String, String>{};
+    if (questionIds != null && questionIds.isNotEmpty) {
+      q['ids'] = questionIds.join(',');
+    }
+    if (extraBankIds != null && extraBankIds.isNotEmpty) {
+      q['extra_bank_ids'] = extraBankIds.join(',');
+    }
+    final data = await _api.get('/api/banks/$bankId/questions',
+        query: q.isEmpty ? null : q);
     final list = asList(data);
     return list.map((e) => BankQuestion.fromJson(asMap(e))).toList();
   }

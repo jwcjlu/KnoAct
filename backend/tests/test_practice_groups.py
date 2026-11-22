@@ -1,0 +1,1303 @@
+"""题组两级模型：表结构、可空性、迁移幂等。"""
+from sqlalchemy import inspect
+
+from app.models import PracticeQuestionGroup, Question
+from conftest import make_user
+
+
+def test_new_tables_registered(setup_db, db):
+    names = set(inspect(db.get_bind()).get_table_names())
+    assert "practice_question_groups" in names
+    assert "practice_import_pages" in names
+
+
+def test_question_has_group_columns(setup_db, db):
+    cols = {c["name"] for c in inspect(db.get_bind()).get_columns("questions")}
+    assert {"group_id", "seq_in_group", "is_example", "work_mode"} <= cols
+
+
+def test_group_lesson_no_is_nullable(setup_db, db):
+    """综合练习页没有「第N课时」，lesson_no 必须允许 NULL。"""
+    cols = {c["name"]: c for c in inspect(db.get_bind()).get_columns(
+        "practice_question_groups")}
+    assert cols["lesson_no"]["nullable"] is True
+
+
+def test_group_columns_defaults(setup_db, db):
+    from app.models import QuestionBank
+
+    user = make_user(db)
+    bank = QuestionBank(user_id=user.id, title="练习册", subject="数学",
+                        grade=5, source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=user.id,
+                              stem="直接写出得数", work_mode="oral",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    assert g.need_process is False
+    assert g.incomplete is False
+    assert g.instruction == ""
+    assert g.lesson_title == ""
+    assert g.lesson_no is None
+
+
+def test_migration_is_idempotent():
+    """连跑两次不报错（列/索引已存在时跳过）。"""
+    from app.migrate_practice_groups import migrate
+
+    migrate()
+    migrate()
+
+
+def test_persist_drafts_writes_group_fields(setup_db, db):
+    from app.core.source_adapter import QuestionDraft
+    from app.models import Question, QuestionBank
+    from app.routers.bank import _persist_drafts
+    from conftest import make_user
+
+    user = make_user(db)
+    bank = QuestionBank(user_id=user.id, title="练习册", subject="数学",
+                        grade=5, source="practice_pdf")
+    db.add(bank)
+    db.flush()
+
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=user.id,
+                              stem="直接写出得数", work_mode="pattern",
+                              page_start=3, page_end=3)
+    db.add(g)
+    db.flush()
+
+    d = QuestionDraft(qtype="fill_blank", question="1+1=____", answer="2")
+    d.group_id = g.id
+    d.seq_in_group = 2
+    d.is_example = True
+    d.work_mode = "pattern"
+    _persist_drafts(db, bank, [d], "practice_pdf")
+    db.commit()
+
+    row = db.query(Question).filter_by(bank_id=bank.id).one()
+    assert row.group_id == g.id
+    assert row.seq_in_group == 2
+    assert row.is_example is True
+    assert row.work_mode == "pattern"
+
+
+def test_dict_to_draft_keeps_practice_fields():
+    """草稿预览→确认导入不能丢练习册字段。"""
+    from app.routers.bank import _dict_to_draft
+
+    d = _dict_to_draft({
+        "qtype": "fill_blank", "question": "1+1=____", "answer": "2",
+        "lesson_no": 5, "question_no": "3", "image_path": "uploads/x.png",
+        "group_id": 11, "seq_in_group": 2, "is_example": True,
+        "work_mode": "pattern",
+    })
+    assert d.lesson_no == 5
+    assert d.image_path == "uploads/x.png"
+    assert d.group_id == 11
+    assert d.is_example is True
+    assert d.work_mode == "pattern"
+
+
+import pytest
+
+
+def test_vision_json_requires_configured_endpoint(setup_db, db, monkeypatch):
+    """未配置中转站时必须明确报错，而不是静默返回空串。"""
+    import app.services.ai as ai_mod
+
+    monkeypatch.setattr(ai_mod, "resolve", lambda *a, **k: type("R", (), {
+        "api_key": "", "base_url": "", "options": {},
+    })())
+    with pytest.raises(RuntimeError):
+        ai_mod.vision_json(db, b"\x89PNG", system="sys", prompt="p")
+
+
+def test_vision_json_sends_json_mode_and_system(setup_db, db, monkeypatch):
+    """断言：带 system 消息 + response_format=json_object + 图片。"""
+    import app.services.ai as ai_mod
+
+    captured = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class _Resp:
+                choices = [type("C", (), {
+                    "message": type("M", (), {"content": '{"page_type":"practice"}'})(),
+                })()]
+
+            return _Resp()
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            captured["client_kwargs"] = kw
+            self.chat = type("C", (), {"completions": _FakeCompletions()})()
+
+    monkeypatch.setattr(ai_mod, "_openai_client", lambda **kw: _FakeClient(**kw))
+    monkeypatch.setattr(ai_mod, "resolve", lambda *a, **k: type("R", (), {
+        "api_key": "k", "base_url": "http://x",
+        "options": {"vision_model": "vl"},
+    })())
+
+    out = ai_mod.vision_json(db, b"\x89PNG", system="SYS", prompt="PROMPT")
+    assert out.startswith("{")
+    assert captured["response_format"] == {"type": "json_object"}
+    assert [m["role"] for m in captured["messages"]] == ["system", "user"]
+    parts = captured["messages"][1]["content"]
+    assert any(p.get("type") == "image_url" for p in parts)
+    assert captured["model"] == "vl"
+
+
+def test_is_aligned_legacy_questions_unchanged(setup_db, db):
+    """work_mode 为空的老题必须走原逻辑：cloze 无 blanks 不发布。"""
+    from app.models import Question
+    from app.services.practice_import import _is_aligned
+
+    q = Question(qtype="cloze", qtype_category="blank", question="x",
+                 answer="a", answer_json='{"blanks":[]}', work_mode="")
+    assert _is_aligned(q) is False
+
+
+def test_is_aligned_new_numeric_list_requires_blanks(setup_db, db):
+    from app.models import Question
+    from app.services.practice_import import _is_aligned
+
+    q = Question(qtype="fill_blank", qtype_category="blank", question="x",
+                 answer="1.2, 1.44", answer_json='{"blanks":["1.2","1.44"]}',
+                 work_mode="pattern")
+    assert _is_aligned(q) is True
+
+    q2 = Question(qtype="fill_blank", qtype_category="blank", question="x",
+                  answer="1.2", answer_json='{"blanks":[]}', work_mode="pattern")
+    assert _is_aligned(q2) is False
+
+
+def test_is_aligned_new_symbol_and_choice_do_not_need_blanks(setup_db, db):
+    """symbol/choice 不是多空题，有答案就该发布（旧逻辑会误挡）。"""
+    from app.models import Question
+    from app.services.practice_import import _is_aligned
+
+    sym = Question(qtype="fill_blank", qtype_category="blank",
+                   question="30.5 ○ 3.05", answer=">", answer_json="{}",
+                   work_mode="compare")
+    assert _is_aligned(sym) is True
+
+    ch = Question(qtype="single_choice", qtype_category="choice", question="x",
+                  answer="B", answer_json='{"correct_index":1}',
+                  work_mode="choice")
+    assert _is_aligned(ch) is True
+
+
+def test_is_aligned_empty_answer_never_published(setup_db, db):
+    from app.models import Question
+    from app.services.practice_import import _is_aligned
+
+    for mode in ("oral", "pattern", "compare", "photo", "app", ""):
+        q = Question(qtype="oral", qtype_category="subjective", question="x",
+                     answer="", answer_json="{}", work_mode=mode)
+        assert _is_aligned(q) is False, mode
+
+
+import json  # noqa: E402
+
+
+def _mk_job(db, prefix, pages, doc_name):
+    """建 parent + bank + document + job，返回 (job_id, bank_id, doc_id)。"""
+    from app.models import PdfDocument, PracticeImportJob, QuestionBank
+    from conftest import make_account
+
+    parent = make_account(db, f"{prefix}_p", role="parent")
+    doc = PdfDocument(filename=doc_name, subject="数学",
+                      storage_path=f"D:/tmp/{doc_name}", content_kind="practice")
+    db.add(doc)
+    db.flush()
+    bank = QuestionBank(user_id=parent.id, title="练习册", subject="数学",
+                        grade=5, source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    job = PracticeImportJob(user_id=parent.id, bank_id=bank.id, document_id=doc.id,
+                            total_pages=pages, question_start_page=1,
+                            question_end_page=pages)
+    db.add(job)
+    db.commit()
+    return job.id, bank.id, doc.id
+
+
+def test_run_import_job_creates_groups_and_items(setup_db, db, monkeypatch):
+    """2 页 → 1 个题组（跨页合并）+ 4 个小题（3 示例 + 1 待做）。"""
+    from app.models import PracticeQuestionGroup, Question
+    from app.services import practice_import as pi
+
+    job_id, bank_id, _doc_id = _mk_job(db, "rj1", 2, "b.pdf")
+
+    page1 = {
+        "page_type": "practice",
+        "groups": [{
+            "stem": "不计算，运用规律直接写出得数",
+            "instruction": "", "lesson_no": 3,
+            "lesson_title": "第3课时 一个数除以小数",
+            "work_mode": "pattern", "need_process": False,
+            "continues_next_page": True,
+            "items": [
+                {"seq": 1, "y": 0.2, "text": "$1.08 \\div 0.9 = 1.2$",
+                 "answer_hint": "1.2", "is_example": True},
+                {"seq": 2, "y": 0.4, "text": "$11.106 \\div 0.9 = 12.34$",
+                 "answer_hint": "12.34", "is_example": True},
+            ],
+        }],
+        "image_questions": [],
+    }
+    page2 = {
+        "page_type": "practice",
+        "groups": [{
+            "stem": "不计算，运用规律直接写出得数",
+            "instruction": "", "lesson_no": 3,
+            "lesson_title": "第3课时 一个数除以小数",
+            "work_mode": "pattern", "need_process": False,
+            "continues_next_page": False,
+            "items": [
+                {"seq": 3, "y": 0.2, "text": "$111.06 \\div 0.9 = 123.4$",
+                 "answer_hint": "123.4", "is_example": True},
+                {"seq": 4, "y": 0.4, "text": "$1111.05 \\div 0.9 =$ ____",
+                 "answer_hint": "", "is_example": False},
+            ],
+        }],
+        "image_questions": [],
+    }
+
+    # render_page_png 收到的是 pno-1（0-based），所以 fake 的键是 0/1
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: f"png{idx}".encode())
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {0: page1, 1: page2}[int(img[-1:])])
+    # 该组是 pattern（answer_kind=numeric_list），必须返回 blanks，
+    # 否则 answer_json={} → 发布闸门挡下 → todo[0].status 不会是 published
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {
+            0: {"kind": "numeric_list", "blanks": ["1234.5"],
+                "answer": "1234.5"},
+        },
+    )
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    from app.models import PracticeImportJob
+
+    job = db.get(PracticeImportJob, job_id)
+    assert job.status == "done", job.error
+
+    groups = db.query(PracticeQuestionGroup).filter_by(bank_id=bank_id).all()
+    assert len(groups) == 1
+    assert groups[0].page_start == 1 and groups[0].page_end == 2
+    assert groups[0].lesson_no == 3
+    assert groups[0].lesson_title == "第3课时 一个数除以小数"
+
+    qs = (db.query(Question).filter_by(bank_id=bank_id)
+          .order_by(Question.seq_in_group).all())
+    assert len(qs) == 4
+    assert sum(1 for q in qs if q.is_example) == 3
+    todo = [q for q in qs if not q.is_example]
+    assert len(todo) == 1
+    assert todo[0].group_id == groups[0].id
+    assert todo[0].answer == "1234.5"
+    assert json.loads(todo[0].answer_json)["blanks"] == ["1234.5"]
+    assert todo[0].status == "published"
+    # 示例行也发布（前端要读它来展示），但不进每日一练（Task 15 过滤）
+    assert all(q.status == "published" for q in qs if q.is_example)
+
+
+def test_run_import_job_skips_non_practice_pages(setup_db, db, monkeypatch):
+    """目录页/答案页不入库，但要留页记录。"""
+    from app.models import PracticeImportPage, PracticeQuestionGroup, Question
+    from app.services import practice_import as pi
+
+    job_id, bank_id, doc_id = _mk_job(db, "rj2", 2, "c.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "toc", "groups": [],
+                            "image_questions": []})
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    assert db.query(PracticeQuestionGroup).filter_by(bank_id=bank_id).count() == 0
+    assert db.query(Question).filter_by(bank_id=bank_id).count() == 0
+    pages = db.query(PracticeImportPage).filter_by(document_id=doc_id).all()
+    assert len(pages) == 2
+    assert all(p.page_type == "toc" for p in pages)
+
+
+def test_run_import_job_records_page_rows(setup_db, db, monkeypatch):
+    from app.models import PracticeImportPage
+    from app.services import practice_import as pi
+
+    job_id, _bank_id, doc_id = _mk_job(db, "rj3", 1, "d.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "practice",
+                            "groups": [{
+                                "stem": "", "instruction": "", "lesson_no": None,
+                                "lesson_title": "", "work_mode": "oral",
+                                "need_process": False,
+                                "continues_next_page": False,
+                                "items": [{"seq": 1, "y": 0.1, "text": "1+1=____",
+                                           "answer_hint": "", "is_example": False}],
+                            }],
+                            "image_questions": []})
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {0: {"kind": "number", "answer": "2"}},
+    )
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    pages = db.query(PracticeImportPage).filter_by(document_id=doc_id).all()
+    assert len(pages) == 1
+    assert pages[0].page_no == 1
+    assert pages[0].page_type == "practice"
+    assert pages[0].group_count == 1
+
+
+def test_run_import_job_marks_failed_page(setup_db, db, monkeypatch):
+    """AI 抛异常时该页标失败，job 标 failed 且可重试。"""
+    from app.models import PracticeImportJob, PracticeImportPage
+    from app.services import practice_import as pi
+
+    job_id, _bank_id, doc_id = _mk_job(db, "rj4", 1, "e.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+
+    def _boom(db_, img, **kw):
+        raise RuntimeError("vision down")
+
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page", _boom)
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    job = db.get(PracticeImportJob, job_id)
+    assert job.status == "failed"
+    assert job.failed_pages == "[1]"
+    pages = db.query(PracticeImportPage).filter_by(document_id=doc_id).all()
+    assert pages[0].status == "failed"
+
+
+def test_retry_deletes_cross_page_group_overlapping_target(setup_db, db, monkeypatch):
+    """跨页组（page 1-2）在第 2 页重跑时必须被删掉，否则会多出一份重复题组。"""
+    from app.models import PracticeImportJob, PracticeQuestionGroup, Question
+    from app.services import practice_import as pi
+
+    job_id, bank_id, _doc_id = _mk_job(db, "rj5", 2, "g.pdf")
+
+    # 先手工造一个已存在的跨页组（模拟上一次导入的产物）
+    from app.models import QuestionBank
+    bank = db.get(QuestionBank, bank_id)
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=bank.user_id,
+                              stem="旧题组", work_mode="oral",
+                              page_start=1, page_end=2)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=bank.user_id, qtype="oral",
+                    qtype_category="subjective", question="旧题", answer="1",
+                    group_id=g.id, status="published"))
+    db.commit()
+    old_gid = g.id
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    # 只重跑第 2 页：返回一个普通 oral 组
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "practice",
+                            "groups": [{"stem": "新题组", "instruction": "",
+                                        "lesson_no": None, "lesson_title": "",
+                                        "work_mode": "oral", "need_process": False,
+                                        "continues_next_page": False,
+                                        "items": [{"seq": 1, "y": 0.1,
+                                                   "text": "2+2=____",
+                                                   "answer_hint": "",
+                                                   "is_example": False}]}],
+                            "image_questions": []})
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {0: {"kind": "number", "answer": "4"}},
+    )
+
+    pi.run_import_job(job_id, retry_pages=[2])
+
+    db.expire_all()
+    # 旧组跨到重跑的第 2 页，会被整组删除并重建（第 1 页也一起重建，
+    # 否则第 1 页的 items 会永久丢失）。所以现在两页各建一个组。
+    # 注意：SQLite 会复用被删行的 id，所以不能按 id 断言，要按 stem 判断
+    survivors = db.query(PracticeQuestionGroup).filter_by(bank_id=bank_id).all()
+    assert [s.stem for s in survivors] == ["新题组", "新题组"]
+    assert {s.page_start for s in survivors} == {1, 2}
+    # 旧组的小题必须一起删掉（group_id 无外键，不会级联）
+    assert db.query(Question).filter_by(question="旧题").count() == 0
+
+
+def _bank_client():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.bank import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_submit_dispatches_by_work_mode(setup_db, db):
+    """有 work_mode 的题走 grade_practice_item（number 判分）。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    # 必须用 parent_child：require_learning_user 会校验家长绑定
+    parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=child.id, qtype="oral",
+                 qtype_category="subjective", question="1+1=____", answer="2",
+                 answer_json="{}", work_mode="oral", status="published")
+    db.add(q)
+    db.commit()
+
+    r = _bank_client().post("/api/banks/submit", headers=child_h, json={
+        "bank_id": bank.id,
+        "answers": [{"question_id": q.id, "text": "2"}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["answers"][0]["is_correct"] is True
+
+
+def test_submit_wrong_answer_is_false(setup_db, db):
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=child.id, qtype="oral",
+                 qtype_category="subjective", question="1+1=____", answer="2",
+                 answer_json="{}", work_mode="oral", status="published")
+    db.add(q)
+    db.commit()
+
+    r = _bank_client().post("/api/banks/submit", headers=child_h, json={
+        "bank_id": bank.id,
+        "answers": [{"question_id": q.id, "text": "3"}],
+    })
+    assert r.status_code == 200
+    assert r.json()["answers"][0]["is_correct"] is False
+
+
+def test_bank_questions_include_group_info(setup_db, db):
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                              stem="直接写出得数", work_mode="pattern",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                 qtype_category="blank", question="1+1=____", answer="2",
+                 status="published", group_id=g.id, seq_in_group=2,
+                 work_mode="pattern")
+    db.add(q)
+    db.commit()
+
+    r = _bank_client().get(f"/api/banks/{bank.id}/questions", headers=child_h)
+    assert r.status_code == 200
+    item = r.json()[0]
+    assert item["group_stem"] == "直接写出得数"
+    assert item["work_mode"] == "pattern"
+    assert item["input_ui"] == "keypad"
+    assert item["answer_kind"] == "numeric_list"
+    assert item["seq_in_group"] == 2
+
+
+def _practice_client():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers.practice_import import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_missing_answers_excludes_examples(setup_db, db):
+    """示例行不该出现在「待补答案」清单里（孩子不用做）。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    parent, child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="fill_blank",
+                    qtype_category="blank", question="示例", answer="",
+                    status="pending", is_example=True, work_mode="pattern"))
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做", answer="",
+                    status="pending", is_example=False, work_mode="pattern"))
+    db.commit()
+
+    r = _practice_client().get(
+        f"/api/practice-import/missing-answers?bank_id={bank.id}",
+        headers=parent_h)
+    assert r.status_code == 200
+    assert [i["question"] for i in r.json()["items"]] == ["待做"]
+
+
+def test_questions_endpoint_returns_work_mode(setup_db, db):
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    parent, _child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=parent.id,
+                    qtype="fill_blank", qtype_category="blank",
+                    question="1+1=____", answer="2", status="published",
+                    work_mode="pattern"))
+    db.commit()
+
+    r = _practice_client().get(
+        f"/api/practice-import/questions?bank_id={bank.id}", headers=parent_h)
+    assert r.status_code == 200
+    item = r.json()["items"][0]
+    assert item["work_mode"] == "pattern"
+    assert item["answer_kind"] == "numeric_list"
+    assert item["input_ui"] == "keypad"
+
+
+def test_page_types_endpoint(setup_db, db):
+    from app.models import PdfDocument, PracticeImportPage
+    from conftest import make_account, auth_headers
+
+    parent = make_account(db, "pg_p", role="parent")
+    doc = PdfDocument(filename="e.pdf", subject="数学", storage_path="D:/e.pdf",
+                      content_kind="practice")
+    db.add(doc)
+    db.flush()
+    db.add(PracticeImportPage(document_id=doc.id, page_no=1, page_type="toc",
+                              group_count=0))
+    db.add(PracticeImportPage(document_id=doc.id, page_no=2,
+                              page_type="practice", group_count=3))
+    db.commit()
+
+    r = _practice_client().get(
+        f"/api/practice-import/pages?document_id={doc.id}",
+        headers=auth_headers(parent))
+    assert r.status_code == 200
+    pages = r.json()["pages"]
+    assert [p["page_no"] for p in pages] == [1, 2]
+    assert pages[0]["page_type"] == "toc"
+
+
+def test_patch_page_type(setup_db, db):
+    from app.models import PdfDocument, PracticeImportPage
+    from conftest import make_account, auth_headers
+
+    parent = make_account(db, "pp_p", role="parent")
+    doc = PdfDocument(filename="f.pdf", subject="数学", storage_path="D:/f.pdf",
+                      content_kind="practice")
+    db.add(doc)
+    db.flush()
+    db.add(PracticeImportPage(document_id=doc.id, page_no=1, page_type="toc"))
+    db.commit()
+
+    r = _practice_client().patch(
+        f"/api/practice-import/pages/1?document_id={doc.id}",
+        headers=auth_headers(parent), json={"page_type": "practice"})
+    assert r.status_code == 200
+    assert r.json()["page_type"] == "practice"
+
+    db.expire_all()
+    row = db.query(PracticeImportPage).filter_by(document_id=doc.id,
+                                                 page_no=1).one()
+    assert row.page_type == "practice"
+
+
+def test_patch_page_type_rejects_unknown(setup_db, db):
+    from app.models import PdfDocument, PracticeImportPage
+    from conftest import make_account, auth_headers
+
+    parent = make_account(db, "pu_p", role="parent")
+    doc = PdfDocument(filename="h.pdf", subject="数学", storage_path="D:/h.pdf",
+                      content_kind="practice")
+    db.add(doc)
+    db.flush()
+    db.add(PracticeImportPage(document_id=doc.id, page_no=1, page_type="toc"))
+    db.commit()
+
+    r = _practice_client().patch(
+        f"/api/practice-import/pages/1?document_id={doc.id}",
+        headers=auth_headers(parent), json={"page_type": "garbage"})
+    assert r.status_code == 400
+
+
+def test_import_rejects_unimplemented_subject(setup_db, db):
+    """语文/英语练习册返回 400，不静默按数学解析。"""
+    from app.models import QuestionBank
+    from conftest import parent_child
+
+    parent, _child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="语文练习册",
+                        subject="语文", grade=5, source="practice_pdf")
+    db.add(bank)
+    db.commit()
+
+    r = _practice_client().post(
+        f"/api/banks/{bank.id}/import-practice-pdf",
+        headers=parent_h,
+        files={"file": ("a.pdf", b"%PDF-1.4 fake", "application/pdf")},
+        data={"answer_start_page": "1", "answer_end_page": "2"},
+    )
+    assert r.status_code == 400
+    assert "尚未实现" in r.json()["detail"]
+
+
+def test_delete_document_cleans_practice_rows(setup_db, db):
+    """删练习册文档时，题组/页记录/小题都要清掉（无外键级联）。"""
+    from app.models import (
+        PdfDocument, PracticeImportPage, PracticeQuestionGroup, Question,
+        QuestionBank,
+    )
+    from app.routers.pdf import delete_document
+    from conftest import make_account
+
+    parent = make_account(db, "del_p", role="parent")
+    doc = PdfDocument(filename="g.pdf", subject="数学",
+                      storage_path="D:/g.pdf", content_kind="practice")
+    db.add(doc)
+    db.flush()
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=parent.id, stem="x",
+                              work_mode="oral", page_start=1, page_end=1,
+                              source_document_id=doc.id)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="oral",
+                    qtype_category="subjective", question="1+1", answer="2",
+                    group_id=g.id, source_document_id=doc.id))
+    db.add(PracticeImportPage(document_id=doc.id, page_no=1))
+    db.commit()
+    doc_id = doc.id
+
+    delete_document(document_id=doc_id, db=db)
+
+    db.expire_all()
+    assert db.query(PracticeImportPage).filter_by(document_id=doc_id).count() == 0
+    assert db.query(PracticeQuestionGroup).filter_by(
+        source_document_id=doc_id).count() == 0
+    assert db.query(Question).filter_by(source_document_id=doc_id).count() == 0
+
+
+def test_delete_document_also_removes_import_jobs(setup_db, db):
+    """PracticeImportJob.document_id 是无 ondelete 的裸外键；MySQL 上不清它会撞 FK。"""
+    from app.models import (
+        PdfDocument, PracticeImportJob, PracticeQuestionGroup, QuestionBank,
+    )
+    from app.routers.pdf import delete_document
+    from conftest import make_account
+
+    parent = make_account(db, "del_job_p", role="parent")
+    doc = PdfDocument(filename="h.pdf", subject="数学",
+                      storage_path="D:/h.pdf", content_kind="practice")
+    db.add(doc)
+    db.flush()
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    job = PracticeImportJob(user_id=parent.id, bank_id=bank.id,
+                            document_id=doc.id, total_pages=1)
+    db.add(job)
+    db.commit()
+    doc_id = doc.id
+
+    delete_document(document_id=doc_id, db=db)
+
+    db.expire_all()
+    assert db.query(PracticeImportJob).filter_by(document_id=doc_id).count() == 0
+
+
+def test_pick_practice_questions_excludes_examples(setup_db, db):
+    """抽题只抽待做小题，示例行不能被抽到。"""
+    from datetime import date
+
+    from app.models import Question, QuestionBank
+    from app.services.task_gen import _pick_practice_questions
+    from conftest import make_account
+
+    child = make_account(db, "tk_c", role="child")
+    bank = QuestionBank(user_id=child.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    for i in range(3):
+        db.add(Question(bank_id=bank.id, user_id=child.id,
+                        qtype="fill_blank", qtype_category="blank",
+                        question=f"示例{i}", answer="1", status="published",
+                        lesson_no=1, is_example=True, work_mode="pattern"))
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做", answer="2",
+                    status="published", lesson_no=1, is_example=False,
+                    work_mode="pattern"))
+    db.commit()
+
+    picked, lesson_no, _title = _pick_practice_questions(
+        db, bank, child.id, date(2026, 11, 22), 5)
+    assert [q.question for q in picked] == ["待做"]
+    assert lesson_no == 1
+
+
+def test_group_context_includes_examples(setup_db, db):
+    """抽中的题要能带出所属题组题干与示例行。"""
+    from app.models import Question, QuestionBank
+    from app.services.task_gen import _group_context
+    from conftest import make_account
+
+    child = make_account(db, "tk_c2", role="child")
+    bank = QuestionBank(user_id=child.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                              stem="不计算，运用规律直接写出得数",
+                              instruction="", work_mode="pattern",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    ex = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                  qtype_category="blank", question="示例1", answer="1.2",
+                  status="published", group_id=g.id, seq_in_group=1,
+                  is_example=True, work_mode="pattern")
+    todo = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做", answer="2",
+                    status="published", group_id=g.id, seq_in_group=2,
+                    is_example=False, work_mode="pattern")
+    db.add_all([ex, todo])
+    db.commit()
+
+    ctx = _group_context(db, [todo.id])
+    assert len(ctx) == 1
+    assert ctx[0]["stem"] == "不计算，运用规律直接写出得数"
+    assert ctx[0]["examples"][0]["question"] == "示例1"
+
+
+def test_submit_chooses_field_by_answer_kind(setup_db, db):
+    """前端 choice 送 selected_index、blank 送 blanks；只读 text 会全判错。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    # compare: symbol，前端会走 blank 送 blanks
+    q_sym = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                     qtype_category="blank", question="30.5 ○ 3.05",
+                     answer=">", answer_json="{}", work_mode="compare",
+                     status="published")
+    # choice：前端送 selected_index
+    q_ch = Question(bank_id=bank.id, user_id=child.id, qtype="single_choice",
+                    qtype_category="choice", question="哪个是质数？",
+                    answer="B", answer_json='{"correct_index":1}',
+                    work_mode="choice", status="published")
+    # equation：number，前端走 blank 送 blanks
+    q_eq = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="4x-5.2=5.2",
+                    answer="2.6", answer_json="{}", work_mode="equation",
+                    status="published")
+    db.add_all([q_sym, q_ch, q_eq])
+    db.commit()
+
+    r = _bank_client().post("/api/banks/submit", headers=child_h, json={
+        "bank_id": bank.id,
+        "answers": [
+            {"question_id": q_sym.id, "blanks": [">"]},
+            {"question_id": q_ch.id, "selected_index": 1},
+            {"question_id": q_eq.id, "blanks": ["2.6"]},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    got = {x["question_id"]: x["is_correct"] for x in r.json()["answers"]}
+    assert got[q_sym.id] is True
+    assert got[q_ch.id] is True
+    assert got[q_eq.id] is True
+    assert r.json()["score"] == 3
+
+
+def test_retry_noncontiguous_pages_keeps_untouched_pages(setup_db, db, monkeypatch):
+    """重试第 2、5 页时，第 3、4 页的题必须保留（不能用 min/max 包络删）。"""
+    from app.models import (
+        PracticeImportJob, PracticeQuestionGroup, Question, QuestionBank,
+    )
+    from app.services import practice_import as pi
+
+    job_id, bank_id, _doc_id = _mk_job(db, "rj8", 6, "j.pdf")
+    bank = db.get(QuestionBank, bank_id)
+
+    for pno in (1, 2, 3, 4, 5, 6):
+        g = PracticeQuestionGroup(bank_id=bank.id, user_id=bank.user_id,
+                                  stem=f"p{pno} 的组", work_mode="oral",
+                                  page_start=pno, page_end=pno)
+        db.add(g)
+        db.flush()
+        db.add(Question(bank_id=bank.id, user_id=bank.user_id, qtype="oral",
+                        qtype_category="subjective",
+                        question=f"p{pno} 的题", answer="1",
+                        group_id=g.id, status="published"))
+    db.commit()
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "practice",
+                            "groups": [{"stem": "new", "instruction": "",
+                                        "lesson_no": None, "lesson_title": "",
+                                        "work_mode": "oral", "need_process": False,
+                                        "continues_next_page": False,
+                                        "items": [{"seq": 1, "y": 0.1,
+                                                   "text": "new=____",
+                                                   "answer_hint": "",
+                                                   "is_example": False}]}],
+                            "image_questions": []})
+    monkeypatch.setattr(
+        "app.services.practice_solve.solve_math_items",
+        lambda db_, items, **kw: {0: {"kind": "number", "answer": "9"}},
+    )
+
+    pi.run_import_job(job_id, retry_pages=[2, 5])
+
+    db.expire_all()
+    texts = sorted(q.question for q in db.query(Question).filter_by(bank_id=bank_id))
+    # 1、3、4、6 页原题必须还在；2、5 页被重建
+    assert "p1 的题" in texts
+    assert "p3 的题" in texts, f"第 3 页的题被误删了: {texts}"
+    assert "p4 的题" in texts, f"第 4 页的题被误删了: {texts}"
+    assert "p6 的题" in texts
+    assert "p2 的题" not in texts
+    assert "p5 的题" not in texts
+
+
+def test_run_import_job_fails_when_no_groups_found(setup_db, db, monkeypatch):
+    """全书一道题都没识别出来 → job 必须标 failed 且可重试，
+    不能让家长看到「导入 0 道题」还以为成功了。"""
+    from app.models import PracticeImportJob
+    from app.services import practice_import as pi
+
+    job_id, _bank_id, _doc_id = _mk_job(db, "rj9", 1, "k.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    # 模型抽风：返回一段散文，不是 JSON
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "practice", "groups": [],
+                            "image_questions": [], "parse_failed": True})
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    job = db.get(PracticeImportJob, job_id)
+    assert job.status == "failed"
+    assert job.failed_pages == "[1]"
+
+
+def test_run_import_job_fails_on_empty_book(setup_db, db, monkeypatch):
+    """页分析成功但一道题都没有（例如整本都是目录）→ 也要标 failed。"""
+    from app.models import PracticeImportJob
+    from app.services import practice_import as pi
+
+    job_id, _bank_id, _doc_id = _mk_job(db, "rj10", 1, "l.pdf")
+
+    monkeypatch.setattr("app.services.practice_image.render_page_png",
+                        lambda path, idx, dpi=150: b"x")
+    monkeypatch.setattr("app.services.parsers.math_page.analyze_page",
+                        lambda db_, img, **kw: {
+                            "page_type": "blank", "groups": [],
+                            "image_questions": [], "parse_failed": False})
+
+    pi.run_import_job(job_id)
+
+    db.expire_all()
+    job = db.get(PracticeImportJob, job_id)
+    assert job.status == "failed"
+    assert "未识别到任何题目" in job.error
+
+
+def test_numeric_list_single_blank_falls_back_to_answer():
+    """找规律单空题：solver 只给 answer 不给 blanks 时，也要能过发布闸门。"""
+    from app.services.practice_import import _is_aligned, build_drafts
+
+    drafts = build_drafts(
+        [{"kind": "fill", "question": "$1111.05 \\div 0.9 =$ ____",
+          "answer": "1234.5", "work_mode": "pattern", "is_example": False,
+          "seq_in_group": 1, "group_id": 1}],
+        document_id=1,
+    )
+    d = drafts[0]
+    assert d.answer_json.get("blanks") == ["1234.5"]
+
+
+def test_submit_other_mode_falls_back_to_subjective(setup_db, db, monkeypatch):
+    """work_mode=other（answer_kind=text）的题要回落主观判分，
+    否则孩子写完答案永远拿不到反馈。"""
+    from app.models import Question, QuestionBank
+    from app.routers import bank as bank_mod
+    from conftest import parent_child
+
+    called = {}
+
+    def _fake_subjective(db_, answer_json, student):
+        called["answer_json"] = answer_json
+        called["student"] = student
+        return {"is_correct": True, "correct_answer_text": "答：12 个",
+                "detail": "意思正确"}
+
+    monkeypatch.setattr(bank_mod, "grade_subjective_with_ai", _fake_subjective)
+
+    _parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    q = Question(bank_id=bank.id, user_id=child.id, qtype="short_answer",
+                 qtype_category="subjective", question="一共多少个？",
+                 answer="答：12 个", answer_json="{}", work_mode="other",
+                 status="published")
+    db.add(q)
+    db.commit()
+
+    r = _bank_client().post("/api/banks/submit", headers=child_h, json={
+        "bank_id": bank.id,
+        "answers": [{"question_id": q.id, "text": "12个"}],
+    })
+    assert r.status_code == 200, r.text
+    assert called["student"]["text"] == "12个"
+    assert r.json()["answers"][0]["is_correct"] is True
+
+
+def test_practice_questions_include_group_and_blank_info(setup_db, db):
+    """家长端要按题组展示并渲染多空输入框。"""
+    from app.models import PracticeQuestionGroup, Question, QuestionBank
+    from conftest import parent_child
+
+    parent, _child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=parent.id,
+                              stem="不计算，运用规律直接写出得数",
+                              instruction="", work_mode="pattern",
+                              page_start=3, page_end=3)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="fill_blank",
+                    qtype_category="blank", question="示例1", answer="1.2",
+                    status="published", group_id=g.id, seq_in_group=1,
+                    is_example=True, work_mode="pattern"))
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做",
+                    answer="1234.5, 12345",
+                    answer_json='{"blanks":["1234.5","12345"]}',
+                    status="published", group_id=g.id, seq_in_group=2,
+                    is_example=False, work_mode="pattern"))
+    db.commit()
+
+    r = _practice_client().get(
+        f"/api/practice-import/questions?bank_id={bank.id}", headers=parent_h)
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert all(i["group_stem"] == "不计算，运用规律直接写出得数" for i in items)
+    todo = [i for i in items if not i["is_example"]][0]
+    assert todo["blank_count"] == 2
+    example = [i for i in items if i["is_example"]][0]
+    assert example["blank_count"] == 1
+
+
+def test_bank_questions_include_blank_count(setup_db, db):
+    """Flutter 读的是 /api/banks/{id}/questions，blank_count 必须在这里也返回。"""
+    from app.models import PracticeQuestionGroup, Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                              stem="不计算，运用规律直接写出得数",
+                              instruction="", work_mode="pattern",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做",
+                    answer="1234.5, 12345",
+                    answer_json='{"blanks":["1234.5","12345"]}',
+                    status="published", group_id=g.id, seq_in_group=1,
+                    is_example=False, work_mode="pattern"))
+    db.commit()
+
+    r = _bank_client().get(f"/api/banks/{bank.id}/questions", headers=child_h)
+    assert r.status_code == 200
+    item = r.json()[0]
+    assert item["blank_count"] == 2
+    assert item["group_stem"] == "不计算，运用规律直接写出得数"
+    assert item["answer"] == "1234.5, 12345"
+
+
+def test_job_payload_includes_document_id(setup_db, db):
+    """/jobs/latest 必须带 document_id，否则家长端页类型面板拿不到数据。"""
+    from app.models import PracticeImportJob
+    from app.routers.practice_import import _job_payload
+
+    job_id, _bank_id, doc_id = _mk_job(db, "docid", 1, "m.pdf")
+    job = db.get(PracticeImportJob, job_id)
+    payload = _job_payload(job)
+    assert payload["document_id"] == doc_id
+
+
+def test_pick_practice_questions_excludes_photo_kinds(setup_db, db):
+    """拍照类题（vertical/step/app/geometry）本期不布置：没有拍照链路，
+    抽到只会让孩子「答了没反馈」。"""
+    from datetime import date
+
+    from app.models import Question, QuestionBank
+    from app.services.task_gen import _pick_practice_questions
+    from conftest import make_account
+
+    child = make_account(db, "tk_photo", role="child")
+    bank = QuestionBank(user_id=child.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    # 口算（number，该抽）
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="oral",
+                    qtype_category="subjective", question="口算题", answer="2",
+                    status="published", lesson_no=1, is_example=False,
+                    work_mode="oral"))
+    # 竖式（photo，本期不抽）
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="calculation",
+                    qtype_category="blank", question="竖式题", answer="364",
+                    status="published", lesson_no=1, is_example=False,
+                    work_mode="vertical"))
+    # 应用题（photo，本期不抽）
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="application",
+                    qtype_category="subjective", question="应用题", answer="12",
+                    status="published", lesson_no=1, is_example=False,
+                    work_mode="app"))
+    db.commit()
+
+    picked, _lesson_no, _title = _pick_practice_questions(
+        db, bank, child.id, date(2026, 11, 22), 10)
+    assert [q.question for q in picked] == ["口算题"], \
+        f"photo 类题不该被抽中，实际抽到 {[q.question for q in picked]}"
+
+
+def test_bank_questions_by_ids_include_group_examples(setup_db, db):
+    """每日一练只传待做题 id，但同组的示例行必须一起返回——
+    没有示例，找规律题就是无解的。"""
+    from app.models import PracticeQuestionGroup, Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                              stem="不计算，运用规律直接写出得数",
+                              instruction="", work_mode="pattern",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="示例A", answer="1.2",
+                    status="published", group_id=g.id, seq_in_group=1,
+                    is_example=True, work_mode="pattern"))
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="示例B", answer="12.3",
+                    status="published", group_id=g.id, seq_in_group=2,
+                    is_example=True, work_mode="pattern"))
+    todo = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做", answer="123",
+                    status="published", group_id=g.id, seq_in_group=3,
+                    is_example=False, work_mode="pattern")
+    db.add(todo)
+    # 另一组，不该被带出来
+    g2 = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                               stem="用竖式计算", instruction="",
+                               work_mode="vertical", page_start=2, page_end=2)
+    db.add(g2)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="calculation",
+                    qtype_category="blank", question="别的组的示例", answer="1",
+                    status="published", group_id=g2.id, seq_in_group=1,
+                    is_example=True, work_mode="vertical"))
+    db.commit()
+
+    r = _bank_client().get(
+        f"/api/banks/{bank.id}/questions?ids={todo.id}", headers=child_h)
+    assert r.status_code == 200
+    got = r.json()
+    questions = {x["question"] for x in got}
+    assert questions == {"示例A", "示例B", "待做"}, f"实际 {questions}"
+    # 示例的 is_example 要对，前端据此分开渲染
+    flags = {x["question"]: x["is_example"] for x in got}
+    assert flags["示例A"] is True and flags["示例B"] is True
+    assert flags["待做"] is False
+
+
+def test_reparse_endpoint_accepts_explicit_pages(setup_db, db, monkeypatch):
+    """页类型改回 practice 后要能指定页重跑（不是只重跑失败页）。"""
+    from app.models import PracticeImportJob
+    from app.routers import practice_import as pi_router
+
+    job_id, _bank_id, _doc_id = _mk_job(db, "reparse", 3, "n.pdf")
+
+    called = {}
+    monkeypatch.setattr(
+        pi_router, "run_import_job",
+        lambda jid, pages=None: called.update(jid=jid, pages=pages),
+        raising=False,
+    )
+    # run_import_job 是 background task，TestClient 会同步执行它
+    parent_h = None
+    job = db.get(PracticeImportJob, job_id)
+    from app.models import User
+    parent = db.get(User, job.user_id)
+    from conftest import auth_headers
+
+    r = _practice_client().post(
+        f"/api/practice-import/jobs/{job_id}/reparse",
+        headers=auth_headers(parent),
+        json={"pages": [2]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert r.json()["reparse_pages"] == [2]
+    assert called.get("pages") == [2]
+
+
+def test_reparse_endpoint_rejects_empty_pages(setup_db, db):
+    from app.models import PracticeImportJob, User
+    from conftest import auth_headers
+
+    job_id, _bank_id, _doc_id = _mk_job(db, "reparse2", 2, "o.pdf")
+    job = db.get(PracticeImportJob, job_id)
+    parent = db.get(User, job.user_id)
+
+    r = _practice_client().post(
+        f"/api/practice-import/jobs/{job_id}/reparse",
+        headers=auth_headers(parent),
+        json={"pages": []},
+    )
+    assert r.status_code == 200
+    assert r.json()["ok"] is False
+
+
+def test_groups_from_pages_respects_page_type_override():
+    """家长改过的页类型必须覆盖本次 AI 判断，否则改完永远不生效。"""
+    from app.services.practice_import import _groups_from_pages
+
+    page_results = [
+        (5, {"page_type": "toc", "groups": [
+            {"stem": "被误判成目录页", "instruction": "", "work_mode": "oral",
+             "need_process": False, "continues_next_page": False,
+             "items": [{"seq": 1, "y": 0.1, "text": "1+1=____",
+                        "answer_hint": "", "is_example": False}]},
+        ], "image_questions": []}),
+    ]
+    # 不改 → 被当作 toc 跳过
+    assert _groups_from_pages(page_results) == []
+    # 家长改回 practice → 要能建组
+    out = _groups_from_pages(page_results, {5: "practice"})
+    assert len(out) == 1
+    assert out[0]["stem"] == "被误判成目录页"
+
+
+def test_bank_questions_extra_bank_ids(setup_db, db):
+    """多卷合并任务：传 extra_bank_ids 才能取到别的卷的题。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    b1 = QuestionBank(user_id=child.id, title="卷1", subject="数学", grade=5)
+    b2 = QuestionBank(user_id=child.id, title="卷2", subject="数学", grade=5)
+    db.add_all([b1, b2])
+    db.flush()
+    q1 = Question(bank_id=b1.id, user_id=child.id, qtype="oral",
+                  qtype_category="subjective", question="卷1题",
+                  answer="1", status="published", work_mode="oral")
+    q2 = Question(bank_id=b2.id, user_id=child.id, qtype="oral",
+                  qtype_category="subjective", question="卷2题",
+                  answer="2", status="published", work_mode="oral")
+    db.add_all([q1, q2])
+    db.commit()
+
+    # 不带 extra_bank_ids：只拿到卷1的
+    r1 = _bank_client().get(
+        f"/api/banks/{b1.id}/questions?ids={q1.id},{q2.id}", headers=child_h)
+    assert [x["question"] for x in r1.json()] == ["卷1题"]
+
+    # 带上 extra_bank_ids：两卷的都能拿到
+    r2 = _bank_client().get(
+        f"/api/banks/{b1.id}/questions?ids={q1.id},{q2.id}"
+        f"&extra_bank_ids={b2.id}", headers=child_h)
+    assert {x["question"] for x in r2.json()} == {"卷1题", "卷2题"}
+
+
+def test_extra_bank_ids_does_not_leak_other_books(setup_db, db):
+    """extra_bank_ids 只扩大「指定的卷」，不能借此读到没指定的卷。"""
+    from app.models import Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    b1 = QuestionBank(user_id=child.id, title="卷1", subject="数学", grade=5)
+    b2 = QuestionBank(user_id=child.id, title="卷2", subject="数学", grade=5)
+    b3 = QuestionBank(user_id=child.id, title="卷3", subject="数学", grade=5)
+    db.add_all([b1, b2, b3])
+    db.flush()
+    for b, name in [(b1, "1"), (b2, "2"), (b3, "3")]:
+        db.add(Question(bank_id=b.id, user_id=child.id, qtype="oral",
+                        qtype_category="subjective", question=f"卷{name}题",
+                        answer="1", status="published", work_mode="oral"))
+    db.commit()
+    q3 = db.query(Question).filter_by(bank_id=b3.id).one()
+
+    r = _bank_client().get(
+        f"/api/banks/{b1.id}/questions?ids={q3.id}&extra_bank_ids={b2.id}",
+        headers=child_h)
+    assert r.json() == [], "卷3 没被指定，不该返回它的题"

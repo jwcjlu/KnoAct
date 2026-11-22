@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/widgets/math_text.dart';
+
 /// 学库宝 / tiku.cn 等导入题干里的有限 HTML：`br` / `p` / `img` / 常见行内标签。
 class QuestionHtmlToken {
   const QuestionHtmlToken(this.kind, this.text);
@@ -19,7 +21,6 @@ enum QuestionHtmlBlockKind {
 
 final _imgSrcRe = RegExp(r'''\bsrc\s*=\s*(["'])(.*?)\1''', caseSensitive: false);
 final _tagRe = RegExp(r'<[^>]+>');
-final _dollarRe = RegExp(r'\$([^$]+)\$');
 final _entityRe = RegExp(
   r'&(?:nbsp|lt|gt|amp|quot|apos|#x[0-9a-fA-F]+|#\d+);',
 );
@@ -66,10 +67,8 @@ String decodeHtmlEntities(String s) {
   });
 }
 
-String _stripDollars(String s) => s.replaceAllMapped(_dollarRe, (m) => m.group(1)!);
-
 void _emitText(List<QuestionHtmlToken> out, String buf) {
-  final text = _stripDollars(decodeHtmlEntities(buf));
+  final text = decodeHtmlEntities(buf);
   if (text.isEmpty) return;
   out.add(QuestionHtmlToken('text', text));
 }
@@ -361,7 +360,10 @@ class QuestionHtmlView extends StatelessWidget {
           style: base.copyWith(height: base.height ?? 1.75),
           children: [
             if (prefix.isNotEmpty) TextSpan(text: prefix),
-            TextSpan(text: plain),
+            if (plain.contains(r'$'))
+              ...buildMathSpans(plain, style: base)
+            else
+              TextSpan(text: plain),
           ],
         ),
       );
@@ -400,7 +402,12 @@ class QuestionHtmlView extends StatelessWidget {
         prefixUsed = true;
       }
       for (final t in block) {
-        if (t.kind == 'text') spans.add(TextSpan(text: t.text, style: blockStyle));
+        if (t.kind != 'text') continue;
+        if (t.text.contains(r'$')) {
+          spans.addAll(buildMathSpans(t.text, style: blockStyle));
+        } else {
+          spans.add(TextSpan(text: t.text, style: blockStyle));
+        }
       }
       if (spans.isEmpty) continue;
 

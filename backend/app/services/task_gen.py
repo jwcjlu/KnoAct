@@ -25,22 +25,40 @@ def _content_lesson_ids(db: Session, subject: str, document_ids: list[int], up_t
 
 
 def _current_lesson(db: Session, subject: str, user_id: int):
-    """按科返回当前课：只在孩子绑定的教材里选；LearningProgress 匹配 (user_id, subject)
-    则用它（须在绑定范围内），否则回退绑定教材该科第一课。未绑定任何教材则返回 None。"""
-    bound_doc_ids = [r[0] for r in db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
+    """按科返回当前课：只在孩子绑定的教材里选。
+
+    进度按 (user_id, document_id) 存，一个学科可能有多本教材；
+    这里优先用「该科有进度的那本」，否则取绑定教材里该科的第一本。
+    """
+    bound_doc_ids = [r[0] for r in
+                     db.query(UserDocument.document_id).filter_by(user_id=user_id).all()]
     if not bound_doc_ids:
         return None
-    prog = db.query(LearningProgress).filter_by(user_id=user_id, subject=subject).first()
-    lessons = (db.query(Lesson)
-               .filter(Lesson.subject == subject, Lesson.document_id.in_(bound_doc_ids))
-               .order_by(Lesson.id).all())
-    if not lessons:
-        return None
-    if prog and prog.current_lesson_id:
-        for l in lessons:
-            if l.id == prog.current_lesson_id:
-                return l
-    return lessons[0]
+
+    from .learning_progress import get_progress
+
+    # 优先：绑定教材范围内、有 progress 的那本。
+    # 老记录（document_id 为 NULL）也要认：把它当作「该科唯一进度」。
+    rows = (db.query(LearningProgress)
+            .filter_by(user_id=user_id, subject=subject).all())
+    lesson = None
+    for row in rows:
+        if not row.current_lesson_id:
+            continue
+        if row.document_id is not None and row.document_id not in bound_doc_ids:
+            continue
+        cand = db.get(Lesson, row.current_lesson_id)
+        if cand is not None and (row.document_id is None
+                                 or cand.document_id in bound_doc_ids):
+            lesson = cand
+            break
+
+    if lesson is None:
+        lesson = (db.query(Lesson)
+                  .filter(Lesson.subject == subject,
+                          Lesson.document_id.in_(bound_doc_ids))
+                  .order_by(Lesson.id).first())
+    return lesson
 
 
 def _default_count(db: Session, key: str, fallback: int, child_id=None) -> int:
@@ -366,6 +384,11 @@ def _gen_bank_practice_tasks(db: Session, user_id: int, day: date):
 
     练习册（source=practice_pdf）按「课时」逐日推进：优先练家长设定的当前课时，
     练完就往后走。普通题库卷仍按原来的整卷轮转。
+
+    **一个科目只有一个练习任务**（数据库有唯一约束 `uq_task_user_subject_date_type`），
+    但该任务可以**合并多个卷**的题：家长导入新练习册后，旧卷不会再把新卷挤掉。
+    每个卷抽 `task_bank_practice_count` 道，最多合并 `task_bank_practice_volumes`
+    个卷（默认 2），总量封顶 `task_bank_practice_total_cap`（默认 12）。
     """
     child = db.get(User, user_id)
     if not child or not child.parent_id:
@@ -373,47 +396,88 @@ def _gen_bank_practice_tasks(db: Session, user_id: int, day: date):
     n_pick = _default_count(db, "task_bank_practice_count", 3, child_id=user_id)
     if n_pick <= 0:
         return []
+    max_volumes = _default_count(
+        db, "task_bank_practice_volumes", 2, child_id=user_id)
+    if max_volumes <= 0:
+        max_volumes = 1
+    total_cap = _default_count(
+        db, "task_bank_practice_total_cap", 12, child_id=user_id)
     banks = (
         db.query(QuestionBank)
         .filter_by(user_id=child.parent_id, status="active")
         .order_by(QuestionBank.id)
         .all()
     )
-    created: list[Task] = []
-    used_subjects: set[str] = set()
+
+    # 每个科目收集最多 max_volumes 个卷的题，合成一个任务
+    merged: dict[str, dict] = {}
     for bank in banks:
         if not _bank_include_daily(bank.tags):
             continue
         subj = (bank.subject or "").strip() or "综合"
-        if subj in used_subjects:
+        entry = merged.setdefault(subj, {"banks": [], "items": [], "titles": []})
+        if len(entry["banks"]) >= max_volumes:
             continue
-        if db.query(Task).filter_by(user_id=user_id, subject=subj, date=day, task_type="practice").first():
+        if len(entry["items"]) >= total_cap:
             continue
 
-        picked, lesson_no, lesson_title = _pick_practice_questions(db, bank, user_id, day, n_pick)
+        room = min(n_pick, total_cap - len(entry["items"]))
+        if room <= 0:
+            continue
+        picked, lesson_no, lesson_title = _pick_practice_questions(
+            db, bank, user_id, day, room)
         if not picked:
             continue
 
-        detail = f"每日抽练 · {len(picked)} 道题"
-        if lesson_no is not None:
-            detail = f"{lesson_title or f'第{lesson_no}课时'} · {len(picked)} 道题"
+        entry["banks"].append(bank.id)
+        entry["titles"].append(bank.title)
+        for q in picked:
+            entry["items"].append({
+                "id": q.id,
+                "bank_id": bank.id,
+                "bank_title": bank.title,
+                "lesson_no": lesson_no,
+                "lesson_title": lesson_title,
+            })
 
+    created: list[Task] = []
+    for subj, entry in merged.items():
+        if not entry["items"]:
+            continue
+        # 幂等：该科目今天已有练习任务就跳过
+        if db.query(Task).filter_by(
+                user_id=user_id, subject=subj, date=day,
+                task_type="practice").first():
+            continue
+
+        titles = entry["titles"]
+        title = (f"{titles[0]} 题库练习" if len(titles) == 1
+                 else f"{titles[0]} 等 {len(titles)} 套卷 题库练习")
+        detail = f"每日抽练 · {len(titles)} 套卷 · {len(entry['items'])} 道题"
+        content = {
+            "bank_id": entry["banks"][0],
+            "bank_title": titles[0],
+            "question_ids": [it["id"] for it in entry["items"]],
+            "lesson_no": entry["items"][0]["lesson_no"],
+            "lesson_title": entry["items"][0]["lesson_title"],
+            "groups": _group_context(
+                db, [it["id"] for it in entry["items"]]),
+            # 多卷信息：前端按题 id 归到对应卷
+            "banks": [
+                {"bank_id": bid, "bank_title": t}
+                for bid, t in zip(entry["banks"], titles)
+            ],
+            "items": entry["items"],
+        }
         created.append(Task(
             task_type="practice",
             subject=subj,
-            title=f"{bank.title} 题库练习",
+            title=title,
             detail=detail,
-            content=json.dumps({
-                "bank_id": bank.id,
-                "bank_title": bank.title,
-                "question_ids": [q.id for q in picked],
-                "lesson_no": lesson_no,
-                "lesson_title": lesson_title,
-            }, ensure_ascii=False),
+            content=json.dumps(content, ensure_ascii=False),
             points=15,
             content_status="published",
         ))
-        used_subjects.add(subj)
     return created
 
 
@@ -427,9 +491,15 @@ def _pick_practice_questions(db: Session, bank, user_id: int, day: date, n_pick:
     base = (
         db.query(Question)
         .filter_by(bank_id=bank.id, status="published")
+        .filter(Question.is_example.is_(False))   # 示例行不是待做题
         .order_by(Question.lesson_no, Question.id)
     )
-    all_q = base.all()
+    # photo 类题（竖式/脱式/应用/图形）需拍照作答，拍照链路未实现，本期不布置，
+    # 否则孩子答了没有任何反馈。answer_kind 由 work_mode 查表得来，不能写进 SQL。
+    from ..core.work_modes import answer_kind_of
+
+    all_q = [q for q in base.all()
+             if answer_kind_of(q.work_mode) != "photo"]
     if not all_q:
         return [], None, ""
 
@@ -471,6 +541,40 @@ def _pick_practice_questions(db: Session, bank, user_id: int, day: date, n_pick:
     offset = day.toordinal() % len(pool) if pool else 0
     picked = [pool[(offset + i) % len(pool)] for i in range(min(n_pick, len(pool)))] if pool else []
     return picked, no, title
+
+
+def _group_context(db: Session, question_ids: list[int]) -> list[dict]:
+    """给抽中的小题带上所属题组题干与示例行，便于孩子理解引导语。"""
+    from ..models import PracticeQuestionGroup, Question
+
+    if not question_ids:
+        return []
+    qs = db.query(Question).filter(Question.id.in_(question_ids)).all()
+    gids = {q.group_id for q in qs if q.group_id}
+    if not gids:
+        return []
+    groups = {g.id: g for g in db.query(PracticeQuestionGroup)
+              .filter(PracticeQuestionGroup.id.in_(gids)).all()}
+    examples: dict[int, list[dict]] = {}
+    for ex in (db.query(Question)
+               .filter(Question.group_id.in_(gids),
+                       Question.is_example.is_(True))
+               .order_by(Question.seq_in_group).all()):
+        examples.setdefault(ex.group_id, []).append(
+            {"question": ex.question, "answer": ex.answer})
+    out = []
+    for gid in sorted(gids):
+        g = groups.get(gid)
+        if g is None:
+            continue
+        out.append({
+            "group_id": g.id,
+            "stem": g.stem,
+            "instruction": g.instruction,
+            "work_mode": g.work_mode,
+            "examples": examples.get(gid, []),
+        })
+    return out
 
 
 def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = False):

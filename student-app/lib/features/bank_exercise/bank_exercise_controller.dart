@@ -74,7 +74,8 @@ class BankExerciseController extends Notifier<BankExerciseState> {
     return const BankExerciseState();
   }
 
-  Future<void> load(int bankId, {List<int>? questionIds, int? taskId}) async {
+  Future<void> load(int bankId,
+      {List<int>? questionIds, int? taskId, List<int>? extraBankIds}) async {
     state = state.copyWith(
       bankId: bankId,
       taskId: taskId,
@@ -84,7 +85,8 @@ class BankExerciseController extends Notifier<BankExerciseState> {
       result: null,
     );
     try {
-      final qs = await _repo.fetchQuestions(bankId, questionIds: questionIds);
+      final qs = await _repo.fetchQuestions(bankId,
+          questionIds: questionIds, extraBankIds: extraBankIds);
       _startedAt = DateTime.now();
       state = state.copyWith(loading: false, questions: qs);
     } catch (e) {
@@ -129,8 +131,12 @@ class BankExerciseController extends Notifier<BankExerciseState> {
       return {'question_id': q.id, 'selected_index': state.selectedSingle[q.id] ?? 0};
     }
     if (q.qtypeCategory == 'blank') {
-      final b = state.blanks[q.id] ?? [''];
-      return {'question_id': q.id, 'blanks': b};
+      final n = q.blankCount < 1 ? 1 : q.blankCount;
+      final cur = List<String>.from(state.blanks[q.id] ?? const <String>[]);
+      while (cur.length < n) {
+        cur.add('');
+      }
+      return {'question_id': q.id, 'blanks': cur.take(n).toList()};
     }
     return {'question_id': q.id, 'text': state.texts[q.id] ?? ''};
   }
@@ -141,7 +147,9 @@ class BankExerciseController extends Notifier<BankExerciseState> {
     state = state.copyWith(busy: true, error: null);
     try {
       final durationMs = DateTime.now().difference(_startedAt).inMilliseconds;
+      // 示例行不是待做题：不提交，否则会被判错、扣分并写进错题本
       final answers = state.questions
+          .where((q) => !q.isExample)
           .map((q) => _answerPayload(q)..['duration_ms'] = durationMs)
           .toList();
       final result = await _repo.submit(bankId: bankId, answers: answers);

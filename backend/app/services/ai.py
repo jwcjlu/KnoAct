@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from sqlalchemy.orm import Session
 from ..models import ModelConfig  # noqa: F401  register model on Base.metadata
+from .model_config import resolve
 
 class AIProvider(ABC):
     name = "base"
@@ -142,5 +143,61 @@ def ocr_image(db: Session, image_bytes: bytes, instruction: str = "识别图片�
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
             {"type": "text", "text": instruction},
         ]}],
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _openai_client(**kwargs):
+    """薄封装，便于测试替换（避免真的建网络客户端）。"""
+    from openai import OpenAI
+
+    return OpenAI(**kwargs)
+
+
+def vision_json(
+    db: Session,
+    image_bytes: bytes,
+    system: str,
+    prompt: str,
+    *,
+    timeout: float | None = None,
+) -> str:
+    """视觉模型 + JSON 输出。整页分析 / 图片题求答案用。
+
+    与 `ocr_image` 的区别：带 system 消息、要求 `response_format=json_object`、有超时。
+    与 `AIProvider.generate` 的区别：能带图片（后者只收文本）。
+
+    未配置中转站时抛 RuntimeError（不静默返回空串，避免调用方把空当"无题目"）。
+    """
+    import base64
+
+    r = resolve(db, "llm")
+    vision_model = r.options.get("vision_model", "")
+    if not vision_model:
+        row = db.query(ModelConfig).filter_by(key="vision_model").first()
+        vision_model = row.value if row else "qwen3-vl-plus"
+    if not r.api_key or not r.base_url:
+        raise RuntimeError("中转站 API Key / Base URL 未配置，无法做视觉分析")
+
+    client = _openai_client(
+        api_key=r.api_key, base_url=r.base_url,
+        timeout=timeout or 600.0, max_retries=0,
+    )
+    b64 = base64.b64encode(image_bytes).decode()
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({
+        "role": "user",
+        "content": [
+            {"type": "image_url",
+             "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            {"type": "text", "text": prompt},
+        ],
+    })
+    resp = client.chat.completions.create(
+        model=vision_model,
+        messages=messages,
+        response_format={"type": "json_object"},
     )
     return resp.choices[0].message.content or ""

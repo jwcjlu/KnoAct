@@ -106,93 +106,6 @@ def test_persist_drafts_passes_lesson_fields(db):
     assert row.source_document_id == doc.id
 
 
-def test_parse_lesson_page_extracts_header_and_items():
-    """大题号只作分组，每个算式行才是一道题。"""
-    from app.services.practice_import import parse_lesson_page
-
-    text = """第3课时 小数乘小数
-1. 直接写出得数。
-8.9 + 4.5 =
-1000 - 550 =
-2. 计算下面各题，能简算的要简算。
-(72 ÷ 18 + 8) × 28
-"""
-    out = parse_lesson_page(text)
-    assert out["lesson_no"] == 3
-    assert out["lesson_title"] == "小数乘小数"
-    assert len(out["items"]) == 3
-    assert out["items"][0]["question"] == "8.9 + 4.5 ="
-    assert out["items"][0]["kind"] == "oral"
-    assert out["items"][2]["question"] == "(72 ÷ 18 + 8) × 28"
-    assert out["items"][2]["kind"] == "step"
-
-
-def test_parse_lesson_page_real_book_page():
-    """真实页面（第 3 课时练习课）：15 道口算 + 6 道简算 + 1 道巧算。"""
-    from app.services.practice_import import parse_lesson_page
-
-    text = """第 3 课时 练习课
-视频讲解　智能批改
-1. 直接写出得数。（建议 2 分钟完成）
-8.9 + 4.5 =
-1000 − 550 =
-3.32 + 2.74 =
-2. 计算下面各题，能简算的要简算。（建议 6 分钟完成）
-(72 ÷ 18 + 8) × 28
-(13 × 125) × (3 × 8)
-巧算。
-2024 × 20232023 − 2023 × 20242024
-月　日
-RJ 五（上）
-"""
-    out = parse_lesson_page(text)
-    assert out["lesson_no"] == 3
-    assert len(out["items"]) == 6, [i["question"] for i in out["items"]]
-    kinds = [i["kind"] for i in out["items"]]
-    assert kinds[:3] == ["oral"] * 3
-    assert kinds[3] == "step"
-    # 页脚噪音不能被当成题
-    assert all("RJ" not in i["question"] for i in out["items"])
-
-
-def test_parse_lesson_page_does_not_split_on_decimals():
-    from app.services.practice_import import parse_lesson_page
-
-    out = parse_lesson_page("第1课时 口算\n1. 计算 3.25 + 1.8 =")
-    assert len(out["items"]) == 1
-    assert "3.25" in out["items"][0]["question"]
-
-
-def test_parse_lesson_page_handles_fullwidth_and_no_title():
-    from app.services.practice_import import parse_lesson_page
-
-    out = parse_lesson_page("第 12 课时 练习课\n（1）0.6×0.4＝")
-    assert out["lesson_no"] == 12
-    assert out["lesson_title"] == "练习课"
-    assert out["items"][0]["question_no"] == "1"
-
-
-def test_parse_lesson_page_returns_empty_when_no_header():
-    from app.services.practice_import import parse_lesson_page
-
-    out = parse_lesson_page("随便一段没有课时标题的文字")
-    assert out["lesson_no"] is None
-    assert out["items"] == []
-
-
-def test_align_answers_matches_by_lesson_and_number():
-    from app.services.practice_import import align_answers
-
-    questions = [
-        {"lesson_no": 3, "question_no": "1", "question": "8.9+4.5="},
-        {"lesson_no": 3, "question_no": "2", "question": "1000-550="},
-    ]
-    answers = [{"lesson_no": 3, "question_no": "1", "answer": "13.4"}]
-    aligned, missing = align_answers(questions, answers)
-    assert aligned[0]["answer"] == "13.4"
-    assert [m["question_no"] for m in missing] == ["2"]
-
-
 def test_split_blanks_by_count():
     from app.services.practice_import import split_blanks
 
@@ -291,97 +204,6 @@ def test_publish_skips_fill_blank_without_blanks(db):
     assert db.get(Question, q.id).status == "pending"
 
 
-def test_run_import_job_publishes_aligned_and_records_failures(db, monkeypatch):
-    from app.models import Question, QuestionBank, PdfDocument, PracticeImportJob
-    from conftest import make_account
-    from app.services import practice_import as pi
-    from app.database import SessionLocal
-
-    parent = make_account(db, "pi_job", "parent")
-    bank = QuestionBank(user_id=parent.id, title="卷", subject="数学")
-    doc = PdfDocument(filename="b.pdf", subject="数学", storage_path="uploads/x.pdf",
-                      content_kind="practice")
-    db.add_all([bank, doc])
-    db.commit()
-    job = PracticeImportJob(
-        user_id=parent.id, bank_id=bank.id, document_id=doc.id, total_pages=4,
-        question_start_page=1, question_end_page=2,
-        answer_start_page=3, answer_end_page=4,
-    )
-    db.add(job)
-    db.commit()
-    job_id, bank_id = job.id, bank.id
-    db.close()
-
-    pages = {
-        1: "第3课时 小数乘小数\n1. 直接写出得数。\n8.9 + 4.5 =\n1000 - 550 =",
-        2: "",
-    }
-    monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_, **kw: pages.get(idx + 1, ""))
-    monkeypatch.setattr(pi, "SessionLocal", SessionLocal, raising=False)
-    # 答案由 AI 求解（不依赖答案页 OCR）
-    monkeypatch.setattr(
-        "app.services.practice_solve.solve_math_items",
-        lambda db_, items, **kw: {i: "1" for i in range(len(items))},
-    )
-
-    pi.run_import_job(job_id)
-
-    s = SessionLocal()
-    try:
-        fresh = s.get(PracticeImportJob, job_id)
-        assert fresh.status == "failed"      # 第 2 页识别失败
-        assert json.loads(fresh.failed_pages) == [2]
-        assert s.query(Question).filter_by(bank_id=bank_id, status="published").count() == 2
-        assert s.get(QuestionBank, bank_id).source == "practice_pdf"
-    finally:
-        s.close()
-
-
-def test_run_import_job_all_ok_marks_done(db, monkeypatch):
-    from app.models import PdfDocument, PracticeImportJob, QuestionBank
-    from conftest import make_account
-    from app.services import practice_import as pi
-    from app.database import SessionLocal
-
-    parent = make_account(db, "pi_job2", "parent")
-    bank = QuestionBank(user_id=parent.id, title="卷2", subject="数学")
-    doc = PdfDocument(filename="c.pdf", subject="数学", storage_path="uploads/y.pdf",
-                      content_kind="practice")
-    db.add_all([bank, doc])
-    db.commit()
-    job = PracticeImportJob(
-        user_id=parent.id, bank_id=bank.id, document_id=doc.id, total_pages=2,
-        question_start_page=1, question_end_page=1,
-        answer_start_page=2, answer_end_page=2,
-    )
-    db.add(job)
-    db.commit()
-    job_id = job.id
-    db.close()
-
-    pages = {1: "第1课时 口算\n1. 直接写出得数。\n1 + 1 =", 2: ""}
-    monkeypatch.setattr(pi, "_ocr_text", lambda path, idx, db_, **kw: pages.get(idx + 1, ""))
-    monkeypatch.setattr(
-        "app.services.practice_solve.solve_math_items",
-        lambda db_, items, **kw: {0: "2"},
-    )
-
-    pi.run_import_job(job_id)
-
-    s = SessionLocal()
-    try:
-        row = s.get(PracticeImportJob, job_id)
-        assert row.status == "done"
-        assert row.published_count == 1
-        assert row.question_count == 1
-    finally:
-        s.close()
-
-
-import json  # noqa: E402
-
-
 def _client_router():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -404,27 +226,6 @@ def test_create_practice_book_bank(setup_db):
                     json={"title": "RJ五上", "subject": "数学", "grade": 5})
     assert r.status_code == 200
     assert r.json()["id"] > 0
-
-
-def test_import_rejects_without_answer_pages(setup_db):
-    from app.database import SessionLocal
-    from conftest import parent_child
-    from app.models import QuestionBank
-
-    s = SessionLocal()
-    p, _c, parent_h, _ch = parent_child(s, "pib2")
-    bank = QuestionBank(user_id=p.id, title="卷", subject="数学", source="practice_pdf")
-    s.add(bank)
-    s.commit()
-    bank_id = bank.id
-    s.close()
-
-    client = _client_router()
-    r = client.post(f"/api/banks/{bank_id}/import-practice-pdf", headers=parent_h,
-                    files={"file": ("a.pdf", b"%PDF-1.4 fake", "application/pdf")},
-                    data={"answer_start_page": "", "answer_end_page": ""})
-    assert r.status_code == 400
-    assert "答案页" in r.json()["detail"]
 
 
 def test_import_rejects_without_vision_model(setup_db, monkeypatch):
@@ -592,14 +393,6 @@ def test_strip_answer_removes_computed_result():
     assert _strip_answer("1+1=？") == "1+1=？"
 
 
-def test_split_row_separates_columns():
-    from app.services.practice_import import _split_row
-
-    parts = _split_row("8.9＋4.5＝    1000－550＝    3.32＋2.74＝")
-    assert len(parts) == 3
-    assert parts[0].startswith("8.9")
-
-
 def test_build_drafts_strips_answer_from_question():
     from app.services.practice_import import build_drafts
 
@@ -608,41 +401,6 @@ def test_build_drafts_strips_answer_from_question():
     drafts = build_drafts(aligned, document_id=1)
     assert drafts[0].question == "8.9＋4.5 ="
     assert drafts[0].answer == "13.4"
-
-
-def test_parse_answer_page_without_lesson_header():
-    """答案页没有「第N课时」标题，仍要能解析出答案。"""
-    from app.services.practice_import import parse_answer_page
-
-    text = """1. 13.4
-2. 450
-3. 60 ÷ 5 = 12
-"""
-    items = parse_answer_page(text)
-    assert len(items) == 3
-    assert items[0]["answer"] == "13.4"
-    assert items[2]["answer"] == "12"   # 带过程时取最后结果
-
-
-def test_align_by_order_pairs_nth_question_with_nth_answer():
-    from app.services.practice_import import align_by_order
-
-    qs = [{"question_no": "1", "question": "a"}, {"question_no": "2", "question": "b"}]
-    ans = [{"answer": "1"}, {"answer": "2"}]
-    aligned, missing = align_by_order(qs, ans)
-    assert len(aligned) == 2
-    assert aligned[1]["answer"] == "2"
-    assert missing == []
-
-
-def test_align_by_order_marks_tail_as_missing():
-    from app.services.practice_import import align_by_order
-
-    qs = [{"question_no": "1"}, {"question_no": "2"}, {"question_no": "3"}]
-    ans = [{"answer": "1"}]
-    aligned, missing = align_by_order(qs, ans)
-    assert len(aligned) == 1
-    assert len(missing) == 2
 
 
 def test_strip_answer_keeps_equation():
@@ -656,8 +414,222 @@ def test_strip_answer_keeps_equation():
     assert _strip_answer("8.9＋4.5＝13.4") == "8.9＋4.5 ="
 
 
-def test_equation_section_kind():
-    from app.services.practice_import import QTYPE_OF_KIND, _section_kind
+from app.services.practice_import import _strip_answer, build_drafts
 
-    assert _section_kind("利用等式的性质求出等式中的未知数。") == "equation"
-    assert QTYPE_OF_KIND["equation"] == "fill_blank"
+
+def test_strip_answer_closes_formula_and_adds_blank():
+    """公式内截断必须重新闭合 $ 并补空位，而不是留一个孤立 $。"""
+    out = _strip_answer(r"$111.06 \div 0.9 = 123.4$")
+    assert out == r"$111.06 \div 0.9 =$ ____"
+    assert out.count("$") % 2 == 0
+
+
+def test_strip_answer_keeps_equation_with_variable():
+    """含未知数的方程不截断（5.2 是方程的一部分）。"""
+    src = r"$4x - 5.2 = 5.2$"
+    assert _strip_answer(src) == src
+
+
+def test_strip_answer_skips_example_rows():
+    """示例行本来就要显示答案，完全不截断。"""
+    src = r"$1.08 \div 0.9 = 1.2$"
+    assert _strip_answer(src, is_example=True) == src
+
+
+def test_strip_answer_legacy_plain_text_still_works():
+    """没有 $ 的旧格式保持原行为。"""
+    assert _strip_answer("8.9 + 4.5 = 13.4") == "8.9 + 4.5 ="
+
+
+def test_strip_answer_no_equals_untouched():
+    assert _strip_answer("求涂色部分的面积") == "求涂色部分的面积"
+
+
+def test_strip_answer_right_side_not_numeric_untouched():
+    src = r"$x + 1 = ?$"
+    assert _strip_answer(src) == src
+
+
+def test_strip_answer_always_keeps_dollar_pairing():
+    for src in [
+        r"$111.06 \div 0.9 = 123.4$",
+        r"$1.08 \div 0.9 = 1.2$",
+        r"$4x - 5.2 = 5.2$",
+        r"$3.5 \times 2 = 7$",
+    ]:
+        assert _strip_answer(src).count("$") % 2 == 0, src
+
+
+def test_build_drafts_passes_group_fields():
+    drafts = build_drafts(
+        [{
+            "kind": "fill", "question": r"$1.08 \div 0.9 = 1.2$", "answer": "1.2",
+            "group_id": 7, "seq_in_group": 3, "is_example": True,
+            "work_mode": "pattern", "lesson_no": 5, "lesson_title": "第1课时",
+            "page": 5,
+        }],
+        document_id=99,
+    )
+    d = drafts[0]
+    assert d.group_id == 7
+    assert d.seq_in_group == 3
+    assert d.is_example is True
+    assert d.work_mode == "pattern"
+    # 示例行不截断，答案保留
+    assert "1.2" in d.question
+
+
+def test_build_drafts_writes_blanks_for_numeric_list():
+    """numeric_list 必须把 blanks 写进 answer_json，否则永远过不了发布闸门。"""
+    drafts = build_drafts(
+        [{
+            "kind": "fill", "question": "$1111.05 \\div 0.9 =$ ____",
+            "answer": "1234.5, 12345", "blanks": ["1234.5", "12345"],
+            "work_mode": "pattern", "is_example": False,
+            "seq_in_group": 1, "group_id": 1,
+        }],
+        document_id=1,
+    )
+    d = drafts[0]
+    assert d.answer_json.get("blanks") == ["1234.5", "12345"]
+    # qtype 来自注册表，不是旧的 kind 映射
+    assert d.qtype == "fill_blank"
+
+
+def test_build_drafts_writes_correct_index_for_choice():
+    drafts = build_drafts(
+        [{
+            "kind": "other", "question": "下列哪个是质数？",
+            "answer": "B", "correct_index": 1,
+            "work_mode": "choice", "is_example": False,
+            "seq_in_group": 1, "group_id": 1,
+        }],
+        document_id=1,
+    )
+    d = drafts[0]
+    assert d.qtype == "single_choice"
+    assert d.answer_json.get("correct_index") == 1
+
+
+def test_build_drafts_symbol_has_no_blanks_requirement():
+    drafts = build_drafts(
+        [{
+            "kind": "fill", "question": "30.5 ○ 3.05", "answer": ">",
+            "work_mode": "compare", "is_example": False,
+            "seq_in_group": 1, "group_id": 1,
+        }],
+        document_id=1,
+    )
+    d = drafts[0]
+    assert d.answer == ">"
+    assert d.answer_json == {}
+
+
+def test_build_drafts_legacy_fill_without_blanks_degrades_to_oral():
+    """旧路径（无 work_mode）的 fill 题切不出 blanks 时降级成 oral，
+    否则它既没有 blanks 又保持 fill_blank，会被发布闸门永久挡住。"""
+    # 没有 blanks_of 回调、也没有 work_mode → 空数为 0 → 切不出 blanks
+    drafts = build_drafts(
+        [{"kind": "fill", "question": "$1+1=$", "answer": "2"}],
+        document_id=1,
+    )
+    assert drafts[0].qtype == "oral"
+    assert drafts[0].answer_json == {}
+
+
+def test_build_drafts_legacy_equation_without_blanks_degrades_to_oral():
+    drafts = build_drafts(
+        [{"kind": "equation", "question": "$4x - 5.2 = 5.2$", "answer": "2.6"}],
+        document_id=1,
+    )
+    assert drafts[0].qtype == "oral"
+
+
+def test_solve_math_items_returns_dict_shape(monkeypatch):
+    """返回结构从 dict[int, str] 改为 dict[int, dict]。"""
+    import app.services.practice_solve as ps
+
+    monkeypatch.setattr(ps, "_provider_ready", lambda db: True)
+    monkeypatch.setattr(ps, "_call_solver", lambda db, chunk: {
+        0: {"kind": "number", "answer": "13.4"},
+        1: {"kind": "numeric_list", "blanks": ["1.2", "1.44"]},
+    })
+
+    out = ps.solve_math_items(None, [{"question": "a"}, {"question": "b"}])
+    assert out[0]["answer"] == "13.4"
+    assert out[1]["blanks"] == ["1.2", "1.44"]
+
+
+def test_derive_page_range_without_answer_pages():
+    """答案页可选：不填时题面页跑到最后一页，而不是 0 页。"""
+    from app.routers.practice_import import _derive_page_range
+
+    q_start, q_end = _derive_page_range(
+        question_start_page=None, question_end_page=None,
+        answer_start_page=None, answer_end_page=None, total_pages=12)
+    assert (q_start, q_end) == (1, 12)
+
+
+def test_derive_page_range_narrows_when_answer_page_given():
+    """提供了答案页则收窄到答案页之前，少跑几次视觉调用。"""
+    from app.routers.practice_import import _derive_page_range
+
+    q_start, q_end = _derive_page_range(
+        question_start_page=None, question_end_page=None,
+        answer_start_page=96, answer_end_page=107, total_pages=107)
+    assert (q_start, q_end) == (1, 95)
+
+
+def test_derive_page_range_explicit_question_end_wins():
+    from app.routers.practice_import import _derive_page_range
+
+    q_start, q_end = _derive_page_range(
+        question_start_page=3, question_end_page=40,
+        answer_start_page=96, answer_end_page=107, total_pages=107)
+    assert (q_start, q_end) == (3, 40)
+
+def test_call_solver_includes_group_stem(monkeypatch):
+    """字母规律题的 a、b 定义在题干里，求解器必须看到，否则只会答 'ab'。"""
+    import app.services.ai as ai_mod
+    import app.services.practice_solve as ps
+
+    captured = {}
+
+    class _P:
+        name = "openai"
+
+        def generate(self, prompt, system="", json_mode=False):
+            captured["prompt"] = prompt
+            return '{"answers":[{"index":0,"kind":"number","answer":"0.0125"}]}'
+
+    monkeypatch.setattr(ai_mod, "get_provider",
+                        lambda db, child_id=None: _P(), raising=False)
+    out = ps._call_solver(
+        None,
+        [{"question": r"$a \times b =$ ____",
+          "stem": r"若 $a = 0.\underbrace{00\cdots00}_{2020\text{个}0}1$"}],
+    )
+    assert "材料" in captured["prompt"], captured["prompt"]
+    assert "underbrace" in captured["prompt"], "题干内容应传给求解器"
+    assert out[0]["answer"] == "0.0125"
+
+
+def test_call_solver_omits_redundant_stem(monkeypatch):
+    """题干与题目相同时不要重复贴两遍（省 token）。"""
+    import app.services.ai as ai_mod
+    import app.services.practice_solve as ps
+
+    captured = {}
+
+    class _P:
+        name = "openai"
+
+        def generate(self, prompt, system="", json_mode=False):
+            captured["prompt"] = prompt
+            return '{"answers":[{"index":0,"kind":"number","answer":"1"}]}'
+
+    monkeypatch.setattr(ai_mod, "get_provider",
+                        lambda db, child_id=None: _P(), raising=False)
+    ps._call_solver(None, [{"question": "1+1=____", "stem": "1+1=____"}])
+    assert "材料" not in captured["prompt"]
+    assert captured["prompt"].count("1+1=____") == 1

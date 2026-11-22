@@ -607,3 +607,105 @@ def test_knowledge_review_cap_truncates_excess_due():
     assert len(due_picked) == 3
     assert len(qs) <= 5
     db.close()
+
+def test_multiple_banks_same_subject_merge_into_one_task():
+    """同科目只有一个练习任务（唯一约束），但该任务里合并多个卷的题——
+    否则新导入的卷永远被旧卷挤掉。"""
+    db = SessionLocal()
+    parent = User(name="家长合并", role="parent")
+    db.add(parent)
+    db.flush()
+    uid, _l1 = _setup(db)
+    db.query(User).filter_by(id=uid).update({"parent_id": parent.id})
+
+    banks = []
+    for i in range(2):
+        b = QuestionBank(
+            user_id=parent.id, title=f"卷{i}", subject="数学",
+            tags=json.dumps({"include_daily_task": True}, ensure_ascii=False),
+        )
+        db.add(b)
+        db.flush()
+        for j in range(2):
+            db.add(Question(bank_id=b.id, qtype="single_choice",
+                            qtype_category="choice",
+                            question=f"卷{i}题{j}", status="published",
+                            answer_json='{"correct_index":0}'))
+        banks.append(b)
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    tasks = db.query(Task).filter_by(
+        user_id=uid, date=date.today(), task_type="practice", subject="数学").all()
+    assert len(tasks) == 1, f"同科目只能一个任务（唯一约束），实际 {len(tasks)}"
+
+    payload = json.loads(tasks[0].content)
+    # 两个卷的题都在同一个任务里
+    got_banks = {it["bank_id"] for it in payload["items"]}
+    assert got_banks == {banks[0].id, banks[1].id}, f"实际 {got_banks}"
+    # banks 清单也带上了
+    assert len(payload["banks"]) == 2
+    # 顶层 bank_id 仍是第一个（兼容旧前端）
+    assert payload["bank_id"] == banks[0].id
+    assert len(payload["question_ids"]) == 4
+    db.close()
+
+
+def test_bank_practice_total_cap_limits_merge():
+    """合并总量受 task_bank_practice_total_cap 限制。"""
+    db = SessionLocal()
+    parent = User(name="家长上限", role="parent")
+    db.add(parent)
+    db.flush()
+    uid, _l1 = _setup(db)
+    db.query(User).filter_by(id=uid).update({"parent_id": parent.id})
+
+    for i in range(2):
+        b = QuestionBank(
+            user_id=parent.id, title=f"卷{i}", subject="数学",
+            tags=json.dumps({"include_daily_task": True}, ensure_ascii=False),
+        )
+        db.add(b)
+        db.flush()
+        for j in range(5):
+            db.add(Question(bank_id=b.id, qtype="single_choice",
+                            qtype_category="choice",
+                            question=f"卷{i}题{j}", status="published",
+                            answer_json='{"correct_index":0}'))
+    db.commit()
+
+    # 每卷抽 3 道、共 2 卷 = 6 道
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, date=date.today(),
+                                 task_type="practice", subject="数学").one()
+    assert len(json.loads(t.content)["question_ids"]) == 6
+    db.close()
+
+
+def test_single_bank_task_keeps_backward_compatible_fields():
+    """只有一套卷时，content 仍是旧结构（bank_id/question_ids 可用）。"""
+    db = SessionLocal()
+    parent = User(name="家长单卷", role="parent")
+    db.add(parent)
+    db.flush()
+    uid, _l1 = _setup(db)
+    db.query(User).filter_by(id=uid).update({"parent_id": parent.id})
+    b = QuestionBank(
+        user_id=parent.id, title="唯一卷", subject="数学",
+        tags=json.dumps({"include_daily_task": True}, ensure_ascii=False),
+    )
+    db.add(b)
+    db.flush()
+    db.add(Question(bank_id=b.id, qtype="single_choice", qtype_category="choice",
+                    question="题", status="published", answer_json='{"correct_index":0}'))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, date=date.today(),
+                                 task_type="practice", subject="数学").one()
+    payload = json.loads(t.content)
+    assert payload["bank_id"] == b.id
+    assert len(payload["question_ids"]) == 1
+    assert payload["bank_title"] == "唯一卷"
+    assert t.title == "唯一卷 题库练习"
+    db.close()

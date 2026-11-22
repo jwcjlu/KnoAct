@@ -22,6 +22,11 @@ class QuestionDraft:
     source_document_id: int | None = None
     # 图片题：题干主体在图里，存裁好的题图路径
     image_path: str = ""
+    # 练习册题组：小题挂到题组下，示例行不入待做
+    group_id: int | None = None
+    seq_in_group: int = 0
+    is_example: bool = False
+    work_mode: str = ""
 
 
 class SourceAdapter(ABC):

@@ -33,7 +33,14 @@ def _flatten_import(passages: list[dict], questions: list[dict]) -> list[Questio
                 continue
             items.append({**it, "passage_title": title, "passage_content": content})
     items.extend(questions)
-    return OcrAdapter().normalize({"questions": items})
+    adapter = OcrAdapter()
+    drafts: list[QuestionDraft] = []
+    # 逐条 normalize：它会跳过空题干，整批调用后下标就和 items 对不上了
+    for item in items:
+        for d in adapter.normalize({"questions": [item]}):
+            d.work_mode = str(item.get("work_mode") or "").strip()
+            drafts.append(d)
+    return drafts
 
 
 _STRUCTURE_SYSTEM = (
@@ -43,8 +50,13 @@ _STRUCTURE_SYSTEM = (
     '"questions":[独立题...]}；否则只返回 {"questions":[...]}。\n'
     '题目字段：{"qtype":"single_choice|multi_choice|true_false|fill_blank|'
     'cloze|calculation|matching|short_answer|essay|application|oral",'
-    '"question":"题干","options":[{"label":"选项","value":0}],"answer_json":{...},"answer":"标准答案","analysis":"解析"}。\n'
-    "content 只允许这些标记：# ## ** * <u> /ipa/ ____（加粗、斜体、下划线、音标、填空）。\n"
+    '"question":"题干","options":[{"label":"选项","value":0}],"answer_json":{...},'
+    '"answer":"标准答案","analysis":"解析","work_mode":"oral|vertical|step|equation|'
+    'pattern|compare|unit_compare|fill_vertical|letter_pattern|geometry|app|choice|'
+    'judge|other"}。\n'
+    "content 只允许这些标记：# ## ** * <u> /ipa/ ____ $...$（加粗、斜体、下划线、"
+    "音标、填空、数学式）。数学式用 $...$ 包裹基础 LaTeX（如 $\\frac{3}{4}$），"
+    "中文、标点、单位不得放进 $...$ 内部。\n"
     "阅读材料 content 中 ____ 的个数与顺序，必须等于该材料下 fill_blank/cloze 子题的个数与顺序；"
     "每道 fill_blank/cloze 子题只对应一个空，answer_json.blanks 只含该空答案。"
     "独立填空题（不在 passages 内）题干里的 ____ 数量须与 answer_json.blanks 条数一致。\n"

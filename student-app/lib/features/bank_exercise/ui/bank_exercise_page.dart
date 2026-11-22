@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets.dart';
+import '../../../core/widgets/math_text.dart';
 import '../../shell/task_page_app_bar.dart';
 import '../bank_exercise_controller.dart';
 import '../data/bank_models.dart';
 import '../passage_markup.dart';
+import '../question_grouping.dart';
 import '../question_html.dart';
 
 class BankExercisePage extends ConsumerStatefulWidget {
@@ -14,11 +16,16 @@ class BankExercisePage extends ConsumerStatefulWidget {
     super.key,
     required this.bankId,
     this.questionIds = const [],
+    this.extraBankIds = const [],
     this.taskId,
   });
 
   final int bankId;
   final List<int> questionIds;
+
+  /// 多卷合并任务里除主卷外的其它卷（取题时一起带上）。
+  final List<int> extraBankIds;
+
   final int? taskId;
 
   @override
@@ -36,6 +43,8 @@ class _BankExercisePageState extends ConsumerState<BankExercisePage> {
     Future.microtask(() => ref.read(bankExerciseControllerProvider.notifier).load(
           widget.bankId,
           questionIds: widget.questionIds.isEmpty ? null : widget.questionIds,
+          extraBankIds:
+              widget.extraBankIds.isEmpty ? null : widget.extraBankIds,
           taskId: widget.taskId,
         ));
   }
@@ -97,11 +106,6 @@ class _BankExercisePageState extends ConsumerState<BankExercisePage> {
     );
   }
 
-  static String _firstBlank(List<String>? blanks) {
-    if (blanks == null || blanks.isEmpty) return '';
-    return blanks.first;
-  }
-
   List<Widget> _buildQuestionBlocks({
     required List<BankQuestion> questions,
     required bool submitted,
@@ -112,44 +116,75 @@ class _BankExercisePageState extends ConsumerState<BankExercisePage> {
     required Map<int, String> texts,
     required BankExerciseController ctl,
   }) {
-    final shown = <int>{};
     final widgets = <Widget>[];
-    for (var i = 0; i < questions.length; i++) {
-      final q = questions[i];
+    var index = 0;
+
+    // 阅读材料：按 passageId 变化插入一张材料卡（保留原有行为）
+    final shown = <int>{};
+    void maybePassage(BankQuestion q) {
       final pid = q.passageId;
-      if (pid != null && !shown.contains(pid)) {
-        shown.add(pid);
-        final p = q.passage;
-        if (p != null && p.content.isNotEmpty) {
-          widgets.add(SectionCard(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('阅读材料', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.gray)),
-                const SizedBox(height: 8),
-                PassageContentView(title: p.title, content: p.content),
-              ],
-            ),
-          ));
-          widgets.add(const SizedBox(height: 12));
-        }
-      }
-      widgets.add(_QuestionCard(
-        index: i,
-        question: q,
-        submitted: submitted,
-        result: resultByQid[q.id],
-        selectedSingle: selectedSingle[q.id],
-        selectedMulti: selectedMulti[q.id] ?? const [],
-        blankText: _firstBlank(blanks[q.id]),
-        textAnswer: texts[q.id] ?? '',
-        onSingle: submitted ? null : (v) => ctl.setSingle(q.id, v),
-        onMulti: submitted ? null : (v, on) => ctl.toggleMulti(q.id, v, on),
-        onBlank: submitted ? null : (v) => ctl.setBlank(q.id, 0, v),
-        onText: submitted ? null : (v) => ctl.setText(q.id, v),
+      if (pid == null || shown.contains(pid)) return;
+      shown.add(pid);
+      final p = q.passage;
+      if (p == null || p.content.isEmpty) return;
+      widgets.add(SectionCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('阅读材料',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.gray)),
+            const SizedBox(height: 8),
+            PassageContentView(title: p.title, content: p.content),
+          ],
+        ),
       ));
       widgets.add(const SizedBox(height: 12));
+    }
+
+    for (final g in groupBankQuestions(questions)) {
+      if (!g.isLegacy && g.stem.isNotEmpty) {
+        widgets.add(Padding(
+          padding: const EdgeInsets.only(top: 6, bottom: 8),
+          child: MathText(g.stem, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+        ));
+      }
+      if (g.examples.isNotEmpty) {
+        widgets.add(SectionCard(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('已印好的示例（不用做）', style: TextStyle(fontSize: 11, color: AppColors.gray)),
+              const SizedBox(height: 6),
+              for (final e in g.examples)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: MathText(e.question, style: const TextStyle(fontSize: 14, height: 1.7)),
+                ),
+            ],
+          ),
+        ));
+        widgets.add(const SizedBox(height: 12));
+      }
+      for (final q in g.items) {
+        maybePassage(q);
+        widgets.add(_QuestionCard(
+          index: index++,
+          question: q,
+          submitted: submitted,
+          result: resultByQid[q.id],
+          selectedSingle: selectedSingle[q.id],
+          selectedMulti: selectedMulti[q.id] ?? const [],
+          blankValues: blanks[q.id] ?? const [],
+          textAnswer: texts[q.id] ?? '',
+          onSingle: submitted ? null : (v) => ctl.setSingle(q.id, v),
+          onMulti: submitted ? null : (v, on) => ctl.toggleMulti(q.id, v, on),
+          onBlank: submitted ? null : (i, v) => ctl.setBlank(q.id, i, v),
+          onText: submitted ? null : (v) => ctl.setText(q.id, v),
+        ));
+        widgets.add(const SizedBox(height: 12));
+      }
     }
     return widgets;
   }
@@ -163,7 +198,7 @@ class _QuestionCard extends StatelessWidget {
     required this.result,
     required this.selectedSingle,
     required this.selectedMulti,
-    required this.blankText,
+    required this.blankValues,
     required this.textAnswer,
     required this.onSingle,
     required this.onMulti,
@@ -177,11 +212,17 @@ class _QuestionCard extends StatelessWidget {
   final BankAnswerResult? result;
   final int? selectedSingle;
   final List<int> selectedMulti;
-  final String blankText;
+
+  /// 逐空作答值（多空题时长度 = question.blankCount）
+  final List<String> blankValues;
+
   final String textAnswer;
   final ValueChanged<int>? onSingle;
   final void Function(int value, bool on)? onMulti;
-  final ValueChanged<String>? onBlank;
+
+  /// (空下标, 值)
+  final void Function(int index, String value)? onBlank;
+
   final ValueChanged<String>? onText;
 
   @override
@@ -221,13 +262,56 @@ class _QuestionCard extends StatelessWidget {
           ],
         );
       }
-    } else if (question.qtypeCategory == 'blank') {
-      input = TextField(
-        key: ValueKey('bank-blank-${question.id}'),
-        decoration: const InputDecoration(hintText: '填写答案…', border: OutlineInputBorder(), isDense: true),
-        onChanged: onBlank,
-        enabled: onBlank != null,
+    } else if (question.answerKind == 'symbol') {
+      const choices = ['>', '<', '='];
+      final picked = blankValues.isNotEmpty ? blankValues[0] : '';
+      input = Row(
+        children: [
+          for (final s in choices)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: ChoiceChip(
+                key: ValueKey('bank-symbol-${question.id}-$s'),
+                label: Text(s, style: const TextStyle(fontSize: 18)),
+                selected: picked == s,
+                onSelected: onBlank == null
+                    ? null
+                    : (on) {
+                        if (on) onBlank!(0, s);
+                      },
+              ),
+            ),
+        ],
       );
+    } else if (question.qtypeCategory == 'blank') {
+      final count = question.blankCount;
+      if (count <= 1) {
+        input = TextField(
+          key: ValueKey('bank-blank-${question.id}'),
+          decoration: const InputDecoration(hintText: '填写答案…', border: OutlineInputBorder(), isDense: true),
+          onChanged: onBlank == null ? null : (v) => onBlank!(0, v),
+          enabled: onBlank != null,
+        );
+      } else {
+        input = Column(
+          children: [
+            for (var i = 0; i < count; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: TextField(
+                  key: ValueKey('bank-blank-${question.id}-$i'),
+                  decoration: InputDecoration(
+                    hintText: '第 ${i + 1} 空',
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: onBlank == null ? null : (v) => onBlank!(i, v),
+                  enabled: onBlank != null,
+                ),
+              ),
+          ],
+        );
+      }
     } else {
       input = TextField(
         key: ValueKey('bank-text-${question.id}'),

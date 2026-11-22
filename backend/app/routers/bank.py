@@ -2,7 +2,7 @@
 import json
 import os
 import re
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import date as date_type
 from typing import Any
 
@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.access import require_learning_user
+from ..core.blank_count import blank_count_of
 from ..core.deps import get_current_user, require_role
 from ..core.question_types import CATEGORY_OF_QTYPE
 from ..core.source_adapter import QuestionDraft
@@ -156,6 +157,10 @@ def _persist_drafts(db: Session, bank: QuestionBank, drafts: list[QuestionDraft]
             question_no=(d.question_no or None),
             source_document_id=d.source_document_id,
             image_path=d.image_path or "",
+            group_id=d.group_id,
+            seq_in_group=d.seq_in_group,
+            is_example=d.is_example,
+            work_mode=d.work_mode,
         )
         db.add(q)
         db.flush()
@@ -180,7 +185,10 @@ def _dict_to_draft(item: dict) -> QuestionDraft | None:
     q = (item.get("question") or "").strip()
     if not q:
         return None
-    return QuestionDraft(
+    # 先按 dataclass 字段名透传全部字段（避免漏字段），再对基础字段做归一化
+    allowed = {f.name for f in fields(QuestionDraft)}
+    base = {k: v for k, v in item.items() if k in allowed}
+    base.update(
         qtype=(item.get("qtype") or "short_answer").strip(),
         question=q,
         options=item.get("options") or [],
@@ -192,6 +200,7 @@ def _dict_to_draft(item: dict) -> QuestionDraft | None:
         passage_title=(item.get("passage_title") or "").strip(),
         passage_content=(item.get("passage_content") or "").strip(),
     )
+    return QuestionDraft(**base)
 
 
 def _assert_draft_subject(bank: QuestionBank, drafts: list[QuestionDraft]) -> None:
@@ -340,28 +349,82 @@ def _format_student_answer(answer_row: dict, q: Question) -> str:
 def list_bank_questions(
     bank_id: int,
     ids: str = "",
+    extra_bank_ids: str = "",
     _auth: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Question).filter_by(bank_id=bank_id, status="published")
+    from ..core.work_modes import answer_kind_of, input_ui_of
+    from ..models import PracticeQuestionGroup
+
+    # 多卷合并任务：一个 task 里可能含多套卷的题，前端用 extra_bank_ids 带上其余卷。
+    # 只查这些指定卷，避免「传任意 id 就能读到别人的题」。
+    scope = [bank_id]
+    for part in (extra_bank_ids or "").split(","):
+        part = part.strip()
+        if part.isdigit():
+            bid = int(part)
+            if bid not in scope:
+                scope.append(bid)
+
+    q = db.query(Question).filter(
+        Question.bank_id.in_(scope), Question.status == "published")
     if ids.strip():
-        qids = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+        qids = [int(x) for x in ids.split(",") if x.strip()]
         if qids:
-            q = q.filter(Question.id.in_(qids))
+            # 每日一练只把「抽中的待做题」id 传过来。但题组的示例行是理解规律的
+            # 必需品（「不计算，运用规律直接写出得数」没有示例就是无解的），
+            # 必须连带命中组的示例行一起返回。
+            hit = q.filter(Question.id.in_(qids)).all()
+            gids = {x.group_id for x in hit if x.group_id}
+            cond = Question.id.in_(qids)
+            if gids:
+                from sqlalchemy import and_, or_
+
+                cond = or_(
+                    cond,
+                    and_(Question.group_id.in_(gids),
+                         Question.is_example.is_(True)),
+                )
+            q = q.filter(cond)
     qs = q.order_by(Question.id).all()
     pids = {x.passage_id for x in qs if x.passage_id}
     passages = {}
     if pids:
         for p in db.query(ReadingPassage).filter(ReadingPassage.id.in_(pids)).all():
-            passages[p.id] = {"id": p.id, "title": p.title, "content": p.content, "subject": p.subject}
-    return [{
-        "id": item.id, "qtype": item.qtype, "qtype_category": item.qtype_category,
-        "question": item.question, "options": json.loads(item.options or "[]"),
-        "answer": item.answer, "analysis": item.analysis, "difficulty": item.difficulty,
-        "tags": json.loads(item.tags or "{}"),
-        "passage_id": item.passage_id,
-        "passage": passages.get(item.passage_id),
-    } for item in qs]
+            passages[p.id] = {"id": p.id, "title": p.title, "content": p.content,
+                              "subject": p.subject}
+
+    gids = {x.group_id for x in qs if x.group_id}
+    groups = {}
+    if gids:
+        for g in db.query(PracticeQuestionGroup).filter(
+                PracticeQuestionGroup.id.in_(gids)).all():
+            groups[g.id] = g
+
+    out = []
+    for item in qs:
+        g = groups.get(item.group_id)
+        mode = item.work_mode or (g.work_mode if g else "")
+        out.append({
+            "id": item.id, "qtype": item.qtype,
+            "qtype_category": item.qtype_category,
+            "question": item.question, "options": json.loads(item.options or "[]"),
+            "answer": item.answer, "analysis": item.analysis,
+            "difficulty": item.difficulty,
+            "tags": json.loads(item.tags or "{}"),
+            "passage_id": item.passage_id,
+            "passage": item.passage_id and passages.get(item.passage_id),
+            # 题组两级：前端据此展示题干/示例、按 input_ui 渲染
+            "group_id": item.group_id,
+            "group_stem": (g.stem if g else ""),
+            "seq_in_group": item.seq_in_group,
+            "is_example": item.is_example,
+            "work_mode": mode,
+            "input_ui": input_ui_of(mode),
+            "answer_kind": answer_kind_of(mode),
+            "blank_count": blank_count_of(item),
+        })
+    return out
 
 
 @router.post("/submit")
@@ -382,8 +445,56 @@ def submit_bank(req: BankSubmitReq, user: User = Depends(require_learning_user),
             results.append({"question_id": qid, "is_correct": False})
             continue
         answer_json = json.loads(qq.answer_json or "{}")
-        student = {k: a.get(k) for k in ("selected_index", "blanks", "pairs", "text") if a.get(k) is not None}
-        if qq.qtype_category == "subjective":
+        student = {k: a.get(k) for k in ("selected_index", "blanks", "pairs", "text")
+                   if a.get(k) is not None}
+
+        mode = (getattr(qq, "work_mode", "") or "").strip()
+        if mode:
+            # 有 work_mode → 走练习册判分门面（按 answer_kind 分派）
+            from ..core.work_modes import answer_kind_of
+            from ..services.practice_grade import grade_practice_item
+
+            # 前端按 qtype_category 送不同字段：
+            #   choice  → selected_index（单选取 int，多选为 list）
+            #   blank   → blanks（数组）
+            #   其它    → text
+            # 只取 text 会让 number/symbol/numeric_list/choice 全部拿到空串，
+            # 结果「答对也判错」并进错题本。
+            kind = answer_kind_of(mode)
+            raw_blanks = a.get("blanks")
+            selected = a.get("selected_index")
+            if kind == "choice" and selected is not None:
+                # 多选送 list，取第一个下标即可（本期不判多选）
+                if isinstance(selected, (list, tuple)):
+                    selected = selected[0] if selected else None
+                student_answer = "" if selected is None else str(selected)
+                blanks = []
+            elif isinstance(raw_blanks, list) and raw_blanks:
+                student_answer = ",".join(str(x) for x in raw_blanks)
+                blanks = raw_blanks
+            else:
+                student_answer = str(a.get("text") or "").strip()
+                blanks = None
+
+            pr = grade_practice_item(
+                db, qq,
+                student_answer=student_answer,
+                blanks=blanks,
+            )
+            # answer_kind=text（如 work_mode="other" 的兜底题）math_grade 只返回
+            # pending 并注明「需主观判分」。这里必须回落主观判分，否则最需要兜底
+            # 的那类题孩子写完答案永远拿不到任何反馈。
+            if pr.get("ai_status") == "pending" and kind == "text":
+                ref = {"sample": qq.answer} if qq.answer else answer_json
+                sub = grade_subjective_with_ai(db, ref, student)
+                pr = {**pr, "is_correct": sub.get("is_correct"),
+                      "reason": sub.get("detail") or pr.get("reason", "")}
+            r = {
+                "is_correct": pr.get("is_correct"),
+                "correct_answer_text": qq.answer,
+                "detail": pr,
+            }
+        elif qq.qtype_category == "subjective":
             r = grade_subjective_with_ai(db, answer_json, student)
         else:
             r = grade_question(qq.qtype_category, answer_json, student)
