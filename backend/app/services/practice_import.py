@@ -484,16 +484,47 @@ def build_drafts(
     return out
 
 
-def _is_aligned(q) -> bool:
-    """已对齐 = 有答案；fill_blank/cloze 还要求 blanks 非空。"""
-    if not (q.answer or "").strip():
-        return False
+def _is_aligned_legacy(q) -> bool:
+    """旧题（work_mode 为空）的发布判定，保持原行为不变。
+
+    存量题库的 cloze/fill_blank 依赖 blanks 校验；若一律走新的 answer_kind 分支，
+    会因不再检查 blanks 而被误发布。
+    """
     if q.qtype in ("fill_blank", "cloze"):
         try:
             data = json.loads(q.answer_json or "{}")
         except (ValueError, TypeError):
             return False
         return bool(data.get("blanks"))
+    return True
+
+
+def _is_aligned(q) -> bool:
+    """已对齐 = 有答案。多空题型还要求逐空答案非空。
+
+    `work_mode` 为空的旧题走 `_is_aligned_legacy()`，行为完全不变。
+    """
+    from ..core.work_modes import answer_kind_of
+
+    if not (q.answer or "").strip():
+        return False
+    mode = (getattr(q, "work_mode", "") or "").strip()
+    if not mode:
+        return _is_aligned_legacy(q)
+
+    kind = answer_kind_of(mode)
+    if kind == "numeric_list":
+        try:
+            data = json.loads(q.answer_json or "{}")
+        except (ValueError, TypeError):
+            return False
+        return bool(data.get("blanks"))
+    if kind == "choice":
+        try:
+            data = json.loads(q.answer_json or "{}")
+        except (ValueError, TypeError):
+            return False
+        return data.get("correct_index") is not None
     return True
 
 

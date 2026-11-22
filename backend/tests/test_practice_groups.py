@@ -150,3 +150,53 @@ def test_vision_json_sends_json_mode_and_system(setup_db, db, monkeypatch):
     parts = captured["messages"][1]["content"]
     assert any(p.get("type") == "image_url" for p in parts)
     assert captured["model"] == "vl"
+
+
+def test_is_aligned_legacy_questions_unchanged(setup_db, db):
+    """work_mode 为空的老题必须走原逻辑：cloze 无 blanks 不发布。"""
+    from app.models import Question
+    from app.services.practice_import import _is_aligned
+
+    q = Question(qtype="cloze", qtype_category="blank", question="x",
+                 answer="a", answer_json='{"blanks":[]}', work_mode="")
+    assert _is_aligned(q) is False
+
+
+def test_is_aligned_new_numeric_list_requires_blanks(setup_db, db):
+    from app.models import Question
+    from app.services.practice_import import _is_aligned
+
+    q = Question(qtype="fill_blank", qtype_category="blank", question="x",
+                 answer="1.2, 1.44", answer_json='{"blanks":["1.2","1.44"]}',
+                 work_mode="pattern")
+    assert _is_aligned(q) is True
+
+    q2 = Question(qtype="fill_blank", qtype_category="blank", question="x",
+                  answer="1.2", answer_json='{"blanks":[]}', work_mode="pattern")
+    assert _is_aligned(q2) is False
+
+
+def test_is_aligned_new_symbol_and_choice_do_not_need_blanks(setup_db, db):
+    """symbol/choice 不是多空题，有答案就该发布（旧逻辑会误挡）。"""
+    from app.models import Question
+    from app.services.practice_import import _is_aligned
+
+    sym = Question(qtype="fill_blank", qtype_category="blank",
+                   question="30.5 ○ 3.05", answer=">", answer_json="{}",
+                   work_mode="compare")
+    assert _is_aligned(sym) is True
+
+    ch = Question(qtype="single_choice", qtype_category="choice", question="x",
+                  answer="B", answer_json='{"correct_index":1}',
+                  work_mode="choice")
+    assert _is_aligned(ch) is True
+
+
+def test_is_aligned_empty_answer_never_published(setup_db, db):
+    from app.models import Question
+    from app.services.practice_import import _is_aligned
+
+    for mode in ("oral", "pattern", "compare", "photo", "app", ""):
+        q = Question(qtype="oral", qtype_category="subjective", question="x",
+                     answer="", answer_json="{}", work_mode=mode)
+        assert _is_aligned(q) is False, mode
