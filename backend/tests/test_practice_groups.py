@@ -99,3 +99,54 @@ def test_dict_to_draft_keeps_practice_fields():
     assert d.group_id == 11
     assert d.is_example is True
     assert d.work_mode == "pattern"
+
+
+import pytest
+
+
+def test_vision_json_requires_configured_endpoint(setup_db, db, monkeypatch):
+    """未配置中转站时必须明确报错，而不是静默返回空串。"""
+    import app.services.ai as ai_mod
+
+    monkeypatch.setattr(ai_mod, "resolve", lambda *a, **k: type("R", (), {
+        "api_key": "", "base_url": "", "options": {},
+    })())
+    with pytest.raises(RuntimeError):
+        ai_mod.vision_json(db, b"\x89PNG", system="sys", prompt="p")
+
+
+def test_vision_json_sends_json_mode_and_system(setup_db, db, monkeypatch):
+    """断言：带 system 消息 + response_format=json_object + 图片。"""
+    import app.services.ai as ai_mod
+
+    captured = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class _Resp:
+                choices = [type("C", (), {
+                    "message": type("M", (), {"content": '{"page_type":"practice"}'})(),
+                })()]
+
+            return _Resp()
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            captured["client_kwargs"] = kw
+            self.chat = type("C", (), {"completions": _FakeCompletions()})()
+
+    monkeypatch.setattr(ai_mod, "_openai_client", lambda **kw: _FakeClient(**kw))
+    monkeypatch.setattr(ai_mod, "resolve", lambda *a, **k: type("R", (), {
+        "api_key": "k", "base_url": "http://x",
+        "options": {"vision_model": "vl"},
+    })())
+
+    out = ai_mod.vision_json(db, b"\x89PNG", system="SYS", prompt="PROMPT")
+    assert out.startswith("{")
+    assert captured["response_format"] == {"type": "json_object"}
+    assert [m["role"] for m in captured["messages"]] == ["system", "user"]
+    parts = captured["messages"][1]["content"]
+    assert any(p.get("type") == "image_url" for p in parts)
+    assert captured["model"] == "vl"
