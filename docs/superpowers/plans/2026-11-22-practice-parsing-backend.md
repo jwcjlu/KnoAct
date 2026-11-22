@@ -3426,17 +3426,43 @@ from ..core.work_modes import answer_kind_of, input_ui_of
 - [ ] **Step 5: 新增学科校验（拒绝未实现的学科）**
 
 spec §7 要求「上传 语文/英语 练习册时返回 400，不静默按数学乱导」。
-在**上传接口**里（`_vision_ready` 校验旁边）加：
+`import_practice_pdf` 的签名里**没有 `body`** —— 学科在已加载的 `bank` 上。
+在 `bank = _require_own_bank(bank_id, user, db)` 之后、`_vision_ready` 校验之前加：
 
 ```python
-    from ..core.subjects import is_implemented, spec_of
+    from ..core.subjects import is_implemented
 
-    if not is_implemented(body.subject):
+    if not is_implemented(bank.subject):
         raise HTTPException(
-            400, f"{body.subject} 练习册解析器尚未实现（当前仅支持数学）")
+            status_code=400,
+            detail=f"{bank.subject or '该'}学科练习册解析器尚未实现（当前仅支持数学）",
+        )
 ```
 
-（`spec_of` 若暂时不需要就不用 import，避免 flake8 未使用告警。）
+补一条测试（`_practice_client()` 已在上面的测试块里建好）：
+
+```python
+# backend/tests/test_practice_groups.py 末尾追加
+def test_import_rejects_unimplemented_subject(setup_db, db):
+    """语文/英语练习册返回 400，不静默按数学解析。"""
+    from app.models import QuestionBank
+    from conftest import parent_child
+
+    parent, _child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="语文练习册",
+                        subject="语文", grade=5, source="practice_pdf")
+    db.add(bank)
+    db.commit()
+
+    r = _practice_client().post(
+        f"/api/banks/{bank.id}/import-practice-pdf",
+        headers=parent_h,
+        files={"file": ("a.pdf", b"%PDF-1.4 fake", "application/pdf")},
+        data={"answer_start_page": "1", "answer_end_page": "2"},
+    )
+    assert r.status_code == 400
+    assert "尚未实现" in r.json()["detail"]
+```
 
 - [ ] **Step 6: 新增页类型查询与修正路由**
 
@@ -3532,17 +3558,29 @@ def _derive_page_range(
     )
 ```
 
-**并把上传校验里的「必须填写答案页起止页」400 去掉**，改为「填了才校验范围」：
+**并把上传校验里的「必须填写答案页起止页」400 去掉**，改为「填了才校验范围」。
+
+⚠️ **注意上传接口的参数是 `str = Form("")`，不是 `int | None`**。必须先经 `_int()`
+解析成整数再比较，否则 `"" < 1` 会抛 `TypeError`。原文在 `:114-118`：
 
 ```python
-    if answer_start_page is not None and answer_end_page is not None:
-        if answer_start_page < 1 or answer_end_page > total:
-            raise HTTPException(400, "答案页范围不合法")
-        if answer_start_page > answer_end_page:
-            raise HTTPException(400, "答案页起止顺序不对")
+    a_start, a_end = _int(answer_start_page), _int(answer_end_page)
+    if not a_start or not a_end:
+        raise HTTPException(status_code=400, detail="必须填写答案页起止页（扫描版无法自动识别）")
 ```
 
-> ⚠️ **位置很重要**：这段校验要用到 `total`（PDF 页数），必须放在
+改成（**必须放在 `total` 计算之后**，因为要校验 `a_end > total`）：
+
+```python
+    a_start, a_end = _int(answer_start_page), _int(answer_end_page)
+    if a_start is not None and a_end is not None:
+        if a_start < 1 or a_end > total:
+            raise HTTPException(status_code=400, detail="答案页范围不合法")
+        if a_start > a_end:
+            raise HTTPException(status_code=400, detail="答案页起止顺序不对")
+```
+
+> ⚠️ **位置很重要**：这段校验要用到 `total`（PDF 页数），必须挪到
 > `render_pages()` 之后（原代码 `:163` 附近）。原来的「必填」校验在 `:114-118`
 > （`total` 之前），照搬会 `NameError`，并连带打挂**保留**的
 > `test_import_rejects_without_vision_model`（它传 `answer_start_page=100/end=107`）。
@@ -3562,22 +3600,23 @@ Expected: PASS（确认 `test_import_rejects_without_vision_model` 没被打挂�
 `practice_import_pages` 的外键 **IntegrityError**；SQLite 则留孤儿记录。
 `Question.group_id` 是裸 INTEGER，删文档不会级联，也会留孤儿。
 
-在 `backend/app/routers/pdf.py` 的 `delete_document` 里，**删文档之前**加：
+在 `backend/app/routers/pdf.py` 的 `delete_document` 里，**删文档之前**加
+（⚠️ 该函数参数名是 `document_id`，不是 `doc_id` —— 用 `rg -n "def delete_document" app/routers/pdf.py` 确认）：
 
 ```python
     # 练习册导入产物无外键级联，必须显式清理
     from ..models import PracticeImportPage, PracticeQuestionGroup, Question
 
     gids = [g.id for g in db.query(PracticeQuestionGroup)
-            .filter_by(source_document_id=doc_id).all()]
+            .filter_by(source_document_id=document_id).all()]
     if gids:
         db.query(Question).filter(Question.group_id.in_(gids)).delete(
             synchronize_session=False)
         db.query(PracticeQuestionGroup).filter(
             PracticeQuestionGroup.id.in_(gids)).delete(synchronize_session=False)
-    db.query(PracticeImportPage).filter_by(document_id=doc_id).delete(
+    db.query(PracticeImportPage).filter_by(document_id=document_id).delete(
         synchronize_session=False)
-    db.query(Question).filter(Question.source_document_id == doc_id).delete(
+    db.query(Question).filter(Question.source_document_id == document_id).delete(
         synchronize_session=False)
     db.flush()
 ```
@@ -3619,7 +3658,7 @@ def test_delete_document_cleans_practice_rows(setup_db, db):
     db.commit()
     doc_id = doc.id
 
-    delete_document(doc_id, db=db)   # 按真实签名调用
+    delete_document(document_id=doc_id, db=db)   # 按真实签名调用
 
     db.expire_all()
     assert db.query(PracticeImportPage).filter_by(document_id=doc_id).count() == 0
@@ -3628,8 +3667,9 @@ def test_delete_document_cleans_practice_rows(setup_db, db):
     assert db.query(Question).filter_by(source_document_id=doc_id).count() == 0
 ```
 
-> 先 `rg -n "def delete_document" app/routers/pdf.py` 确认签名（可能需要 `user` 参数），
-> 按真实签名写测试或改走 `TestClient` 调 `DELETE /api/pdf/documents/{id}`。
+> 先 `rg -n "def delete_document" app/routers/pdf.py` 确认完整签名
+> （可能还需要 `user` 参数），按真实签名写测试或改走
+> `TestClient` 调 `DELETE /api/pdf/documents/{id}`。
 
 - [ ] **Step 10: 提交**
 
@@ -3885,7 +3925,7 @@ cd backend && rg -n "parse_lesson_page|parse_answer_page|align_answers|align_by_
 `publish_aligned` 相关、**`test_import_rejects_without_vision_model`**。
 
 **补一条正向测试替代被删的 `test_import_rejects_without_answer_pages`**
-（答案页可选是行为变更，必须有正向覆盖）。`_derive_page_range` 由 Task 14 Step 6 创建：
+（答案页可选是行为变更，必须有正向覆盖）。`_derive_page_range` 由 **Task 14 Step 7** 创建：
 
 ```python
 # backend/tests/test_practice_import.py 末尾追加
