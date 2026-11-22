@@ -721,6 +721,8 @@ let bankView = null;               // null | 'practice_import'
 let practiceBookBanks = [];
 let practiceSelectedBankId = '';   // 当前选中的练习册卷（重绘后要保留）
 let practiceImportJob = null;
+let practicePages = [];          // [{page_no, page_type, group_count, status}]
+let practiceDocumentId = null;   // 当前任务的 document_id（页类型 PATCH 用）
 let practiceLessons = [];
 let practiceMissing = [];
 let practicePollTimer = null;
@@ -1031,10 +1033,32 @@ async function loadLatestPracticeJob(bankId){
   if(!bankId) return;
   const r = await api(`/api/practice-import/jobs/latest?bank_id=${bankId}`);
   const job = r && r.job;
-  if(!job) { practiceImportJob = null; return; }
+  if(!job) { practiceImportJob = null; practiceDocumentId = null; practicePages = []; return; }
   practiceImportJob = job;
+  practiceDocumentId = job.document_id || null;
+  await loadPracticePages(practiceDocumentId);
   if(job.status === 'pending' || job.status === 'ocr' || job.status === 'aligning'){
     startPracticePolling(job.id);
+  }
+}
+
+async function loadPracticePages(documentId){
+  practicePages = [];
+  if(!documentId) return;
+  const r = await api(`/api/practice-import/pages?document_id=${documentId}`);
+  practicePages = (r && r.pages) || [];
+}
+
+async function patchPageType(documentId, pageNo, pageType){
+  const r = await api(
+    `/api/practice-import/pages/${pageNo}?document_id=${documentId}`,
+    {method:'PATCH', body:{page_type: pageType}});
+  if(r && r.page_type){
+    toast(`第 ${pageNo} 页已改为「${r.page_type}」，请点击「重新导入」生效`);
+    await loadPracticePages(documentId);
+    render();
+  } else {
+    toast('修改失败');
   }
 }
 
@@ -1185,6 +1209,35 @@ function renderPracticeImport(){
                 </div>`).join('')}
             </div>` : ''}
         </div>
+
+        ${practicePages.length ? `
+        <div style="margin-top:24px">
+          <div class="bank-list-head"><span>页类型（判断错的可改）</span></div>
+          <div style="margin-top:8px;font-size:12px;color:#8e9691">
+            非 practice 的页不会导入题目。目录页/答案页被误判时改回 practice 再重新导入。
+          </div>
+          <div class="pdf-list" style="margin-top:10px">
+            ${practicePages.map(p => `
+              <div class="pdf-row">
+                <div class="pdf-info">
+                  <div class="nm">第 ${p.page_no} 页
+                    <span style="font-size:11px;color:${p.page_type==='practice'?'var(--green2)':'#c05b4a'}">
+                      ${escapeAttr(String(p.page_type))}
+                    </span>
+                  </div>
+                  <div class="meta">识别到 ${p.group_count} 个题组 · 状态 ${escapeAttr(String(p.status))}</div>
+                </div>
+                <div class="pdf-actions">
+                  <select style="border:1px solid var(--line3);border-radius:8px;padding:4px 6px;font-size:12px"
+                          onchange="patchPageType(${practiceDocumentId}, ${p.page_no}, this.value)">
+                    ${['practice','toc','answer_key','cover','blank'].map(t =>
+                      `<option value="${t}" ${t===p.page_type?'selected':''}>${t}</option>`
+                    ).join('')}
+                  </select>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>` : ''}
 
         <div style="margin-top:24px">
           <div class="bank-list-head" style="display:flex;align-items:center;gap:10px">
@@ -1360,6 +1413,9 @@ function startPracticePolling(jobId){
       if(j.status === 'done' || j.status === 'failed'){
         clearInterval(practicePollTimer);
         practicePollTimer = null;
+        // 新导入/重试完成后，页类型面板也要跟着刷新（否则要切卷才看得到）
+        practiceDocumentId = j.document_id || null;
+        await loadPracticePages(practiceDocumentId);
         await loadPracticeLessons(practiceSelectedBankId);
         await loadPracticeMissing();
         await loadPracticeQuestions(0);   // 导入完成后刷新题目列表
