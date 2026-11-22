@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.access import require_learning_user
+from ..core.blank_count import blank_count_of
 from ..core.deps import get_current_user, require_role
 from ..core.question_types import CATEGORY_OF_QTYPE
 from ..core.source_adapter import QuestionDraft
@@ -395,6 +396,7 @@ def list_bank_questions(
             "work_mode": mode,
             "input_ui": input_ui_of(mode),
             "answer_kind": answer_kind_of(mode),
+            "blank_count": blank_count_of(item),
         })
     return out
 

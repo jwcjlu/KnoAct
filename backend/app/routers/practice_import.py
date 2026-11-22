@@ -18,6 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.access import ensure_user_access, require_learning_user
+from ..core.blank_count import blank_count_of
 from ..core.deps import require_role
 from ..core.work_modes import answer_kind_of, input_ui_of
 from ..database import get_db
@@ -229,6 +230,7 @@ def _job_payload(job) -> dict:
     )
     return {
         "id": job.id,
+        "document_id": job.document_id,
         "status": job.status,
         "total_pages": job.total_pages,
         "question_pages": max(0, q_end - q_start + 1),
@@ -410,6 +412,14 @@ def list_practice_questions(
         .limit(limit)
         .all()
     )
+    gids = {r.group_id for r in rows if r.group_id}
+    groups = {}
+    if gids:
+        from ..models import PracticeQuestionGroup
+
+        for g in db.query(PracticeQuestionGroup).filter(
+                PracticeQuestionGroup.id.in_(gids)).all():
+            groups[g.id] = g
     return {
         "total": total,
         "items": [
@@ -428,6 +438,11 @@ def list_practice_questions(
                 "group_id": r.group_id,
                 "seq_in_group": r.seq_in_group,
                 "is_example": r.is_example,
+                "group_stem": (groups[r.group_id].stem
+                               if r.group_id in groups else ""),
+                "group_instruction": (groups[r.group_id].instruction
+                                      if r.group_id in groups else ""),
+                "blank_count": blank_count_of(r),
             }
             for r in rows
         ],

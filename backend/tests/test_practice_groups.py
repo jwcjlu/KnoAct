@@ -1006,3 +1006,84 @@ def test_submit_other_mode_falls_back_to_subjective(setup_db, db, monkeypatch):
     assert r.status_code == 200, r.text
     assert called["student"]["text"] == "12个"
     assert r.json()["answers"][0]["is_correct"] is True
+
+
+def test_practice_questions_include_group_and_blank_info(setup_db, db):
+    """家长端要按题组展示并渲染多空输入框。"""
+    from app.models import PracticeQuestionGroup, Question, QuestionBank
+    from conftest import parent_child
+
+    parent, _child, parent_h, _ch = parent_child(db)
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=parent.id,
+                              stem="不计算，运用规律直接写出得数",
+                              instruction="", work_mode="pattern",
+                              page_start=3, page_end=3)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="fill_blank",
+                    qtype_category="blank", question="示例1", answer="1.2",
+                    status="published", group_id=g.id, seq_in_group=1,
+                    is_example=True, work_mode="pattern"))
+    db.add(Question(bank_id=bank.id, user_id=parent.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做",
+                    answer="1234.5, 12345",
+                    answer_json='{"blanks":["1234.5","12345"]}',
+                    status="published", group_id=g.id, seq_in_group=2,
+                    is_example=False, work_mode="pattern"))
+    db.commit()
+
+    r = _practice_client().get(
+        f"/api/practice-import/questions?bank_id={bank.id}", headers=parent_h)
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert all(i["group_stem"] == "不计算，运用规律直接写出得数" for i in items)
+    todo = [i for i in items if not i["is_example"]][0]
+    assert todo["blank_count"] == 2
+    example = [i for i in items if i["is_example"]][0]
+    assert example["blank_count"] == 1
+
+
+def test_bank_questions_include_blank_count(setup_db, db):
+    """Flutter 读的是 /api/banks/{id}/questions，blank_count 必须在这里也返回。"""
+    from app.models import PracticeQuestionGroup, Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="卷", subject="数学", grade=5)
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                              stem="不计算，运用规律直接写出得数",
+                              instruction="", work_mode="pattern",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做",
+                    answer="1234.5, 12345",
+                    answer_json='{"blanks":["1234.5","12345"]}',
+                    status="published", group_id=g.id, seq_in_group=1,
+                    is_example=False, work_mode="pattern"))
+    db.commit()
+
+    r = _bank_client().get(f"/api/banks/{bank.id}/questions", headers=child_h)
+    assert r.status_code == 200
+    item = r.json()[0]
+    assert item["blank_count"] == 2
+    assert item["group_stem"] == "不计算，运用规律直接写出得数"
+    assert item["answer"] == "1234.5, 12345"
+
+
+def test_job_payload_includes_document_id(setup_db, db):
+    """/jobs/latest 必须带 document_id，否则家长端页类型面板拿不到数据。"""
+    from app.models import PracticeImportJob
+    from app.routers.practice_import import _job_payload
+
+    job_id, _bank_id, doc_id = _mk_job(db, "docid", 1, "m.pdf")
+    job = db.get(PracticeImportJob, job_id)
+    payload = _job_payload(job)
+    assert payload["document_id"] == doc_id
