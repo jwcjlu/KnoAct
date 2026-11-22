@@ -424,7 +424,9 @@ def delete_document(document_id: int, _auth: User = Depends(require_role("parent
     db.query(UserDocument).filter_by(document_id=document_id).delete(synchronize_session=False)
 
     # 练习册导入产物无外键级联，必须显式清理
-    from ..models import PracticeImportPage, PracticeQuestionGroup, Question
+    from ..models import (
+        PracticeImportJob, PracticeImportPage, PracticeQuestionGroup, Question,
+    )
 
     gids = [g.id for g in db.query(PracticeQuestionGroup)
             .filter_by(source_document_id=document_id).all()]
@@ -436,6 +438,9 @@ def delete_document(document_id: int, _auth: User = Depends(require_role("parent
     db.query(PracticeImportPage).filter_by(document_id=document_id).delete(
         synchronize_session=False)
     db.query(Question).filter(Question.source_document_id == document_id).delete(
+        synchronize_session=False)
+    # 导入任务行也是无 ondelete 的裸外键；MySQL 上不清它会撞 FK 约束
+    db.query(PracticeImportJob).filter_by(document_id=document_id).delete(
         synchronize_session=False)
     db.flush()
 

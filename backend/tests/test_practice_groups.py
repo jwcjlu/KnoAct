@@ -717,3 +717,32 @@ def test_delete_document_cleans_practice_rows(setup_db, db):
     assert db.query(PracticeQuestionGroup).filter_by(
         source_document_id=doc_id).count() == 0
     assert db.query(Question).filter_by(source_document_id=doc_id).count() == 0
+
+
+def test_delete_document_also_removes_import_jobs(setup_db, db):
+    """PracticeImportJob.document_id 是无 ondelete 的裸外键；MySQL 上不清它会撞 FK。"""
+    from app.models import (
+        PdfDocument, PracticeImportJob, PracticeQuestionGroup, QuestionBank,
+    )
+    from app.routers.pdf import delete_document
+    from conftest import make_account
+
+    parent = make_account(db, "del_job_p", role="parent")
+    doc = PdfDocument(filename="h.pdf", subject="数学",
+                      storage_path="D:/h.pdf", content_kind="practice")
+    db.add(doc)
+    db.flush()
+    bank = QuestionBank(user_id=parent.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    job = PracticeImportJob(user_id=parent.id, bank_id=bank.id,
+                            document_id=doc.id, total_pages=1)
+    db.add(job)
+    db.commit()
+    doc_id = doc.id
+
+    delete_document(document_id=doc_id, db=db)
+
+    db.expire_all()
+    assert db.query(PracticeImportJob).filter_by(document_id=doc_id).count() == 0
