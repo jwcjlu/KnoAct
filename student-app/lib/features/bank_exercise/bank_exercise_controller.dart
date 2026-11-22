@@ -145,7 +145,9 @@ class BankExerciseController extends Notifier<BankExerciseState> {
     state = state.copyWith(busy: true, error: null);
     try {
       final durationMs = DateTime.now().difference(_startedAt).inMilliseconds;
+      // 示例行不是待做题：不提交，否则会被判错、扣分并写进错题本
       final answers = state.questions
+          .where((q) => !q.isExample)
           .map((q) => _answerPayload(q)..['duration_ms'] = durationMs)
           .toList();
       final result = await _repo.submit(bankId: bankId, answers: answers);

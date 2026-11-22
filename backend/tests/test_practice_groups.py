@@ -1124,3 +1124,57 @@ def test_pick_practice_questions_excludes_photo_kinds(setup_db, db):
         db, bank, child.id, date(2026, 11, 22), 10)
     assert [q.question for q in picked] == ["口算题"], \
         f"photo 类题不该被抽中，实际抽到 {[q.question for q in picked]}"
+
+
+def test_bank_questions_by_ids_include_group_examples(setup_db, db):
+    """每日一练只传待做题 id，但同组的示例行必须一起返回——
+    没有示例，找规律题就是无解的。"""
+    from app.models import PracticeQuestionGroup, Question, QuestionBank
+    from conftest import parent_child
+
+    _parent, child, _ph, child_h = parent_child(db)
+    bank = QuestionBank(user_id=child.id, title="册", subject="数学", grade=5,
+                        source="practice_pdf")
+    db.add(bank)
+    db.flush()
+    g = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                              stem="不计算，运用规律直接写出得数",
+                              instruction="", work_mode="pattern",
+                              page_start=1, page_end=1)
+    db.add(g)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="示例A", answer="1.2",
+                    status="published", group_id=g.id, seq_in_group=1,
+                    is_example=True, work_mode="pattern"))
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="示例B", answer="12.3",
+                    status="published", group_id=g.id, seq_in_group=2,
+                    is_example=True, work_mode="pattern"))
+    todo = Question(bank_id=bank.id, user_id=child.id, qtype="fill_blank",
+                    qtype_category="blank", question="待做", answer="123",
+                    status="published", group_id=g.id, seq_in_group=3,
+                    is_example=False, work_mode="pattern")
+    db.add(todo)
+    # 另一组，不该被带出来
+    g2 = PracticeQuestionGroup(bank_id=bank.id, user_id=child.id,
+                               stem="用竖式计算", instruction="",
+                               work_mode="vertical", page_start=2, page_end=2)
+    db.add(g2)
+    db.flush()
+    db.add(Question(bank_id=bank.id, user_id=child.id, qtype="calculation",
+                    qtype_category="blank", question="别的组的示例", answer="1",
+                    status="published", group_id=g2.id, seq_in_group=1,
+                    is_example=True, work_mode="vertical"))
+    db.commit()
+
+    r = _bank_client().get(
+        f"/api/banks/{bank.id}/questions?ids={todo.id}", headers=child_h)
+    assert r.status_code == 200
+    got = r.json()
+    questions = {x["question"] for x in got}
+    assert questions == {"示例A", "示例B", "待做"}, f"实际 {questions}"
+    # 示例的 is_example 要对，前端据此分开渲染
+    flags = {x["question"]: x["is_example"] for x in got}
+    assert flags["示例A"] is True and flags["示例B"] is True
+    assert flags["待做"] is False

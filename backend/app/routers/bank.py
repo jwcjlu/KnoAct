@@ -357,9 +357,23 @@ def list_bank_questions(
 
     q = db.query(Question).filter_by(bank_id=bank_id, status="published")
     if ids.strip():
-        qids = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+        qids = [int(x) for x in ids.split(",") if x.strip()]
         if qids:
-            q = q.filter(Question.id.in_(qids))
+            # 每日一练只把「抽中的待做题」id 传过来。但题组的示例行是理解规律的
+            # 必需品（「不计算，运用规律直接写出得数」没有示例就是无解的），
+            # 必须连带命中组的示例行一起返回。
+            hit = q.filter(Question.id.in_(qids)).all()
+            gids = {x.group_id for x in hit if x.group_id}
+            cond = Question.id.in_(qids)
+            if gids:
+                from sqlalchemy import and_, or_
+
+                cond = or_(
+                    cond,
+                    and_(Question.group_id.in_(gids),
+                         Question.is_example.is_(True)),
+                )
+            q = q.filter(cond)
     qs = q.order_by(Question.id).all()
     pids = {x.passage_id for x in qs if x.passage_id}
     passages = {}
