@@ -661,3 +661,114 @@ def test_equation_section_kind():
 
     assert _section_kind("利用等式的性质求出等式中的未知数。") == "equation"
     assert QTYPE_OF_KIND["equation"] == "fill_blank"
+
+
+from app.services.practice_import import _strip_answer, build_drafts
+
+
+def test_strip_answer_closes_formula_and_adds_blank():
+    """公式内截断必须重新闭合 $ 并补空位，而不是留一个孤立 $。"""
+    out = _strip_answer(r"$111.06 \div 0.9 = 123.4$")
+    assert out == r"$111.06 \div 0.9 =$ ____"
+    assert out.count("$") % 2 == 0
+
+
+def test_strip_answer_keeps_equation_with_variable():
+    """含未知数的方程不截断（5.2 是方程的一部分）。"""
+    src = r"$4x - 5.2 = 5.2$"
+    assert _strip_answer(src) == src
+
+
+def test_strip_answer_skips_example_rows():
+    """示例行本来就要显示答案，完全不截断。"""
+    src = r"$1.08 \div 0.9 = 1.2$"
+    assert _strip_answer(src, is_example=True) == src
+
+
+def test_strip_answer_legacy_plain_text_still_works():
+    """没有 $ 的旧格式保持原行为。"""
+    assert _strip_answer("8.9 + 4.5 = 13.4") == "8.9 + 4.5 ="
+
+
+def test_strip_answer_no_equals_untouched():
+    assert _strip_answer("求涂色部分的面积") == "求涂色部分的面积"
+
+
+def test_strip_answer_right_side_not_numeric_untouched():
+    src = r"$x + 1 = ?$"
+    assert _strip_answer(src) == src
+
+
+def test_strip_answer_always_keeps_dollar_pairing():
+    for src in [
+        r"$111.06 \div 0.9 = 123.4$",
+        r"$1.08 \div 0.9 = 1.2$",
+        r"$4x - 5.2 = 5.2$",
+        r"$3.5 \times 2 = 7$",
+    ]:
+        assert _strip_answer(src).count("$") % 2 == 0, src
+
+
+def test_build_drafts_passes_group_fields():
+    drafts = build_drafts(
+        [{
+            "kind": "fill", "question": r"$1.08 \div 0.9 = 1.2$", "answer": "1.2",
+            "group_id": 7, "seq_in_group": 3, "is_example": True,
+            "work_mode": "pattern", "lesson_no": 5, "lesson_title": "第1课时",
+            "page": 5,
+        }],
+        document_id=99,
+    )
+    d = drafts[0]
+    assert d.group_id == 7
+    assert d.seq_in_group == 3
+    assert d.is_example is True
+    assert d.work_mode == "pattern"
+    # 示例行不截断，答案保留
+    assert "1.2" in d.question
+
+
+def test_build_drafts_writes_blanks_for_numeric_list():
+    """numeric_list 必须把 blanks 写进 answer_json，否则永远过不了发布闸门。"""
+    drafts = build_drafts(
+        [{
+            "kind": "fill", "question": "$1111.05 \\div 0.9 =$ ____",
+            "answer": "1234.5, 12345", "blanks": ["1234.5", "12345"],
+            "work_mode": "pattern", "is_example": False,
+            "seq_in_group": 1, "group_id": 1,
+        }],
+        document_id=1,
+    )
+    d = drafts[0]
+    assert d.answer_json.get("blanks") == ["1234.5", "12345"]
+    # qtype 来自注册表，不是旧的 kind 映射
+    assert d.qtype == "fill_blank"
+
+
+def test_build_drafts_writes_correct_index_for_choice():
+    drafts = build_drafts(
+        [{
+            "kind": "other", "question": "下列哪个是质数？",
+            "answer": "B", "correct_index": 1,
+            "work_mode": "choice", "is_example": False,
+            "seq_in_group": 1, "group_id": 1,
+        }],
+        document_id=1,
+    )
+    d = drafts[0]
+    assert d.qtype == "single_choice"
+    assert d.answer_json.get("correct_index") == 1
+
+
+def test_build_drafts_symbol_has_no_blanks_requirement():
+    drafts = build_drafts(
+        [{
+            "kind": "fill", "question": "30.5 ○ 3.05", "answer": ">",
+            "work_mode": "compare", "is_example": False,
+            "seq_in_group": 1, "group_id": 1,
+        }],
+        document_id=1,
+    )
+    d = drafts[0]
+    assert d.answer == ">"
+    assert d.answer_json == {}

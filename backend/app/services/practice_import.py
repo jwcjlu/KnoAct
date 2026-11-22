@@ -288,34 +288,55 @@ def _has_variable(expr: str) -> bool:
     return bool(re.search(r"(?<![A-Za-z])[a-zA-Z](?![A-Za-z])", expr or ""))
 
 
-def _strip_answer(question: str) -> str:
-    """去掉题干里的「= 结果」部分。
+_FORMULA_RE = re.compile(r"\$([^$]+)\$")
 
-    视觉模型有时会自己把算式算出来写进题干（如 `8.9＋4.5＝13.4`），
-    必须截断在等号，否则孩子会直接看到答案。
 
-    **但含未知数的方程不能截断**：`4x－5.2 = 5.2` 里的 5.2 是方程的一部分，
-    截掉就变成了无解的半道题。
+def _strip_answer(question: str, *, is_example: bool = False) -> str:
+    """去掉题干里「= 结果」的部分，但绝不破坏 `$...$` 的成对性。
+
+    视觉模型有时会自己把算式算出来写进题干（如 `8.9＋4.5＝13.4`），必须截断，
+    否则孩子直接看到答案。规则顺序不可颠倒：
+
+    0. `is_example=True` → 原样返回（示例本来就该显示答案）
+    1. 等号左侧含未知数 → 不截断（方程里的常数项属于题目本身）
+    2. 只在第一个 `$...$` 内部判断「是否已算出答案」，不对整串做正则
+    3. 截断点在公式内 → 重新闭合该公式并补 `____`
+    4. 兜底：截断后 `$` 计数为奇数 → 放弃截断（宁可露答案，不要坏标记）
     """
     q = (question or "").strip()
-    if not q:
-        return ""
-
-    m = re.search(r"[=＝]", q)
-    if not m:
+    if not q or is_example:
         return q
 
-    left = q[: m.start()]
-    right = q[m.end():].strip()
+    m = _FORMULA_RE.search(q)
+    if m is None:
+        # 旧格式（无公式外壳）：整串判断
+        eq = re.search(r"[=＝]", q)
+        if not eq:
+            return q
+        left = q[: eq.start()]
+        if _has_variable(left):
+            return q
+        right = q[eq.end():].strip()
+        if re.match(r"^[-−+]?\d", right):
+            return left.rstrip(" =＝") + " ="
+        return q
 
-    # 左边含未知数 → 是方程，右边是常数项，必须保留
+    inner = m.group(1)
+    eq = re.search(r"[=＝]", inner)
+    if not eq:
+        return q
+    left = inner[: eq.start()]
     if _has_variable(left):
         return q
+    right = inner[eq.end():].strip()
+    if not re.match(r"^[-−+]?\d", right):
+        return q
 
-    # 右边以数字开头 → 是算出来的结果，截掉
-    if re.match(r"^[-−+]?\d", right):
-        return left.rstrip(" =＝") + " ="
-    return q
+    closed = f"${left.rstrip(' =＝')} =$"
+    candidate = q[: m.start()] + closed + " ____" + q[m.end():]
+    if candidate.count("$") % 2 != 0:
+        return q
+    return candidate
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -390,17 +411,35 @@ def build_drafts(
     aligned: list[dict],
     *,
     document_id: int,
-    blanks_of=lambda q: 0,
+    blanks_of=None,      # 保留形参兼容旧调用；新流程用 item["blanks"]
 ) -> list[QuestionDraft]:
-    """已对齐的题 → QuestionDraft（供 bank._persist_drafts 落库）。"""
+    """已对齐的题 → QuestionDraft（供 bank._persist_drafts 落库）。
+
+    `work_mode` 非空时按注册表定 qtype，并按 answer_kind 写 answer_json：
+    - `numeric_list` → `{"blanks": [...]}`（发布闸门要求非空）
+    - `choice`       → `{"correct_index": n}`
+    - 其它           → `{}`
+
+    `work_mode` 为空时走旧的 kind → qtype 映射（兼容既有题库/OCR 链路）。
+    """
+    from ..core.work_modes import answer_kind_of, legacy_qtype_of
+
     out: list[QuestionDraft] = []
     for q in aligned:
-        kind = (q.get("kind") or "oral").strip()
-        qtype = QTYPE_OF_KIND.get(kind, "oral")
+        mode = (q.get("work_mode") or "").strip()
+        if mode:
+            qtype = legacy_qtype_of(mode)
+            kind = answer_kind_of(mode)
+        else:
+            qtype = QTYPE_OF_KIND.get((q.get("kind") or "oral").strip(), "oral")
+            kind = ""
+
         d = QuestionDraft(
             qtype=qtype,
-            question=_strip_answer(q.get("question") or ""),
-            answer=(q.get("answer") or "").strip(),
+            question=_strip_answer(q.get("question") or "",
+                                   is_example=bool(q.get("is_example"))),
+            # 示例行的答案来自页面印好的 answer_hint
+            answer=(q.get("answer") or q.get("answer_hint") or "").strip(),
             analysis=q.get("analysis") or "",
         )
         d.lesson_no = q.get("lesson_no")
@@ -408,17 +447,38 @@ def build_drafts(
         d.question_no = str(q.get("question_no") or "")
         d.source_document_id = document_id
         d.tags = {"source": "practice_pdf", "page": q.get("page") or 0}
+
+        # 题组两级：小题挂到组下；示例行不入待做
+        d.group_id = q.get("group_id")
+        d.seq_in_group = int(q.get("seq_in_group") or 0)
+        d.is_example = bool(q.get("is_example"))
+        d.work_mode = mode
+
         if q.get("image_path"):
             d.image_path = q["image_path"]
             d.tags["image_path"] = q["image_path"]
 
-        if qtype == "fill_blank":
-            n = int(blanks_of(q) or 0)
-            blanks = split_blanks(d.answer, n) if n else None
+        # answer_json：发布闸门与判分都依赖它
+        blanks = [str(x).strip() for x in (q.get("blanks") or []) if str(x).strip()]
+        if kind == "numeric_list":
             if blanks:
                 d.answer_json = {"blanks": blanks}
-            else:
-                d.qtype = "oral"
+        elif kind == "choice":
+            idx = q.get("correct_index")
+            if idx is not None:
+                d.answer_json = {"correct_index": int(idx)}
+        elif not mode:
+            # 旧路径：fill_blank 按空数切分答案。
+            # 现有调用方通过 blanks_of 回调传空数，必须兼容。
+            if qtype in ("fill_blank", "cloze"):
+                n = int((blanks_of(q) if blanks_of else 0)
+                        or q.get("blanks_count") or 0)
+                old_blanks = split_blanks(d.answer, n) if n else None
+                if old_blanks:
+                    d.answer_json = {"blanks": old_blanks}
+                elif n:
+                    d.qtype = "oral"
+
         out.append(d)
     return out
 
