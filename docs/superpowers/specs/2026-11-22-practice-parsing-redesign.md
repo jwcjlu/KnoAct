@@ -117,7 +117,7 @@ class PracticeQuestionGroup(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     bank_id: Mapped[int] = mapped_column(ForeignKey("question_banks.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    lesson_no: Mapped[int] = mapped_column(Integer, index=True)
+    lesson_no: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)  # 无课时标题时为 None
     lesson_title: Mapped[str] = mapped_column(String(128), default="")
     stem: Mapped[str] = mapped_column(LongText, default="")        # 题干
     instruction: Mapped[str] = mapped_column(LongText, default="") # 引导语/说明
@@ -211,12 +211,21 @@ work_mode: Mapped[str] = mapped_column(String(24), default="")
 | `items[].y` | **该题在页面的纵向比例（0~1）**，用于密集网格按位置分行列、跨页顺序还原 |
 | `image_questions[]` | 需看图的题，给纵向比例（沿用现有裁图逻辑） |
 
+**`_levenshtein` 归属**：放到 `backend/app/services/practice_import.py` 的模块级私有函数
+（与 `merge_cross_page_groups` 同文件，无外部依赖，不需要单独 util 文件）。
+
 **`image_questions` 挂靠题组**：每张裁出的图片题**自成一个题组**
 （`work_mode="geometry"`，`items` 只有 1 条，`stem` 用该题的标题）。
 这样它带题干、能按题组抽题，不会变成 `group_id=NULL` 的孤儿题。
 
+> **图片题的答案从哪来**：裁图题组只有标题、没有题面文字，`solve_math_items` 看不到图，
+> 纯文本求答案必然失败。因此图片题**求答案时把裁出的 PNG 一并送视觉模型**
+> （`provider.generate` 走 `ocr_image` 同款视觉通道，带上题干标题+图片）；
+> 仍失败则该题 `pending`、进「待补答案」由家长手动补。**不采用「自动跳过」**——
+> `photo`/`geometry` 的 `answer` 恒非空是发布闸门的前提。
+
 **`practice_image.detect_image_questions` 的调整**：
-- 新契约下页级 `image_questions` 由 `practice_page_ai` 一次返回（不再是独立调用）
+- 新契约下页级 `image_questions` 由 `parsers/math_page.py` 一次返回（不再是独立调用）
 - 保留 `practice_image.py` 的 `crop_question_image()`（裁图能力不变）
 - 废弃 `detect_image_questions()` 与 `_IMAGE_HINT_RE` 门控（新流程逐页分析，无需关键词触发）
 
@@ -349,6 +358,8 @@ _persist_drafts(db, bank, drafts, "practice_pdf")
 def _is_aligned(q) -> bool:
     if not (q.answer or "").strip():
         return False
+    if not (q.work_mode or "").strip():
+        return _is_aligned_legacy(q)          # 旧题（work_mode 为空）走原 qtype 逻辑，行为不变
     kind = answer_kind_of(q.work_mode)        # 从 work_modes 注册表查
     if kind in ("numeric_list",):
         return bool(_blanks_of(q))            # 多空题型要求 blanks 非空
@@ -356,6 +367,10 @@ def _is_aligned(q) -> bool:
         return _json(q).get("correct_index") is not None
     return True
 ```
+
+> **旧题必须保留原路径**：`work_mode` 默认 `""`，存量题库题（`cloze`/`fill_blank`/`short_answer`）
+> 若一律走新分支，会因不再检查 `blanks` 而被误发布。`_is_aligned_legacy(q)` 即现有
+> `practice_import.py:357` 的实现，原样保留。
 
 > **`build_drafts` 的 `fill_blank → oral` 静默降级要删掉**（`practice_import.py:347-350`）。
 > 它会把 `symbol`/`equation` 这类映射到 `fill_blank` 的题降成 `oral`，
@@ -442,7 +457,8 @@ db.query(PracticeQuestionGroup).filter(
 **测试**
 
 后端 pytest（`tests/test_practice_groups.py` + 扩展 `test_practice_import.py`）
-- `work_modes` 注册表完整性：每个 mode 的 `answer_kind` / `input_ui` / `legacy_qtype` 合法
+- `work_modes` 注册表完整性：每个 **数学** mode 的 `answer_kind` / `input_ui` / `legacy_qtype` 合法
+  （语文/英语占位条目的 id 尚未注册，跳过交叉校验）
 - 页面分析 JSON 解析：正常、缺字段、未知 `work_mode`（→`other`）
 - `is_example` 过滤：示例不进待做项、不参与求答案、不进待补清单
 - `page_type` 过滤：`toc` / `answer_key` / `cover` 不入库
@@ -453,6 +469,8 @@ db.query(PracticeQuestionGroup).filter(
 - **重新导入清理**：同一 doc 重导后题组不累积（旧组被显式删除）
 - 判分分派：`number` / `numeric_list` / `symbol` / `photo` 各走对分支
 - **发布闸门**：每种 `answer_kind` 都能通过 `_is_aligned`（含 `choice`/`symbol`/`equation`）
+- **发布闸门（旧题回归）**：`work_mode=""` 的存量题仍走 `_is_aligned_legacy`，空 `blanks`
+  的 `cloze` 题依旧不发布（防新分支误放行）
 - `photo` 题必须有 `answer` 才发布（空答案进待补）
 - `build_drafts` 不再把 `fill_blank` 降级成 `oral`
 - **题组入库**：导入后 `group_id` 非空，且题组数 = 跨页合并后的组数
@@ -473,6 +491,7 @@ db.query(PracticeQuestionGroup).filter(
 - **`_strip_answer` + 方程**：`$4x-5.2 = 5.2$` 不截断（含未知数）
 - **`_strip_answer` + 示例**：`is_example=True` 的行完全不截断
 - **`_strip_answer` 兜底**：截断会导致 `$` 变奇数时，退化为不截断
+- **图片题求答案**：`geometry` 题组把裁图 PNG 一并送视觉模型；失败则该题 `pending` 进待补清单
 
 Flutter
 - 题组展示：题干 + 示例 + 待做项
@@ -492,7 +511,9 @@ Flutter
 parent-web
 - `renderQuestionHtml` 对 `$...$` 输出 `<span class="math-tex" data-tex="...">` 而不是剥掉 `$`
 - `decorateMath` 在无 `window.katex` 时不崩（降级为等宽原文）
-- **Dockerfile 冒烟**：`docker build ./parent-web` 后容器内 `/vendor/katex/katex.min.js` 返回 200
+- **Dockerfile 冒烟**：用 `docker run --rm knoact-parent-web ls /usr/share/nginx/html/vendor/katex/`
+  断言文件存在（**不要**用 HTTP 200 判断——`nginx.conf` 的 `try_files ... /index.html`
+  会把缺失路径回退成 200 + index.html，测不出回归）
 
 **容错**
 
@@ -513,27 +534,26 @@ parent-web
 | --- | --- |
 | `backend/app/core/work_modes.py` | 新增：`WorkModeSpec` + 数学题型注册表 |
 | `backend/app/core/subjects.py` | 新增：`SubjectSpec` 学科注册表（数学实现，语文/英语占位） |
-| `backend/app/services/parsers/math_page.py` | 新增：数学页面分析（提示词 + 结果解析） |
+| `backend/app/services/parsers/math_page.py` | 新增：数学整页分析——**提示词 + 结果解析 + 调用 `provider.generate(json_mode=True)`**（§4/§9.2 引用的「页面分析」都指这个文件） |
 | `backend/app/models.py` | 新增 `PracticeQuestionGroup`、`PracticeImportPage`；`Question` 加 4 列（裸 `group_id`） |
 | `backend/app/migrate_practice_groups.py` | 新增：建表（`create_all` 兜底）+ 加 4 列 + 建 `ix_questions_group`（**不删数据**） |
 | `backend/app/core/source_adapter.py` | `QuestionDraft` 加 `group_id`/`seq_in_group`/`is_example`/`work_mode` |
 | `backend/app/routers/bank.py` | `_persist_drafts` 透传 4 个新字段；`GET /{bank_id}/questions` 返回题组题干/示例/`work_mode`/`input_ui`/`answer_kind`；`POST /submit` 有 `work_mode` 时改走 `grade_practice_item` |
-| `backend/app/services/practice_page_ai.py` | 新增：整页分析（`provider.generate(json_mode=True)`，不依赖 `ocr_image`） |
-| `backend/app/services/practice_import.py` | 重写：页面分析 + 跨页合并 + **先建题组再挂小题**；`retry_pages` 同步删旧题组；**`_strip_answer` 改为感知 `$` 边界**（见 §10.2）；**删除** `parse_lesson_page`/`_split_row`/`parse_answer_page`/`align_answers`/`align_by_order` 及其测试 |
+| `backend/app/services/parsers/math_page.py` | 提示词加「题目格式约束」（空位 `____`、竖式 `□` 保留、每行独立 `$...$`、数学式用基础 LaTeX、中文不进 `$`）；§四 的 JSON 示例即 few-shot 样例 |
 | `backend/app/services/practice_grade.py` | 新增：按 `answer_kind` 分派判分（`grade_by_answer_kind` 的**薄包装**，负责把 `Question`/`PracticeQuestionGroup` 的字段拆出来） |
 | `backend/app/services/math_grade.py` | 新增：**所有数学入口共用的判分门面**（`grade_by_answer_kind`，唯一一份按 `answer_kind` 分派的实现） |
 | `backend/app/services/ocr_import.py` | 对齐：`_STRUCTURE_SYSTEM` 增 `work_mode`/`need_process`/`is_example`；`content` 白名单补 `$...$`（与 §十 一致）；判分改走 `math_grade` |
 | `backend/app/services/practice_solve.py` | **保留函数名 `solve_math_items`**，返回类型改为 `dict[int, dict]`；同步改 `tests/test_practice_import.py` 的 monkeypatch |
-| `backend/app/services/practice_image.py` | **删除** `detect_image_questions()` 与 `_IMAGE_HINT_RE`；保留 `crop_question_image()` |
+| `backend/app/services/practice_image.py` | **删除** `detect_image_questions()`（其 `_IMAGE_HINT_RE` 实际在 `practice_import.py:479`，随该文件重写一并移除）；保留 `crop_question_image()` |
 | `backend/app/routers/practice_import.py` | 题组浏览；待补清单过滤 `is_example`；页类型查询与修改；重新导入清理入口 |
 | `backend/app/routers/practice.py` | `/preview` 返回题组题干；**新增** `/records` 与 `/answer-photo` |
 | `backend/app/routers/pdf.py` | `delete_document` 时显式删除该 doc 的题组与页记录 |
 | `backend/app/services/task_gen.py` | 抽题按**小题**，带出题组题干与示例 |
 | `backend/app/main.py` | 启动跑新迁移（仅 schema）；续跑范围回退到 `total_pages` |
-| `parent-web/app.js` | 题组形式展示；页类型可修正；重新导入二次确认；答案页改为可选；`renderQuestionHtml` 对 `$...$` 输出 `math-tex` 占位并由 `decorateMath` 渲染 |
+| `parent-web/app.js` | 题组形式展示；页类型可修正；重新导入二次确认；答案页改为可选；`renderQuestionHtml` 对 `$...$` 输出 `math-tex` 占位并由 `decorateMath` 渲染；`____`→下划线、`○`→符号占位、`□`→小空框 |
 | `student-app/lib/features/bank_exercise/data/bank_models.dart` | 题目模型加 `groupStem`/`examples`/`workMode`/`inputUi`/`answerKind` |
 | `student-app/lib/core/widgets/math_text.dart` | 新增：`$...$` 切分 + `Math.tex` 行内渲染 + 短公式降级纯文本 + `onErrorFallback` |
-| `student-app/lib/features/bank_exercise/question_html.dart` | 新增 `____`→输入框、`○`→符号按钮、竖式行首空白保留；`_stripDollars` 改为委托 `math_text`（不再静默剥 `$`） |
+| `student-app/lib/features/bank_exercise/question_html.dart` | 新增 `____`→输入框、`○`→符号按钮、`□`→小输入框（竖式用）、竖式行首空白保留；`_stripDollars` 改为委托 `math_text`（不再静默剥 `$`） |
 | `student-app/lib/features/bank_exercise/ui/bank_exercise_page.dart` | 题组展示 + 按 `inputUi` 渲染 |
 | `student-app/lib/features/practice/`（新增） | 每日一练：题组式、多空、拍照（`photo`/`numeric_list` 只在这里做） |
 | `student-app/pubspec.yaml` | **已加** `flutter_math_fork: ^0.7.4`（工作区现有改动，KaTeX 字体随包 617 KB） |
@@ -541,7 +561,7 @@ parent-web
 | `parent-web/index.html` | 引入 `vendor/katex/katex.min.css` 与 `katex.min.js` |
 | `parent-web/app.js` | `renderQuestionHtml` 不再剥 `$`，输出 `<span class="math-tex" data-tex>`；新增 `decorateMath(root)` 调 `katex.render`；`____`→下划线、`○`→符号占位 |
 | `parent-web/Dockerfile` | **必须改**：`COPY index.html app.js ./` + `COPY vendor/ .../vendor/`（否则镜像 404 静默降级） |
-| `backend/app/services/practice_page_ai.py` | 提示词加「题目格式约束」（空位 `____`、竖式每行独立 `$...$`、数学式用 `$...$` 基础 LaTeX、中文不进 `$`）；§四 的 JSON 示例即 few-shot 样例 |
+| `backend/app/services/practice_import.py` | 重写：页面分析 + 跨页合并 + **先建题组再挂小题**；`retry_pages` 同步删旧题组；**`_strip_answer` 加 `is_example` 参数并感知 `$` 边界**（见 §10.2）；**删除** `parse_lesson_page`/`_split_row`/`parse_answer_page`/`align_answers`/`align_by_order` 及其测试 |
 | `backend/tests/test_practice_groups.py` | 新增，含格式标记测试 |
 
 **关于答案页范围**：新流程用 AI 求答案，`answer_start_page`/`answer_end_page` 不再必需，
@@ -583,7 +603,8 @@ SUBJECTS: dict[str, SubjectSpec] = {
         "oral", "vertical", "step", "equation", "pattern", "compare",
         "unit_compare", "fill_vertical", "letter_pattern", "geometry",
         "app", "choice", "judge", "other")),
-    # 以下本期不实现，仅占位表明扩展点
+    # 以下本期不实现，仅占位表明扩展点。work_mode_ids 里的 id 尚未注册到
+    # work_modes（等实现语文/英语时一起加），因此「注册表完整性」测试只校验数学。
     "语文": SubjectSpec("语文", "语文", "text_page", (
         "pinyin", "dictation", "fill_blank", "reading", "comprehension", "other")),
     "英语": SubjectSpec("英语", "英语", "text_page", (
@@ -655,10 +676,11 @@ def grade_by_answer_kind(db, question, student_answer="", photo_bytes=None) -> d
 | 竖式/脱式的多行 | 每行一个 `$...$`，行间用 `\n` | 逐行 `Math.tex` + 行首空格保留（**不用** `\begin{aligned}`） | ✅ |
 | 图形 | `![](/uploads/practice_images/xxx.png)` | 现有 `img` 支持 | ✅ 已有 |
 | 单位 | 原样（`km`、`m²`、`cm²`） | 正常文本 | ✅ 已有 |
-| 表格 | `\|` 分隔单元格 | 渲染为表格 | ⛔ 不做（`|` 会被 LaTeX/竖式标记混淆；本期表格题整块裁图走 `photo`） |
+| 表格 | ——（不引入表格标记） | ⛔ 不做（见下） |
 
-> **表格题本期走图片**：练习册里的统计表/方格表用 `image_questions` 裁图（`work_mode="table"`），
-> 不尝试用文本还原表格。这样避免引入 `|` 分隔标记与前端表格渲染的双重成本。
+> **表格题本期整块裁图**：练习册里的统计表/方格表用 `image_questions` 裁图，
+> 建组时 `work_mode` 用**已注册的 `geometry`**（`photo`/`camera`，判分走拍照），
+> 不新增 `table` 题型、不引入 `|` 分隔标记。避免表格还原与竖式标记的双重成本。
 
 #### 10.1 LaTeX 渲染（实测通过）
 
@@ -700,7 +722,8 @@ def grade_by_answer_kind(db, question, student_answer="", photo_bytes=None) -> d
 
 **AI 输出约束（写进页面分析提示词）**
 
-1. `items[].text` 中的空位**统一用 `____`**（不用「（　）」「(  )」等）
+1. `items[].text` 中的空位**统一用 `____`**（不用「（　）」「(  )」等）；
+   **竖式里的方格挖空保留印刷的 `□` 原样**（不改成 `____`，否则竖式对齐会被破坏）
 2. 竖式题保留换行与对齐空格，用 `\n` 分隔行、**每行各是一个独立 `$...$`**（不用 `\begin{aligned}`）
 3. 比较大小题把待填的 `○` 原样保留
 4. **数学式用 `$...$` 包裹 LaTeX**（如 `$\frac{3}{4}$`、`$4x-5.2=5.2$`、
@@ -718,15 +741,23 @@ def grade_by_answer_kind(db, question, student_answer="", photo_bytes=None) -> d
 对 `$111.06 \div 0.9 = 123.4$` 会截成 `$111.06 \div 0.9 =` —— **留下单个未配对 `$`**，
 前端按 10.1 约束 6 会把整段当普通文本，用户直接看到 `\div` 源码。
 
-**规则（必须实现）**
+**规则（必须实现，顺序不可颠倒）**
 
-1. **先剥掉公式外壳再判断**：取第一个 `$...$` 内的表达式做「是否已算出答案」的判断，
-   而不是对整串做正则。
-2. 若截断点在某个 `$...$` **内部**，则把该公式**重新闭合**：
+```python
+def _strip_answer(question: str, *, is_example: bool = False) -> str:
+```
+
+0. **`is_example=True` → 直接返回原文**（示例本来就要显示答案，任何截断都不做）。
+1. **左侧含未知数 → 不截断**（沿用现有 `_has_variable()`，见 `practice_import.py:286`）。
+   `$4x-5.2 = 5.2$` 里的 `5.2` 是方程的一部分，截掉就无解。**这条优先于下面所有规则。**
+2. **只在 `$...$` 内部判断**：取第一个 `$...$` 的表达式内容做「是否已算出答案」的
+   判断（右侧是否以数字开头），而不是对整串做正则。
+3. **截断点在公式内部 → 重新闭合 + 补空位**：
    `$111.06 \div 0.9 = 123.4$` → `$111.06 \div 0.9 =$ ____`
-   （补空位提示孩子填，且 `$` 数量保持成对）。
-3. `is_example=True` 的行**完全不截断**（示例本来就要显示答案）。
-4. 截断后若 `$` 计数为奇数，退化为不截断（宁可露出答案，也不要产生坏标记）。
+   （`$` 数量保持成对，且给出填空提示）。
+4. **兜底**：截断后若 `$` 计数为奇数，退化为不截断（宁可露出答案，也不要产生坏标记）。
+
+> `build_drafts` 调用处必须传 `is_example=q.get("is_example", False)`。
 
 > 等价约束：任何进入 `Question.question` / `PracticeQuestionGroup.stem` 的字符串，
 > `$` 必须成对。建议在 `build_drafts` 出口加一条断言（测试里必须覆盖）。
