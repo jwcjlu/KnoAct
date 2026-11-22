@@ -131,6 +131,27 @@ class PracticeQuestionGroup(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 ```
 
+**页级元信息**（新增表，很小，解决「页码类型可修正」与原始文本追溯）：
+
+```python
+class PracticeImportPage(Base):
+    """导入时按页记录分析结果，供排查与手动修正页类型。"""
+    __tablename__ = "practice_import_pages"
+    __table_args__ = (UniqueConstraint("document_id", "page_no"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("pdf_documents.id"))
+    page_no: Mapped[int] = mapped_column(Integer)
+    page_type: Mapped[str] = mapped_column(String(16), default="practice")
+    raw_text: Mapped[str] = mapped_column(LongText, default="")     # 该页 AI 原始输出
+    group_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="ok")    # ok | failed
+```
+
+家长端可把某页 `page_type` 从 `toc` 改成 `practice` 后重新解析该页。
+
+**`work_mode` 以小题为准**：组级 `work_mode` 是默认值，小题 `Question.work_mode` 非空时优先；
+渲染与统计都读小题字段（组级仅作兜底）。
+
 > `raw_pages` 不放在组上（同页 40 题会存 40 份重复 OCR 文本），改为复用
 > `PracticeImportJob` 的原始文本或单独一张页表；本期先用 `PdfPage.image_path` 追溯原页。
 
@@ -207,29 +228,38 @@ work_mode: Mapped[str] = mapped_column(String(24), default="")
 
 全书扫描完成后统一处理（`merge_cross_page_groups(groups)`）：
 
-```
-for i in range(len(groups) - 1):
-    cur, nxt = groups[i], groups[i+1]
-    # 只在同一 bank + 相邻页 + 上一组标记未结束时尝试
-    if not cur.continues_next_page:  continue
-    if nxt.page_start != cur.page_end + 1:  continue
-    if cur.work_mode != nxt.work_mode:  continue      # 题型不同不合并
-    # stem 判定：包含 或 编辑距离 ≤ 30%
-    same_stem = (
-        cur.stem and nxt.stem and
-        (cur.stem in nxt.stem or nxt.stem in cur.stem or
-         Levenshtein(cur.stem, nxt.stem) <= max(len(cur.stem), len(nxt.stem)) * 0.3)
-    )
-    if same_stem or not cur.stem or not nxt.stem:
-        合并 nxt.items 到 cur.items（重编 seq）
-        cur.page_end = nxt.page_end
-        cur.continues_next_page = nxt.continues_next_page
-        删除 nxt
-    else:
-        cur.incomplete = True          # 标记可能不完整，家长端可见
+```python
+merged = []
+i = 0
+while i < len(groups):
+    cur = groups[i]
+    merged.append(cur)
+    # 合并成功后不前进，继续尝试吞下一组（支持跨 3 页以上）
+    while cur.get("continues_next_page") and i + 1 < len(groups):
+        nxt = groups[i + 1]
+        if nxt["page_start"] != cur["page_end"] + 1 or cur["work_mode"] != nxt["work_mode"]:
+            break
+        same_stem = (
+            not cur["stem"] or not nxt["stem"]
+            or cur["stem"] in nxt["stem"] or nxt["stem"] in cur["stem"]
+            or _levenshtein(cur["stem"], nxt["stem"])
+               <= max(len(cur["stem"]), len(nxt["stem"])) * 0.3
+        )
+        if not same_stem:
+            cur["incomplete"] = True
+            cur["continues_next_page"] = False   # 不再尝试吞后续组
+            break
+        cur["items"].extend(nxt["items"])
+        cur["page_end"] = nxt["page_end"]
+        cur["continues_next_page"] = nxt.get("continues_next_page", False)
+        i += 1                                    # 吞掉 nxt
+    i += 1
 ```
 
-**合并失败**：保留两段，`cur.incomplete = True`，家长端显示「可能不完整」提示。
+**要点**
+- 合并成功后 `i` 只前进 1（吞掉 nxt），外层再 +1，支持连续跨多页
+- 合并失败必须把 `continues_next_page` 置 False，否则下一轮还会误吞
+- 合并失败标 `incomplete=True`，家长端显示「可能不完整」
 
 **`incomplete` 字段**需要加进 `PracticeQuestionGroup`：
 
@@ -239,33 +269,104 @@ incomplete: Mapped[bool] = mapped_column(Boolean, default=False)
 
 ### 六、求答案与判分
 
-**按 `answer_kind` 分派**（不按题型名）：
+#### 6.0 入库流程（题组先建，小题后挂）
 
-| answer_kind | 求答案 | 判分 |
-| --- | --- | --- |
-| `number` | AI 批量算数值 → `Question.answer` | `grade_math_answer()` |
-| `numeric_list` | AI 算多个空 → `answer_json={"blanks":[...]}` | 逐空比较，全对才算对 |
-| `symbol` | AI 判 > < = → `Question.answer` | 精确匹配（先归一化全半角） |
-| `choice` | 从选项挑 → `answer_json={"correct_index":n}` | 精确匹配索引 |
-| `text` | AI 生成参考答案 → `Question.answer` | `grade_subjective()` |
-| `photo` | **仍然求数值答案**（进 `Question.answer`） | `grade_math_work_photo()`，用它判对错 |
-
-> **`photo` 一定要有标准答案**：`grade_math_work_photo(db, image_bytes, question, expected_answer)`
-> 在 `expected_answer` 为空时无法判对错（`math_gen.py:248` 起）。所以竖式/脱式/应用题
-> **也要 AI 算出最终答案**，只是孩子必须拍照提交、判分时同时看过程和答案。
->
-> 若 AI 求不出答案（如纯图形题的答案依赖图中未标注信息），该题 `status=pending`
-> 进「待补答案」，家长补了答案才发布。
-
-**`numeric_list` 的答案形态**（复用现有发布闸门）
+`_persist_drafts` 只负责写 `Question`，**题组行由调用方先建**：
 
 ```python
-Question.answer = "1.2, 1.44, 1.728, 2.0736"     # 便于人看
-Question.answer_json = '{"blanks": ["1.2", "1.44", "1.728", "2.0736"]}'  # 判分用
+# services/practice_import.py 里
+group_ids: dict[str, int] = {}       # key: 组内唯一标识（如 f"{page_start}-{idx}"）
+
+for g in merged_groups:
+    row = PracticeQuestionGroup(
+        bank_id=bank.id, user_id=bank.user_id,
+        lesson_no=g["lesson_no"], lesson_title=g["lesson_title"],
+        stem=g["stem"], instruction=g.get("instruction", ""),
+        work_mode=g["work_mode"], need_process=g["need_process"],
+        page_start=g["page_start"], page_end=g["page_end"],
+        source_document_id=job.document_id,
+        incomplete=g.get("incomplete", False),
+    )
+    db.add(row); db.flush()
+    group_ids[g["key"]] = row.id
+
+# 再构造 drafts，把 group_id 填进去
+for g in merged_groups:
+    for it in g["items"]:
+        d = build_draft(it, g, document_id=job.document_id)
+        d.group_id = group_ids[g["key"]]
+        d.seq_in_group = it["seq"]
+        d.is_example = it["is_example"]
+        d.work_mode = g["work_mode"]
+        drafts.append(d)
+
+_persist_drafts(db, bank, drafts, "practice_pdf")
 ```
 
-`_is_aligned()` 已有 `fill_blank/cloze 必须有 blanks` 的判断，`numeric_list` 走同一分支，
-不需要新的发布闸门。
+#### 6.1 判分接入点
+
+新判分器 `grade_practice_item()` 必须**接到现有提交入口**：
+
+- `routers/bank.py` 的 `POST /api/banks/submit`（`bank.py:356`）在写
+  `AnswerRecord` 前，若该题有 `work_mode`，改走 `grade_practice_item()`；
+  无 `work_mode` 的旧题仍走 `grade_question()`
+- `routers/practice.py` 的 `POST /api/practice/answer-photo`（**新增**）用于
+  `need_process` 与 `photo` 题型：上传照片 → `grade_practice_item(photo_bytes=...)`
+  → 写 `PracticeAttempt`
+
+> 现有 Flutter `/bank-exercise` 只支持输入/点选（`bank_exercise_controller.dart`
+> 的 `_answerPayload` 按 `qtype_category` 三选一，`setBlank` 恒传 1 个空），
+> `photo` 与 `numeric_list` 都提交不了。因此：
+> - `bank_exercise_controller.dart` 需支持 `blanks` 数组与拍照上传
+> - 或明确「`photo`/`numeric_list` 题型仅在「每日一练」里做，题库练习只支持
+>   `number`/`choice`/`symbol`」——**本期选后者**（题库练习保持简单），
+>   每日一练（计划三）才实现拍照与多空
+
+**按 `answer_kind` 分派**（不按题型名）：
+
+| answer_kind | 求答案（必写字段） | 判分 |
+| --- | --- | --- |
+| `number` | `answer` = 数值 | `grade_math_answer()` |
+| `numeric_list` | `answer` = 逗号拼接 + `answer_json={"blanks":[...]}` | 逐空比较，全对才算对 |
+| `symbol` | `answer` = `>`/`<`/`=` | 精确匹配（先归一化全半角） |
+| `choice` | `answer` = 选项文本 + `answer_json={"correct_index":n}` | 精确匹配索引 |
+| `text` | `answer` = 参考答案文本 | `grade_subjective()` |
+| `photo` | `answer` = AI 算出的数值 + `answer_json={"blanks":[...]}`（若多空） | `grade_math_work_photo()` |
+
+> **`answer` 恒为非空**——这是现有发布闸门 `_is_aligned()` 的第一条判断
+> （`practice_import.py:357`）。只写 `answer_json` 不写 `answer` 的题型（原设计的
+> `choice`/`judge`）会永久 `pending`，必须同时写 `answer`。
+
+**`_is_aligned()` 改为按 `answer_kind` 判定**（不再按 qtype）：
+
+```python
+def _is_aligned(q) -> bool:
+    if not (q.answer or "").strip():
+        return False
+    kind = answer_kind_of(q.work_mode)        # 从 work_modes 注册表查
+    if kind in ("numeric_list",):
+        return bool(_blanks_of(q))            # 多空题型要求 blanks 非空
+    if kind == "choice":
+        return _json(q).get("correct_index") is not None
+    return True
+```
+
+> **`build_drafts` 的 `fill_blank → oral` 静默降级要删掉**（`practice_import.py:347-350`）。
+> 它会把 `symbol`/`equation` 这类映射到 `fill_blank` 的题降成 `oral`，
+> 导致 `qtype_category` 变 `subjective`，判分永远 pending。改为按 `answer_kind` 写
+> `answer_json`，不再降级。
+
+**`photo` 一定要有标准答案**：`grade_math_work_photo(db, image_bytes, question, expected_answer)`
+在 `expected_answer` 为空时无法判对错（`math_gen.py:248` 起）。所以竖式/脱式/应用题
+**也要 AI 算出最终答案**，只是孩子必须拍照提交、判分时同时看过程和答案。
+若 AI 求不出答案，该题 `status=pending` 进「待补答案」，家长补了才发布。
+
+**`numeric_list` 的答案形态**
+
+```python
+Question.answer = "1.2, 1.44, 1.728, 2.0736"     # 展示用，且满足 _is_aligned 第一条
+Question.answer_json = '{"blanks": ["1.2", "1.44", "1.728", "2.0736"]}'  # 判分用
+```
 
 **`solve_math_items` 的新返回结构**
 
@@ -339,7 +440,12 @@ db.query(PracticeQuestionGroup).filter(
 - **迁移不删数据**：跑 `migrate()` 后已有练习册题目数量不变
 - **重新导入清理**：同一 doc 重导后题组不累积（旧组被显式删除）
 - 判分分派：`number` / `numeric_list` / `symbol` / `photo` 各走对分支
+- **发布闸门**：每种 `answer_kind` 都能通过 `_is_aligned`（含 `choice`/`symbol`/`equation`）
 - `photo` 题必须有 `answer` 才发布（空答案进待补）
+- `build_drafts` 不再把 `fill_blank` 降级成 `oral`
+- **题组入库**：导入后 `group_id` 非空，且题组数 = 跨页合并后的组数
+- **重导入幂等**：同一 doc 重导后题组不累积（旧组显式删除）
+- **答案页可选**：`answer_start_page=None` 时仍能跑满 `total_pages`
 - **回归**：找规律题 = 1 个题组 + 4 个待做小题 + 3 个示例
 - **回归**：脱式题 `need_process=true`，只填数值不算完成
 
@@ -365,27 +471,44 @@ Flutter
 | 文件 | 改动 |
 | --- | --- |
 | `backend/app/core/work_modes.py` | 新增：`WorkModeSpec` + 注册表 |
-| `backend/app/models.py` | 新增 `PracticeQuestionGroup`；`Question` 加 4 列（裸 `group_id`，无 CASCADE） |
-| `backend/app/migrate_practice_groups.py` | 新增：建索引 + 加 4 列 + 建 `ix_questions_group`（**不删数据**） |
+| `backend/app/models.py` | 新增 `PracticeQuestionGroup`、`PracticeImportPage`；`Question` 加 4 列（裸 `group_id`） |
+| `backend/app/migrate_practice_groups.py` | 新增：建表（`create_all` 兜底）+ 加 4 列 + 建 `ix_questions_group`（**不删数据**） |
 | `backend/app/core/source_adapter.py` | `QuestionDraft` 加 `group_id`/`seq_in_group`/`is_example`/`work_mode` |
-| `backend/app/routers/bank.py` | `_persist_drafts` 透传 4 个新字段；`GET /{bank_id}/questions` 返回题组题干/示例/`work_mode` |
-| `backend/app/services/practice_page_ai.py` | 新增：整页视觉分析（OCR + 结构化合并，走 `provider.generate(json_mode=True)`） |
-| `backend/app/services/practice_import.py` | 重写：改用页面分析结果 + 跨页合并；`retry_pages` 同步删旧题组 |
+| `backend/app/routers/bank.py` | `_persist_drafts` 透传 4 个新字段；`GET /{bank_id}/questions` 返回题组题干/示例/`work_mode`/`input_ui`/`answer_kind`；`POST /submit` 有 `work_mode` 时改走 `grade_practice_item` |
+| `backend/app/services/practice_page_ai.py` | 新增：整页分析（`provider.generate(json_mode=True)`，不依赖 `ocr_image`） |
+| `backend/app/services/practice_import.py` | 重写：页面分析 + 跨页合并 + **先建题组再挂小题**；`retry_pages` 同步删旧题组；**删除** `parse_lesson_page`/`_split_row`/`parse_answer_page`/`align_answers`/`align_by_order` 及其测试 |
 | `backend/app/services/practice_grade.py` | 新增：按 `answer_kind` 分派判分 |
-| `backend/app/services/practice_solve.py` | 扩展：返回 `dict[int, dict]` 支持多空与符号 |
-| `backend/app/routers/practice_import.py` | 题组浏览、待补清单（过滤 `is_example`）、重新导入清理入口 |
-| `backend/app/routers/practice.py` | `/preview` 返回题组题干；`/records` 按题组展示 |
+| `backend/app/services/practice_solve.py` | **保留函数名 `solve_math_items`**，返回类型改为 `dict[int, dict]`；同步改 `tests/test_practice_import.py` 的 monkeypatch |
+| `backend/app/services/practice_image.py` | **删除** `detect_image_questions()` 与 `_IMAGE_HINT_RE`；保留 `crop_question_image()` |
+| `backend/app/routers/practice_import.py` | 题组浏览；待补清单过滤 `is_example`；页类型查询与修改；重新导入清理入口 |
+| `backend/app/routers/practice.py` | `/preview` 返回题组题干；**新增** `/records` 与 `/answer-photo` |
+| `backend/app/routers/pdf.py` | `delete_document` 时显式删除该 doc 的题组与页记录 |
 | `backend/app/services/task_gen.py` | 抽题按**小题**，带出题组题干与示例 |
-| `backend/app/main.py` | 启动跑新迁移（仅 schema） |
-| `parent-web/app.js` | 题组形式展示题目；页面类型可手动修正；重新导入需二次确认 |
-| `student-app/lib/features/bank_exercise/data/bank_models.dart` | 题目模型加 `groupStem` / `examples` / `workMode` / `needProcess` |
-| `student-app/lib/features/bank_exercise/ui/bank_exercise_page.dart` | 题组展示 + 按 `input_ui` 渲染 + `need_process` 强制拍照 |
-| `student-app/lib/features/practice/`（新增） | 每日一练页（题组式） |
+| `backend/app/main.py` | 启动跑新迁移（仅 schema）；续跑范围回退到 `total_pages` |
+| `parent-web/app.js` | 题组形式展示；页类型可修正；重新导入二次确认；答案页改为可选 |
+| `student-app/lib/features/bank_exercise/data/bank_models.dart` | 题目模型加 `groupStem`/`examples`/`workMode`/`inputUi`/`answerKind` |
+| `student-app/lib/features/bank_exercise/ui/bank_exercise_page.dart` | 题组展示 + 按 `inputUi` 渲染 |
+| `student-app/lib/features/practice/`（新增） | 每日一练：题组式、多空、拍照（`photo`/`numeric_list` 只在这里做） |
 | `backend/tests/test_practice_groups.py` | 新增 |
 
 **关于答案页范围**：新流程用 AI 求答案，`answer_start_page`/`answer_end_page` 不再必需，
 降级为**可选**（家长若提供，则用答案页做交叉校验；不提供则纯 AI 求答案）。
 上传接口与 parent-web 表单都要把这两项从「必填」改成「可选」。
+
+⚠️ **可选化必须同步改三处派生逻辑，否则不填答案页会导入 0 页**：
+
+```python
+# practice_import.py:559 与 _job_payload、main.py 的断点续跑共用同一表达式
+q_end = job.question_end_page or (job.answer_start_page or 1) - 1   # ❌ answer_start 为 None → q_end=0
+# 改为：
+q_end = (job.question_end_page
+         or ((job.answer_start_page - 1) if job.answer_start_page else job.total_pages))
+```
+
+需要改的三处：
+1. `services/practice_import.py:run_import_job()` 计算 `q_end`
+2. `routers/practice_import.py:_job_payload()` 计算 `question_pages`
+3. `main.py` 启动续跑时计算 `failed_pages` 范围
 
 ## 后续可扩展（不在本次范围）
 
