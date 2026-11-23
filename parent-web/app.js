@@ -613,6 +613,25 @@ function markMath(escaped){
 }
 
 /**
+ * 按字符数截断，但绝不把 `$...$` 切成一半。
+ *
+ * 截断点落在公式内时必须退回到该公式的 `$` 之前：否则 markMath 找不到配对，
+ * 会把「$2.44 \times 99 + 2.44」原样当源码显示出来（就是列表里露 \times 的 bug）。
+ */
+function clipMath(src, n){
+  const s = String(src || '');
+  if (s.length <= n) return s;
+  let cut = s.slice(0, n);
+  if ((cut.match(/\$/g) || []).length % 2 === 1) {
+    const i = cut.lastIndexOf('$');
+    // 第一个 $ 就在开头（整个题干是一个超长公式）：退回等于清空，干脆不截
+    if (i <= 0) return s;
+    cut = cut.slice(0, i);
+  }
+  return cut.trimEnd() + '…';
+}
+
+/**
  * 把扁平的题目数组按 group_id 聚成题组。
  * 无 group_id 的历史题聚成一组（stem 为空），保证旧卷也能显示。
  * 返回 [{groupId, stem, lessonTitle, examples:[], items:[]}, ...]，组内按 seq_in_group 排序。
@@ -1121,7 +1140,7 @@ function renderPracticeImport(){
     <div class="pdf-row">
       <div class="pdf-info">
         <div class="nm">${escapeAttr(String(m.lesson_title || ''))}</div>
-        <div class="meta">题 ${escapeAttr(String(m.question_no || ''))}：${escapeAttr(String(m.question || '').slice(0, 60))}</div>
+        <div class="meta">题 ${escapeAttr(String(m.question_no || ''))}：${markMath(escapeHtml(clipMath(m.question, 60)))}</div>
         ${m.image_url ? `<img src="${API}${escapeAttr(m.image_url)}" alt="题图"
             style="display:block;margin-top:8px;max-width:320px;width:100%;border:1px solid var(--line3);border-radius:8px">` : ''}
       </div>
@@ -1227,8 +1246,8 @@ function renderPracticeImport(){
               ${practicePreview.map(p => `
                 <div class="pdf-row">
                   <div class="pdf-info">
-                    <div class="nm">${escapeAttr(String(p.question || ''))}</div>
-                    <div class="meta">${escapeAttr(String(p.lesson_title || ''))} · 答案 ${escapeAttr(String(p.answer || ''))}</div>
+                    <div class="nm">${markMath(escapeHtml(String(p.question || '')))}</div>
+                    <div class="meta">${escapeAttr(String(p.lesson_title || ''))} · 答案 ${markMath(escapeHtml(String(p.answer || '')))}</div>
                   </div>
                 </div>`).join('')}
             </div>` : ''}
@@ -1314,7 +1333,7 @@ function practiceQuestionRows(){
           <div class="nm">${markMath(escapeHtml(String(q.question || '')))}</div>
           <div class="meta">
             ${escapeAttr(String(q.lesson_title || ''))}
-            · 答案 <b style="color:var(--green2)">${escapeAttr(String(q.answer || '（缺）'))}</b>
+            · 答案 <b style="color:var(--green2)">${markMath(escapeHtml(String(q.answer || '（缺）')))}</b>
           </div>
           ${q.image_url ? `<img src="${API}${escapeAttr(q.image_url)}" alt="题图" loading="lazy"
               style="display:block;margin-top:8px;max-width:360px;width:100%;border:1px solid var(--line3);border-radius:8px">` : ''}

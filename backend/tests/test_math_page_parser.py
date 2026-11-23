@@ -172,6 +172,26 @@ def test_prompt_explains_multi_blank_split(setup_db, db, monkeypatch):
     assert "不要把待填的题目本身也写进 stem" in called["system"]
 
 
+def test_prompt_forbids_splitting_formula_at_equals(setup_db, db, monkeypatch):
+    """提示词必须明确禁止按等号把算式切成 stem + 「= ...」两截。
+
+    DB 里实测到 `$ = (420 ÷ ____) ÷ (35 ÷ 7)`、`$ = $` 这类残题，
+    根因就是模型这样切分；后处理只是兜底，提示词才是根因。
+    """
+    import app.services.parsers.math_page as mp
+
+    called = {}
+    monkeypatch.setattr(
+        mp, "vision_json",
+        lambda db_, img, system, prompt, **kw: (
+            called.update(system=system)
+            or '{"page_type":"practice","groups":[],"image_questions":[]}'))
+    mp.analyze_page(db, b"\x89PNG")
+
+    sys_prompt = called["system"]
+    assert "绝不可按等号把一道算式切成两截" in sys_prompt
+
+
 def test_fix_blank_inside_math():
     r"""模型把 ____ 写进 $...$ 里会把公式劈成两半，必须挪出来。"""
     from app.services.parsers.math_page import parse_page_analysis
@@ -233,3 +253,104 @@ def test_clean_markup_drops_stray_operator():
     assert _clean_markup("$3 \\times 4 = 12$") == "$3 \\times 4 = 12$"
     # 无运算符的普通文本不动
     assert _clean_markup("求涂色部分的面积") == "求涂色部分的面积"
+
+
+def _page(groups):
+    """跑一遍完整的 parse_page_analysis，返回规范化后的 groups。"""
+    from app.services.parsers.math_page import parse_page_analysis
+
+    return parse_page_analysis(json.dumps({
+        "page_type": "practice", "groups": groups, "image_questions": [],
+    }, ensure_ascii=False))["groups"]
+
+
+def test_stem_is_cleaned_like_item_text():
+    r"""组题干以前不过 _clean_markup，裸 LaTeX 会以源码显示在题组标题上。"""
+    g = _page([{
+        "stem": "$603 - 239 =$\n\\underline{\\hspace{2cm}}",
+        "work_mode": "vertical",
+        "items": [{"seq": 1, "y": 0.1, "text": "$603 - 251 =$ ____"}],
+    }])[0]
+    assert r"\underline" not in g["stem"] or r"$\underline" in g["stem"], g["stem"]
+    assert g["stem"].count("$") % 2 == 0, g["stem"]
+
+
+def test_item_starting_with_equals_absorbs_stem_left_side():
+    r"""模型把一行算式按等号劈开：题干 `$420 \div 35 =$` + 小题 `$ = (...) ...$`。
+
+    不接回来孩子只看到「= (…)」，题目条件丢了；题干也不该再当标题重复显示。
+    """
+    g = _page([{
+        "stem": "$420 \\div 35 =$",
+        "work_mode": "step",
+        "items": [{"seq": 1, "y": 0.2,
+                   "text": "$ = (420 \\div \\underline{\\hspace{1cm}}) \\div (35 \\div 7)$"}],
+    }])[0]
+    assert g["items"][0]["text"] == (
+        r"$420 \div 35 = (420 \div \underline{\hspace{1cm}}) \div (35 \div 7)$"
+    ), g["items"][0]["text"]
+    assert g["stem"] == ""
+
+
+def test_item_starting_with_equals_keeps_equals_when_stem_has_none():
+    """题干没有等号时必须保留小题的等号，否则算式丢了关系符。"""
+    g = _page([{
+        "stem": "$420 \\div 35$",
+        "work_mode": "step",
+        "items": [{"seq": 1, "y": 0.2, "text": "$ = (420 \\div 15) \\div (35 \\div 7)$"}],
+    }])[0]
+    assert g["items"][0]["text"] == r"$420 \div 35 = (420 \div 15) \div (35 \div 7)$"
+
+
+def test_item_starting_with_equals_does_not_merge_into_complete_equation():
+    """题干已经是完整等式时不能拼（否则出现两个等号）。"""
+    src = "$ = (420 \\div 15) \\div (35 \\div 7)$"
+    g = _page([{
+        "stem": "$9450 \\div 630 = 15$",
+        "work_mode": "step",
+        "items": [{"seq": 1, "y": 0.2, "text": src}],
+    }])[0]
+    assert g["items"][0]["text"] == src
+    assert g["stem"] == "$9450 \\div 630 = 15$"
+
+
+def test_cjk_stem_kept_after_merge():
+    """含中文引导语的题干要保留，且引导语不能重复拼进每道小题。"""
+    g = _page([{
+        "stem": "根据规律填空：$9450 \\div 630 =$",
+        "work_mode": "step",
+        "items": [{"seq": 1, "y": 0.2, "text": "$ = (420 \\div 15) \\div (35 \\div 7)$"}],
+    }])[0]
+    assert g["stem"] == "根据规律填空：$9450 \\div 630 =$", g["stem"]
+    assert g["items"][0]["text"] == r"$9450 \div 630 = (420 \div 15) \div (35 \div 7)$"
+
+
+def test_shell_items_are_dropped():
+    r"""`$ = $` 这种只剩等号的空壳小题没有可作答内容，要丢弃。"""
+    g = _page([{
+        "stem": "直接写出得数。",
+        "work_mode": "oral",
+        "items": [
+            {"seq": 1, "y": 0.1, "text": "$ = $"},
+            {"seq": 2, "y": 0.2, "text": "$ = $____"},
+            {"seq": 3, "y": 0.3, "text": "$8.9 + 4.5 =$ ____"},
+        ],
+    }])[0]
+    assert [it["text"] for it in g["items"]] == [r"$8.9 + 4.5 =$ ____"]
+
+
+def test_group_with_only_shell_items_is_dropped():
+    """整组都是空壳 → 该组不出现在结果里（否则落库成看不见的题）。"""
+    groups = _page([{
+        "stem": "",
+        "work_mode": "oral",
+        "items": [{"seq": 1, "y": 0.1, "text": "$ = $"}],
+    }])
+    assert groups == []
+
+
+def test_group_without_items_is_not_dropped():
+    """模型漏返回 items 与「题干被劈成空壳」是两回事，不能一并丢掉。"""
+    groups = _page([{"stem": "x", "work_mode": "oral", "items": []}])
+    assert len(groups) == 1
+

@@ -68,6 +68,12 @@ _PAGE_SYSTEM = (
     "- items[] 每个空一条，text 只写该空对应的部分（如「$a \\times b =$ ____」）。\n"
     "- 一题只有 1 个空时，stem 与 items[0].text 的内容不重复：把题目放在 items[0].text。\n"
     "\n"
+    "【绝不可按等号把一道算式切成两截】\n"
+    "算式的等号左右两边属于同一道题，必须写在同一个 items[].text 里。\n"
+    "  错误：stem 写 \"$420 \\div 35 =$\"，items[0].text 写 \"$ = (420 \\div 15) \\div (35 \\div 7)$\"\n"
+    "  正确：items[0].text 写 \"$420 \\div 35 = (420 \\div 15) \\div (35 \\div 7)$\"\n"
+    "同理，也不要把只剩 \"$ = $\" 的残缺片段当成一道题返回。\n"
+    "\n"
     "【work_mode 判断提示】\n"
     "字母表示数/用字母找规律（如 a=0.00…01 求 a×b）→ letter_pattern；\n"
     "数字序列找规律并推算 → pattern；比较两个数/带单位比较大小 → compare / unit_compare；\n"
@@ -222,6 +228,64 @@ def _is_stray_op(text: str, m) -> bool:
     return rest == ""
 
 
+_LEADING_EQ_RE = re.compile(r"^\s*\$?\s*[=＝]")
+_TRAILING_EQ_RE = re.compile(r"[=＝]\s*$")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _join_stem_prefix(stem: str, text: str) -> str:
+    r"""小题以 `=` 开头时，把题组题干里的「等号左边」接回来。
+
+    模型常把一行算式按等号劈开：题干 `/ $420 \div 35 =$`、小题
+    `/ $ = (420 \div \underline{\hspace{1cm}}) \div (35 \div 7)$`。
+    不接回来，孩子只看到「= (…)」，等于丢了题目条件。
+
+    只接两种明确的「左半边」形态，其余原样返回（过度拼接更危险）：
+    - 题干公式以 `=` 结尾（`$420 \div 35 =$`）
+    - 题干公式里根本没有 `=`（`$420 \div 35$`）
+    题干已经是完整等式（`$a = 5$`）时不动，否则会拼出两个等号。
+    """
+    if not text or not _LEADING_EQ_RE.match(text):
+        return text
+    m = re.search(r"\$([^$]*)\$\s*$", stem or "")
+    inner = (m.group(1) if m else "").strip()
+    if not inner or ("=" in inner and not _TRAILING_EQ_RE.search(inner)):
+        return text
+
+    rest = text.lstrip()
+    if rest.startswith("$"):
+        end = rest.find("$", 1)
+        if end < 0:
+            return text
+        tail = rest[end + 1:]
+        body = rest[1:end]
+    else:
+        tail, body = "", rest
+    body = body.strip()
+    # 题干自己已经有等号时，去掉小题自带的那个，否则会拼成「= =」；
+    # 题干没有等号（`$420 \div 35$`）时必须把小题的等号留下，否则算式没了关系符。
+    if _TRAILING_EQ_RE.search(inner):
+        body = body.lstrip("=＝").strip()
+    if not re.search(r"[0-9A-Za-z\\]", body):
+        return text
+    # 只接公式本身，不接题干里公式**之前**的中文引导语（那是题组标题的事，
+    # 拼进小题会让每道小题都重复一遍「根据规律填空：」）。
+    return f"${inner} {body}${tail}"
+
+
+def _is_shell(text: str) -> bool:
+    r"""小题正文是不是「空壳」：只剩等号/空位/公式外壳，没有任何数字或字母。
+
+    `$ = $`、`$ = $____` 这类来自模型把一行算式按等号劈开后丢掉左半边，
+    孩子看到的就是一个孤零零的等号——没有可作答内容，必须丢弃。
+    只判「含等号」的形态：孤立的 `____` 在题组题干承载算式时是合法的空位。
+    """
+    t = text or ""
+    if not re.search(r"[=＝]", t):
+        return False
+    return not re.search(r"[0-9A-Za-z\u4e00-\u9fff]", t)
+
+
 def _norm_item(raw: dict, fallback_seq: int) -> dict:
     seq = _safe_int(raw.get("seq"))
     return {
@@ -237,24 +301,44 @@ def _norm_group(raw: dict) -> dict:
     mode = str(raw.get("work_mode") or "").strip()
     if mode not in REGISTRY:
         mode = "other"
+    # stem/instruction 也必须过 _clean_markup：否则题干里的裸 LaTeX
+    # （`\underline{\hspace{2cm}}`）会以源码形式显示在题组标题上。
+    stem = _clean_markup(str(raw.get("stem") or ""))
     items_raw = raw.get("items")
     items: list[dict] = []
     if isinstance(items_raw, list):
         for idx, it in enumerate(items_raw, start=1):
             if isinstance(it, dict):
                 items.append(_norm_item(it, idx))
+
+    joined = 0
+    for it in items:
+        fixed = _join_stem_prefix(stem, it["text"])
+        if fixed != it["text"]:
+            it["text"] = fixed
+            joined += 1
+    # 题干纯粹是算式左半边（不含中文引导语）且已被并进小题 → 不要再当标题重复显示
+    if joined and not _CJK_RE.search(stem):
+        stem = ""
+    # 空壳小题（`$ = $`）无可作答内容，丢弃
+    kept = [it for it in items if not _is_shell(it["text"])]
+    # 原本有小题、但全是空壳 → 这一组没有任何可作答内容，由调用方丢弃。
+    # 原本就没有小题的组不算（模型漏返回 items 与「题干被劈开」是两回事）。
+    all_shell = bool(items) and not kept
+
     # 按 y 排序还原行列顺序。sorted 是稳定排序：同一 y（密集网格同一行）
     # 会保留 AI 的原始顺序，这是期望行为，不要改成二次排序。
-    items.sort(key=lambda x: x["y"])
+    kept.sort(key=lambda x: x["y"])
     return {
-        "stem": str(raw.get("stem") or "").strip(),
+        "stem": stem,
         "instruction": str(raw.get("instruction") or "").strip(),
         "lesson_no": _safe_int(raw.get("lesson_no")),
         "lesson_title": str(raw.get("lesson_title") or "").strip(),
         "work_mode": mode,
         "need_process": bool(raw.get("need_process")),
         "continues_next_page": bool(raw.get("continues_next_page")),
-        "items": items,
+        "items": kept,
+        "all_shell": all_shell,
     }
 
 
@@ -299,7 +383,12 @@ def parse_page_analysis(raw: str) -> dict:
     if isinstance(gs, list):
         for g in gs:
             if isinstance(g, dict):
-                groups.append(_norm_group(g))
+                norm = _norm_group(g)
+                # 小题被全部判为空壳（`$ = $`）的组没有任何可作答内容，直接丢弃，
+                # 否则会落库成「看不见的题」，家长在待补答案里只看到空白行。
+                if norm.pop("all_shell"):
+                    continue
+                groups.append(norm)
 
     images: list[dict] = []
     iqs = data.get("image_questions")
