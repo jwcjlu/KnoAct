@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 from email.utils import formatdate
 from urllib.parse import urlencode
@@ -60,6 +61,40 @@ def assemble_auth_url(api_key: str, api_secret: str) -> str:
     return f"{_XUNFEI_WSS}?{query}"
 
 
+_MAX_BYTES = 7000   # 讯飞单次请求的文本上限（UTF-8 字节），留出余量
+
+
+def _split_for_xunfei(text: str, max_bytes: int = _MAX_BYTES) -> list[str]:
+    """按句末标点把长文本切成单次请求吃得下的段，绝不静默截断。
+
+    原来的实现是 `if 超限: body = body[:2000]`——长课文会被**无声砍掉后半篇**，
+    家长听到的是念到一半突然停。这里改成切段后逐段合成再拼接 MP3。
+    """
+    if len(text.encode("utf-8")) <= max_bytes:
+        return [text]
+
+    parts = [p for p in re.split(r"(?<=[。！？；!?;])", text) if p.strip()]
+    out: list[str] = []
+    buf = ""
+    for part in parts:
+        # 单句本身就超限 → 按字节硬切（极少见：无标点的超长串）
+        while len(part.encode("utf-8")) > max_bytes:
+            cut = max_bytes
+            while len(part[:cut].encode("utf-8")) > max_bytes:
+                cut -= 1
+            out.append(part[:cut])
+            part = part[cut:]
+        if len((buf + part).encode("utf-8")) <= max_bytes:
+            buf += part
+            continue
+        if buf.strip():
+            out.append(buf)
+        buf = part
+    if buf.strip():
+        out.append(buf)
+    return out
+
+
 def synthesize_xunfei(
     *,
     text: str,
@@ -70,8 +105,6 @@ def synthesize_xunfei(
     speed: float = 1.0,
     timeout: float = 30.0,
 ) -> bytes:
-    import websocket
-
     app_id = (app_id or "").strip()
     api_key = (api_key or "").strip()
     api_secret = (api_secret or "").strip()
@@ -80,8 +113,29 @@ def synthesize_xunfei(
     body = (text or "").strip()
     if not body:
         raise ValueError("合成文本为空")
-    if len(body.encode("utf-8")) > 7900:
-        body = body[:2000]
+
+    chunks = _split_for_xunfei(body)
+    audio = bytearray()
+    for chunk in chunks:
+        audio.extend(_synthesize_once(
+            text=chunk, app_id=app_id, api_key=api_key,
+            api_secret=api_secret, voice=voice, speed=speed, timeout=timeout,
+        ))
+    return bytes(audio)
+
+
+def _synthesize_once(
+    *,
+    text: str,
+    app_id: str,
+    api_key: str,
+    api_secret: str,
+    voice: str = "",
+    speed: float = 1.0,
+    timeout: float = 30.0,
+) -> bytes:
+    """单次 WebSocket 合成（text 必须已在字节上限内）。"""
+    import websocket
 
     url = assemble_auth_url(api_key, api_secret)
     vcn = map_xunfei_voice(voice)
@@ -96,7 +150,7 @@ def synthesize_xunfei(
         },
         "data": {
             "status": 2,
-            "text": base64.b64encode(body.encode("utf-8")).decode("ascii"),
+            "text": base64.b64encode(text.encode("utf-8")).decode("ascii"),
         },
     }
     ws = websocket.create_connection(url, timeout=timeout)

@@ -4191,8 +4191,11 @@ async function testVoice(){
   toast('正在合成试听语音…');
   const sample = '你好，这是语音合成测试';
   try{
+    // 带上当前配置的语速：后端没显式传 speed 时会回落到库里已保存的值，
+    // 但试听是「保存前」的预览，必须用滑块当前值才能听出真实效果。
+    const sp = encodeURIComponent(String(ttsConfig.speed || 1));
     const r = await fetch(
-      `${API}/api/tts/synthesize?text=${encodeURIComponent(sample)}`,
+      `${API}/api/tts/synthesize?text=${encodeURIComponent(sample)}&speed=${sp}`,
       {headers: authHeaders()}
     );
   if(r.status === 401){
