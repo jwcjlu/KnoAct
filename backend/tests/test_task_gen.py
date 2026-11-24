@@ -380,7 +380,71 @@ def test_dictation_due_cap_and_new_floor():
     got = {w["word"] for w in words}
     assert "未学课词" not in got
     assert {"白鹭", "矗立"} <= got
+    # 池里只有 2 个词（都在到期档），没有更多可补 —— 不硬凑
     assert len(words) == 2
+    db.close()
+
+
+def test_dictation_new_words_fill_remaining_slots():
+    r"""`new_floor` 是**下限**不是上限：新课当天应把每日量吃满。
+
+    旧实现写 `new_words[...][:new_n]`，把 floor(7*0.3)=2 当上限，
+    而轮转档又排除新词 → 新课只出 2 个词、剩余 5 个名额空着。
+    线上《少年中国说》生词听写只有 2 个就是这条 bug。
+    """
+    db = SessionLocal()
+    uid, l1_id = _setup(db)  # 第1课已有「白鹭」「矗立」两个新词
+    lesson = db.query(Lesson).filter_by(id=l1_id).first()
+    _add_words(db, lesson, ["潜", "渊", "腾", "震惶", "鹰隼"])  # 共 7 个新词
+    db.add(ChildConfig(user_id=uid, key="task_dictation_count_语文", value="7"))
+    db.add(ChildConfig(user_id=uid, key="task_dictation_new_floor", value="0.3"))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    words = json.loads(t.content)
+    assert len(words) == 7, f"新课应吃满 7 个，实际 {len(words)}：{words}"
+    assert "新课 7" in t.detail, t.detail
+    db.close()
+
+
+def test_dictation_new_floor_still_guaranteed():
+    """有到期词时，新词仍要保住 new_floor 下限，不能被复习档挤没。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    lesson = db.query(Lesson).filter_by(id=l1_id).first()
+    # 再造 8 个词，池子共 10 个
+    _add_words(db, lesson, [f"词{i}" for i in range(8)])
+    db.add(ChildConfig(user_id=uid, key="task_dictation_count_语文", value="10"))
+    db.add(ChildConfig(user_id=uid, key="task_dictation_new_floor", value="0.3"))
+    db.flush()
+
+    all_wb = db.query(WordBank).filter_by(lesson_id=l1_id).all()
+    # 前 8 个设为到期（复习档），最后 2 个保持新词
+    for wb in all_wb[:8]:
+        db.add(WordMastery(word_bank_id=wb.id, user_id=uid, mastery=0.1,
+                           next_review_at=datetime.utcnow() - timedelta(days=1),
+                           attempts=json.dumps([True])))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    words = json.loads(t.content)
+
+    # 新词必须全部入选（这是 new_floor 的保障语义）
+    new_ids = {x.id for x in all_wb[8:]}
+    new_in_task = [w for w in words if w["id"] in new_ids]
+    assert len(new_in_task) == 2, f"两个新词都应入选：{words}"
+
+    # 到期档受 due_cap=ceil(10*0.5)=5 约束，不会把 8 个到期词全放进来
+    due_ids = {x.id for x in all_wb[:8]}
+    due_in_task = [w for w in words if w["id"] in due_ids]
+    assert len(due_in_task) == 5, f"到期档应被截到 5 个：{words}"
+
+    # 合计 5+2=7：池里没有轮转档可补，剩余名额空着（due_cap 有意压制复习量）
+    assert len(words) == 7, f"实际 {len(words)}：{words}"
     db.close()
 
 

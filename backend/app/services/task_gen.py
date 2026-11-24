@@ -72,8 +72,8 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
       的全部 WordBank（未学课不进池，已学课永不踢出）。
     - 四档优先级：到期词 -> 错词 -> 新词 -> 轮转补位。
       - 到期词（next_review_at<=now）+ 错词（mistake_count>0 未到期）合计受 due_n 上限。
-      - 新词（无 WordMastery 或 attempts 为空）受 new_n 下限保障。
-      - 轮转词（已考过、没错、未到期，含已掌握）按「最久没考」补满 count。
+      - 新词（无 WordMastery 或 attempts 为空）受 new_n **下限**保障，且优先吃满剩余名额。
+      - 轮转词（已考过、没错、未到期，含已掌握）在新词用尽后才补位。
     - 所有词永不移出（B2）；已掌握的词靠轮转档回来。
     """
     import math
@@ -128,8 +128,13 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
 
     picked_ids = {w.id for w in picked}
 
-    new_words = [w for w in words if _is_new(w) and w.id not in picked_ids][:new_n]
-    picked += new_words
+    # 新词档：`new_n` 是**下限**（配置项名就叫「新课生词下限比例」），不是上限。
+    # 剩余名额优先给新词——学新课才是目标；新词不够了才轮到轮转词。
+    # 旧实现写作 `new_words[...][:new_n]`，把下限当上限用：新课当天只出
+    # floor(7*0.3)=2 个词，而轮转档又排除新词，剩下的名额就空着（2/7）。
+    new_candidates = [w for w in words if _is_new(w) and w.id not in picked_ids]
+    take_new = max(new_n, count - len(picked))
+    picked += new_candidates[:take_new]
     picked_ids = {w.id for w in picked}
 
     if len(picked) < count:
