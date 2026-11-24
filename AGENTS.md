@@ -79,7 +79,8 @@ docker-compose 部署用内置的 MySQL 8.4（长文本列在 MySQL 上为 MEDIU
 
 两条硬约束：**成功指标必须落在已有数据表上**（`WordMastery` /
 `KnowledgeMastery` / `AnswerRecord` / `BrainGameResult` 等），落不上去说明测不出
-东西，先别做；**不得用 A 类型标准要求 B 类型内容**，也不得用积分/时长代表掌握度。
+东西，先别做；**不得用探究型标准要求识记型内容，也不得用识记型标准放过探究型
+内容**，更不得用积分/时长代表掌握度。
 
 ## Architecture（现状）
 
