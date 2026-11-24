@@ -632,12 +632,16 @@ v2 只按内容类型分层，缺了**年龄**。最典型的是**反事实**：
 
 ## 5.5 迁移缺口（可推，零新表）
 
-`KnowledgePoint` 同时有 `original_sentence`（原文出处）和独立表述。对**同一知识点**测两次：
+`KnowledgePointPool` 的 `extra`（JSON，含 `example` 原文句子）与 `content`（独立表述）可对**同一知识点**测两次：
 
 | 呈现方式 | 测什么 |
 | --- | --- |
-| 带原文语境 | 语境匹配 |
-| 脱离原文，换个情境 | 迁移 |
+| 带 `example` 原文语境 | 语境匹配 |
+| **脱离原文，换个情境** | 迁移 |
+
+> **注（v4.1 更正）**：本节原文写作 `KnowledgePoint.original_sentence`，与实际不符——
+> `KnowledgePoint` 只有 `content` 一个正文字段，全库无 `original_sentence`。
+> 真正带原文的是 `KnowledgePointPool.extra` 里的 `example`。
 
 **两者正确率差 = 迁移缺口。** `AnswerRecord.source_type` / `source_id` 已足够关联两次呈现。
 
@@ -1221,7 +1225,7 @@ SSE 逐 token 推流，表面「体验好」，实际：
 | 17 | 卡住无区分机制 | 无「说出卡在哪」通道 | 最小提示入口 + 按能否说出卡点分流 | M |
 | 18 | 原料层/思考层未标注 | 听写等无层级标识 | 报告与任务卡标注层级 | S |
 | 19 | **教 AI** | 无 | 差分判定 + 追问边界；需先有会话层 | L |
-| 20 | **迁移缺口** | 未测 | 同点两呈现（原文/脱离原文） | M |
+| 20 | **迁移缺口** | 未测 | 同点两呈现（原文/脱离原文）。**注**：spec 原文误称 `KnowledgePoint.original_sentence`，实际无此字段；应以 `KnowledgePointPool.extra` 的 `example` 为准 | M |
 | 21 | `Annotation` 画像 | 数据存着没人读 | 标注密度/粒度/类型进家长报告 | S |
 | 22 | **悬置率给教研** | 无 | 跨孩子聚合，反向检验拆课与出题质量 | M |
 | 23 | 积分与掌握度边界 | 未明写禁止混用 | 已在硬约束写死 | ✅ |

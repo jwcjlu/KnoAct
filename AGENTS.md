@@ -297,7 +297,7 @@ docker-compose 部署用内置的 MySQL 8.4（长文本列在 MySQL 上为 MEDIU
 | **答 + 指** | 答完让孩子指出「从哪里看出来的」（`quiz.py` 的 evidence 机制只对准了 AI，没对准孩子） | 同时堵住**蒙对**（答案对出处错）与**假阴性**（答案错出处对 = 理解对、表达弱） |
 | **错误诊断** | `AnswerRecord` 已存 `student_answer` 原文，但 `grade_answer` 返回 `bool` 就丢掉了；`Mistake` 每次再错**覆盖**上次错答，「同一错答案反复出现」存不下来 | **稳定的错误比偶然的正确信息量大得多**——它暴露完整错误路径。读已存数据即可，最便宜 |
 | **读 `duration_ms`** | 字段存在，全链路不读 | 1 秒答对 = 已自动化；40 秒答对 = 还在推导。**这两件事现在记成同一个 `is_correct=True`** |
-| **迁移缺口** | `KnowledgePoint` 同时有 `original_sentence` 与独立表述，可同点两呈现（带语境 / 脱离语境） | 正确率差 = 迁移缺口，`AnswerRecord.source_type/source_id` 已足够关联 |
+| **迁移缺口** | `KnowledgePointPool.extra` 的 `example`（原文）与 `content`（独立表述）可同点两呈现（带语境 / 脱离语境）。⚠️ 早期文档误写为 `KnowledgePoint.original_sentence`，该字段不存在 | 正确率差 = 迁移缺口，`AnswerRecord.source_type/source_id` 已足够关联 |
 | **标注画像** | `Annotation` 存了 `kind` / `quote` / 页号，**全系统唯一免费的注意力测量** | 划得越多越说明「没看出哪里重要」（选择性本质是排除）；划短=卡在解码层，有 `note`=在做加工 |
 
 **关于「教 AI」**（最强的判据之一，但成本最高）：孩子教 AI、AI 装不懂只追问，再用**孩子讲的内容**
