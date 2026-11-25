@@ -34,6 +34,17 @@ class FakeExpressionRepository extends ExpressionRepository {
     final error = createNoteError;
     if (error != null) throw error;
   }
+
+  @override
+  Future<ProbeResult> probe({
+    required int userId,
+    int? knowledgePointId,
+    int? itemId,
+    required String text,
+    required List<Map<String, String>> turns,
+  }) async {
+    return const ProbeResult(done: false, question: '你觉得为什么？');
+  }
 }
 
 Future<void> _pumpPage(
@@ -122,5 +133,59 @@ void main() {
 
     expect(find.byKey(const ValueKey('expression-input')), findsOneWidget);
     expect(find.text('讲完了'), findsOneWidget);
+  });
+
+  testWidgets('有正文时显示让 AI 问问我', (tester) async {
+    final repository = FakeExpressionRepository()
+      ..topicsResult = const [_topic];
+
+    await _pumpPage(tester, repository);
+    await tester.tap(find.text('比喻'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('expression-input')),
+      '我讲一讲比喻',
+    );
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('expression-probe-open')),
+      findsOneWidget,
+    );
+    expect(find.text('让 AI 问问我'), findsOneWidget);
+  });
+
+  testWidgets('无正文时不显示让 AI 问问我', (tester) async {
+    final repository = FakeExpressionRepository()
+      ..topicsResult = const [_topic];
+
+    await _pumpPage(tester, repository);
+    await tester.tap(find.text('比喻'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('expression-probe-open')),
+      findsNothing,
+    );
+    expect(find.text('让 AI 问问我'), findsNothing);
+  });
+
+  testWidgets('仅空白正文时不显示让 AI 问问我', (tester) async {
+    final repository = FakeExpressionRepository()
+      ..topicsResult = const [_topic];
+
+    await _pumpPage(tester, repository);
+    await tester.tap(find.text('比喻'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('expression-input')),
+      '   \n  ',
+    );
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('expression-probe-open')),
+      findsNothing,
+    );
   });
 }
