@@ -1,3 +1,4 @@
+from app.models import KnowledgePoint, WordBank
 from app.services.pdf_split import (
     is_cn_table_title,
     _page_is_cn_word_table,
@@ -5,7 +6,13 @@ from app.services.pdf_split import (
     _detect_chinese_word_tables,
 )
 from app.services import lesson_extract as le
-from app.services.lesson_extract import parse_chinese_table_text, extract_chinese_table_units
+from app.services.lesson_extract import (
+    apply_chinese_word_tables,
+    extract_chinese_table_units,
+    parse_chinese_table_text,
+)
+from app.services.word_kinds import KIND_PHRASE, KIND_RECOGNIZE
+from conftest import make_document, make_lesson
 
 _PHRASE_SAMPLE = """
 词语表
@@ -81,3 +88,45 @@ def test_extract_chinese_table_units(monkeypatch):
     monkeypatch.setattr(le, "_lesson_texts", lambda pdf, sp, ep, db=None: sample)
     by = extract_chinese_table_units("x.pdf", None, "phrase", 6, 6)
     assert [w["word"] for w in by[1]] == ["桂花", "故乡"]
+
+
+def test_replace_kind_only_leaves_other_kinds_and_points(db, monkeypatch):
+    doc = make_document(db, subject="语文", filename="语文.pdf", storage_path="x.pdf")
+    l1 = make_lesson(db, subject="语文", title="桂花雨", document=doc, start_page=7, end_page=9)
+    l2 = make_lesson(db, subject="语文", title="落花生", document=doc, start_page=10, end_page=11)
+    db.add_all([
+        WordBank(lesson_id=l1.id, subject="语文", word="杭", extra="", kind=KIND_RECOGNIZE),
+        WordBank(lesson_id=l1.id, subject="语文", word="旧词", extra="", kind=KIND_PHRASE),
+        KnowledgePoint(lesson_id=l1.id, subject="语文", category="本课", content="借物抒情"),
+    ])
+    db.commit()
+    monkeypatch.setattr(le, "_detect_chinese_word_tables", lambda *a, **k: [
+        {"kind": KIND_PHRASE, "title": "词语表", "start_page": 90, "end_page": 91},
+    ])
+    monkeypatch.setattr(le, "extract_chinese_table_units", lambda pdf, db, kind, sp, ep: {
+        1: [{"word": "桂花", "extra": "", "kind": KIND_PHRASE},
+            {"word": "故乡", "extra": "", "kind": KIND_PHRASE}],
+        2: [{"word": "播种", "extra": "", "kind": KIND_PHRASE}],
+    } if kind == KIND_PHRASE else {})
+    r = apply_chinese_word_tables(db, doc.id, "x.pdf")
+    assert r["words"] >= 3
+    phrases = [w.word for w in db.query(WordBank).filter_by(lesson_id=l1.id, kind=KIND_PHRASE)]
+    assert set(phrases) == {"桂花", "故乡"}
+    assert "旧词" not in phrases
+    assert db.query(WordBank).filter_by(lesson_id=l1.id, kind=KIND_RECOGNIZE, word="杭").count() == 1
+    assert db.query(KnowledgePoint).filter_by(lesson_id=l1.id).count() == 1
+
+
+def test_missing_lesson_no_does_not_clear_kind(db, monkeypatch):
+    doc = make_document(db, subject="语文", filename="语文.pdf", storage_path="x.pdf")
+    l3 = make_lesson(db, subject="语文", title="第三课", document=doc, start_page=12, end_page=14)
+    db.add(WordBank(lesson_id=l3.id, subject="语文", word="留", extra="", kind=KIND_PHRASE))
+    db.commit()
+    monkeypatch.setattr(le, "_detect_chinese_word_tables", lambda *a, **k: [
+        {"kind": KIND_PHRASE, "title": "词语表", "start_page": 90, "end_page": 90},
+    ])
+    monkeypatch.setattr(le, "extract_chinese_table_units", lambda *a, **k: {
+        4: [{"word": "地道", "extra": "", "kind": KIND_PHRASE}],
+    })
+    apply_chinese_word_tables(db, doc.id, "x.pdf")
+    assert db.query(WordBank).filter_by(lesson_id=l3.id, word="留").count() == 1
