@@ -187,7 +187,11 @@ git commit -m "feat(words): 迁移 kind 默认值并去重建唯一索引"
 1. `content = extract_lesson_content(...)`（words 已带 kind）。  
 2. **词表**：`_replace_lesson_words(db, lesson, content["words"])`（不要对词表再走会 detach 全部词的 purge，或 purge 时排除 words 后由 replace 处理——实现时选一种，结果须保留 `(word,kind)` 掌握度）。  
 3. 知识点 / 课文 / 阅读题：可继续先清再写（与现网一致）。  
-4. 英语 `kind=word`。
+4. 英语条目一律 `kind=word`。
+
+- [ ] **Step 4b: 英语书末词表路径**
+
+`apply_word_list` / `_ensure_word_list_lesson` / `_sync_word_list`（`_run_extract` 尾段）传入 `_replace_lesson_words` 的 items **必须补** `kind: "word"`，否则 replace 断言/缺字段会炸。
 
 - [ ] **Step 5: commit**
 
@@ -269,7 +273,10 @@ git commit -m "feat(dictation): 按 dictation_kinds 过滤听写与复习生词"
 - [ ] **`addLessonWord(kind)`**：新词默认该栏 kind。  
 - [ ] **`saveLessonEdit`**：body.words 每项提交 `kind`（及 id/word/extra）。  
 - [ ] 展示芯片按 kind 分组。  
-- [ ] 学习配置：三 checkbox ↔ `dictation_kinds_语文`；`loadLearningPreferences` / `saveLearningConfig` 读写该键。  
+- [ ] **学习配置 `dictation_kinds_语文`（勿走现有字符串套路）**：  
+  - `loadLearningPreferences`：对该键 **不要** `String(r[k])`；保留数组（或 `JSON.parse`），坏数据回落 `['recognize','write','phrase']`；勾选框按数组 includes 回显。  
+  - `saveLearningConfig`：由三 checkbox 组装 **JSON 数组**（如 `['write','phrase']`），经 `PUT /api/learning/preferences` 的 `dictation_kinds_语文` 字段提交；**禁止**写成 `'true'/'false'` 字符串。  
+  - 将该键纳入与其它听写参数相同的 `childKeys` / preferences 写入路径。  
 
 ```bash
 git commit -m "feat(parent-web): 生词三栏编辑与听写类型开关"
