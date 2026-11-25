@@ -110,6 +110,39 @@ def test_submit_returns_not_understood_when_both_wrong():
     assert r.json()["answers"][0]["verdict"] == "not_understood"
 
 
+def test_expression_weak_not_filed_into_mistake_book():
+    """理解对、表达错不该进错题本（否则会触发「再刷同类题」）。"""
+    from app.models import Mistake
+
+    quiz_id, headers = _seed_quiz(_one_question())
+    # 选错选项（1）但指对依据 → expression_weak
+    client.post("/api/quiz/submit", json={
+        "quiz_id": quiz_id,
+        "answers": [{"question_id": "q1", "selected_index": 1, "evidence_sentence": EVIDENCE}],
+    }, headers=headers)
+    db = SessionLocal()
+    try:
+        assert db.query(Mistake).count() == 0
+    finally:
+        db.close()
+
+
+def test_not_understood_is_filed_into_mistake_book():
+    """真没懂（答案错、依据也错）仍要进错题本。"""
+    from app.models import Mistake
+
+    quiz_id, headers = _seed_quiz(_one_question())
+    client.post("/api/quiz/submit", json={
+        "quiz_id": quiz_id,
+        "answers": [{"question_id": "q1", "selected_index": 1, "evidence_sentence": OTHER}],
+    }, headers=headers)
+    db = SessionLocal()
+    try:
+        assert db.query(Mistake).count() == 1
+    finally:
+        db.close()
+
+
 def test_submit_without_evidence_still_works_and_reports_unknown():
     # 旧客户端不传 evidence_sentence，判分必须与以前完全一致
     quiz_id, headers = _seed_quiz(_one_question())

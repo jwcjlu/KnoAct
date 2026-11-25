@@ -189,28 +189,23 @@ class _QuizQuestionBlock extends StatelessWidget {
     );
   }
 
-  _ChoiceVisual _choiceVisual(
+  ChoiceVisual _choiceVisual(
     int i,
     int? chosen,
     bool submitted,
     ReaderQuizGradeRow? r,
     int nChoices,
   ) {
-    if (!submitted) {
-      return chosen == i ? _ChoiceVisual.selected : _ChoiceVisual.normal;
-    }
-    final ci = r?.correctIndex;
-    final sel = r?.selectedIndex ?? chosen;
-    final hasKey = ci != null && ci >= 0 && ci < nChoices;
-    if (hasKey && i == ci) return _ChoiceVisual.correct;
-    if (hasKey && i == sel && sel != ci) return _ChoiceVisual.wrong;
-    if (!hasKey && r != null && r.isCorrect && i == sel) {
-      return _ChoiceVisual.correct;
-    }
-    if (!hasKey && r != null && !r.isCorrect && i == sel) {
-      return _ChoiceVisual.wrong;
-    }
-    return _ChoiceVisual.normal;
+    return choiceVisualFor(
+      index: i,
+      chosen: chosen,
+      submitted: submitted,
+      correctIndex: r?.correctIndex,
+      selectedIndex: r?.selectedIndex,
+      isCorrect: r?.isCorrect ?? false,
+      verdict: r?.verdict ?? 'unknown',
+      nChoices: nChoices,
+    );
   }
 }
 
@@ -255,13 +250,45 @@ class _EvidenceTile extends StatelessWidget {
   }
 }
 
-enum _ChoiceVisual { normal, selected, correct, wrong }
+enum ChoiceVisual { normal, selected, correct, softWrong, wrong }
+
+/// 选项的视觉状态（可单测）：expression_weak 时把「选错的项」降为中性色。
+ChoiceVisual choiceVisualFor({
+  required int index,
+  required int? chosen,
+  required bool submitted,
+  required int? correctIndex,
+  required int? selectedIndex,
+  required bool isCorrect,
+  required String verdict,
+  required int nChoices,
+}) {
+  if (!submitted) {
+    return chosen == index ? ChoiceVisual.selected : ChoiceVisual.normal;
+  }
+  final ci = correctIndex;
+  final sel = selectedIndex ?? chosen;
+  final hasKey = ci != null && ci >= 0 && ci < nChoices;
+  // 理解对、表达没到位：孩子其实找对了依据，不要用红叉否定他
+  final soft = verdict == 'expression_weak';
+  if (hasKey && index == ci) return ChoiceVisual.correct;
+  if (hasKey && index == sel && sel != ci) {
+    return soft ? ChoiceVisual.softWrong : ChoiceVisual.wrong;
+  }
+  if (!hasKey && isCorrect && index == sel) {
+    return ChoiceVisual.correct;
+  }
+  if (!hasKey && !isCorrect && index == sel) {
+    return soft ? ChoiceVisual.softWrong : ChoiceVisual.wrong;
+  }
+  return ChoiceVisual.normal;
+}
 
 class _ChoiceTile extends StatelessWidget {
   const _ChoiceTile({required this.label, required this.state, this.onTap});
 
   final String label;
-  final _ChoiceVisual state;
+  final ChoiceVisual state;
   final VoidCallback? onTap;
 
   @override
@@ -271,21 +298,25 @@ class _ChoiceTile extends StatelessWidget {
     Color fg = const Color(0xFF2B332E);
     String suffix = '';
     switch (state) {
-      case _ChoiceVisual.selected:
+      case ChoiceVisual.selected:
         border = AppColors.blue;
         bg = AppColors.blueSoft;
         fg = AppColors.blue;
-      case _ChoiceVisual.correct:
+      case ChoiceVisual.correct:
         border = AppColors.green;
         bg = const Color(0xFFE8F5E9);
         fg = AppColors.green;
         suffix = ' ✓';
-      case _ChoiceVisual.wrong:
+      case ChoiceVisual.softWrong:
+        border = const Color(0xFFB9C2BC);
+        bg = const Color(0xFFF3F5F3);
+        fg = const Color(0xFF5C6761);
+      case ChoiceVisual.wrong:
         border = const Color(0xFFC05B4A);
         bg = const Color(0xFFFDF0EE);
         fg = const Color(0xFFC05B4A);
         suffix = ' ✗';
-      case _ChoiceVisual.normal:
+      case ChoiceVisual.normal:
         break;
     }
     return Padding(
@@ -368,8 +399,8 @@ class ImmersiveDiagnosticCard extends ConsumerWidget {
                     _ChoiceTile(
                       label: o.label,
                       state: s.replies[q.id] == o.label
-                          ? _ChoiceVisual.selected
-                          : _ChoiceVisual.normal,
+                          ? ChoiceVisual.selected
+                          : ChoiceVisual.normal,
                       onTap: () => ctl.pickReply(q.id, o.label),
                     )
                 else

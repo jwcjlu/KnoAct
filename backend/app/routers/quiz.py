@@ -158,7 +158,9 @@ def quiz_submit(req: QuizSubmitReq, user: User = Depends(require_learning_user),
                 evidence_ok=r["evidence_ok"],
                 bucket_id=quiz.bucket_id,
             )
-            if not r["is_correct"]:
+            # 理解对、表达没到位（expression_weak）不进错题本：
+            # 他要的是帮他把话说清楚，不是再刷同类题。
+            if not r["is_correct"] and r.get("verdict") != "expression_weak":
                 record_quiz_mistake(db, quiz.user_id, q["prompt"], your, correct,
                                     q.get("knowledge_point_id"),
                                     bucket_id=quiz.bucket_id)

@@ -18,7 +18,7 @@ void main() {
 
     test('expression_weak 肯定理解，指向表达', () {
       final t = quizVerdictText('expression_weak');
-      expect(t, contains('位置'));
+      expect(t, contains('这句'));
       // 关键：不能打红叉式的否定
       expect(t.contains('错'), isFalse);
     });

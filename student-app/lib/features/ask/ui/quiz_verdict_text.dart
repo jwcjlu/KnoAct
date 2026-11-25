@@ -17,7 +17,7 @@ String quizVerdictText(String verdict) {
     case 'lucky':
       return '答案对了，但你说的这句不是依据。再看看哪句能支持它？';
     case 'expression_weak':
-      return '你找的位置是对的，只是话没说明白。你想说的是什么？';
+      return '你找的这句是对的，只是话没说明白。你想说的是什么？';
     case 'not_understood':
       return '我们回去再看看这一句。';
     default:
