@@ -29,6 +29,14 @@ class ExpressionTopic {
   }
 }
 
+class ProbeResult {
+  const ProbeResult({required this.done, required this.question, this.error});
+
+  final bool done;
+  final String question;
+  final String? error;
+}
+
 class ExpressionRepository {
   ExpressionRepository(this._api);
 
@@ -46,11 +54,40 @@ class ExpressionRepository {
         .toList();
   }
 
+  Future<ProbeResult> probe({
+    required int userId,
+    int? knowledgePointId,
+    int? itemId,
+    required String text,
+    required List<Map<String, String>> turns,
+  }) async {
+    assertExpressionNoteTarget(
+      knowledgePointId: knowledgePointId,
+      itemId: itemId,
+    );
+    final body = <String, dynamic>{
+      'user_id': userId,
+      'text': text,
+      'turns': turns,
+    };
+    if (knowledgePointId != null) body['knowledge_point_id'] = knowledgePointId;
+    if (itemId != null) body['item_id'] = itemId;
+    final response = asMap(
+      await _api.post('/api/expression/probe', body: body),
+    );
+    return ProbeResult(
+      done: response['done'] == true,
+      question: (response['question'] as String?) ?? '',
+      error: response['error'] as String?,
+    );
+  }
+
   Future<void> createNote({
     required int userId,
     int? knowledgePointId,
     int? itemId,
     required String text,
+    List<Map<String, String>>? probeTurns,
   }) async {
     assertExpressionNoteTarget(
       knowledgePointId: knowledgePointId,
@@ -59,6 +96,9 @@ class ExpressionRepository {
     final body = <String, dynamic>{'user_id': userId, 'text': text};
     if (knowledgePointId != null) body['knowledge_point_id'] = knowledgePointId;
     if (itemId != null) body['item_id'] = itemId;
+    if (probeTurns != null && probeTurns.isNotEmpty) {
+      body['probe_turns'] = probeTurns;
+    }
     await _api.post('/api/expression/notes', body: body);
   }
 }

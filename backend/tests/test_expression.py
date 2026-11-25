@@ -20,7 +20,7 @@ def test_expression_note_has_no_judgement_columns():
 def test_expression_note_required_columns_exist():
     cols = _cols()
     for name in ("id", "user_id", "bucket_id", "knowledge_point_id", "item_id",
-                 "title", "text", "created_at"):
+                 "title", "text", "probe_turns", "parent_hint", "created_at"):
         assert name in cols, f"缺列 {name}"
 
 
@@ -612,3 +612,120 @@ def test_unread_count_rejects_other_child():
     other_uid, _ = _seed_child(prefix="u8b")
     r = _client().get(f"/api/expression/unread-count?user_id={other_uid}", headers=h)
     assert r.status_code == 403
+
+
+def _probe_body(uid, kp_id, text="比喻就是把一件事说成另一件事", turns=None):
+    body = {
+        "user_id": uid,
+        "knowledge_point_id": kp_id,
+        "text": text,
+    }
+    if turns is not None:
+        body["turns"] = turns
+    return body
+
+
+def test_probe_requires_nonempty_text():
+    uid, h = _seed_child(prefix="pr1")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="pr1")
+    for bad in ("", "   ", "\n\n"):
+        r = _client().post(
+            "/api/expression/probe",
+            json=_probe_body(uid, kp_id, text=bad),
+            headers=h,
+        )
+        assert r.status_code == 400, f"{bad!r} 应被拒"
+
+
+def test_probe_returns_question_then_done_at_3():
+    uid, h = _seed_child(prefix="pr2")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="pr2")
+    r0 = _client().post(
+        "/api/expression/probe",
+        json=_probe_body(uid, kp_id),
+        headers=h,
+    )
+    assert r0.status_code == 200
+    j0 = r0.json()
+    assert j0["done"] is False
+    assert j0.get("question")
+
+    turns = [
+        {"q": "本体是什么？", "a": "被比喻的东西"},
+        {"q": "喻体呢？", "a": "用来比的"},
+        {"q": "相似点？", "a": "有共同点"},
+    ]
+    r3 = _client().post(
+        "/api/expression/probe",
+        json=_probe_body(uid, kp_id, turns=turns),
+        headers=h,
+    )
+    assert r3.status_code == 200
+    assert r3.json()["done"] is True
+    assert r3.json().get("question") in ("", None)
+
+
+def test_probe_rejects_grade_below_3():
+    uid, h = _seed_child(grade=2, prefix="pr3")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="pr3")
+    r = _client().post(
+        "/api/expression/probe",
+        json=_probe_body(uid, kp_id),
+        headers=h,
+    )
+    assert r.status_code == 403
+
+
+def test_probe_rejects_parent_actor():
+    from app.database import SessionLocal
+    from app.models import User
+
+    uid, _h = _seed_child(prefix="pr4")
+    kp_id = _seed_kp_with_mastery(uid, "借代", prefix="pr4")
+    s = SessionLocal()
+    parent_h = auth_headers(s.get(User, s.get(User, uid).parent_id))
+    s.close()
+    r = _client().post(
+        "/api/expression/probe",
+        json=_probe_body(uid, kp_id),
+        headers=parent_h,
+    )
+    assert r.status_code == 403
+
+
+def test_create_note_without_probe_has_empty_hint():
+    uid, h = _seed_child(prefix="hint0")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="hint0")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "只写一段",
+    }, headers=h)
+    assert r.status_code == 200
+    notes = _client().get(f"/api/expression/notes?user_id={uid}", headers=h).json()["notes"]
+    assert notes[0]["parent_hint"] in ("", None)
+    assert "probe_turns" not in notes[0]
+
+
+def test_create_note_with_probe_turns_may_set_hint():
+    uid, h = _seed_child(prefix="hint1")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="hint1")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "比喻就是像",
+        "probe_turns": [{"q": "什么时候不算？", "a": "不知道"}],
+    }, headers=h)
+    assert r.status_code == 200
+    notes = _client().get(f"/api/expression/notes?user_id={uid}", headers=h).json()["notes"]
+    n = notes[0]
+    assert "parent_hint" in n
+    assert "probe_turns" not in n
+    for bad in ("很好", "掌握", "正确", "错误"):
+        assert bad not in (n.get("parent_hint") or "")
+
+
+def test_create_note_rejects_too_many_probe_turns():
+    uid, h = _seed_child(prefix="hint2")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="hint2")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "x",
+        "probe_turns": [{"q": "q", "a": "a"}] * 4,
+    }, headers=h)
+    assert r.status_code == 400

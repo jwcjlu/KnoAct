@@ -1,5 +1,7 @@
 # 孩子讲一遍（表达练习）设计
 
+> 可选 AI 追问旁路见 [expression-probe-ai-design.md](./2026-11-25-expression-probe-ai-design.md)。
+
 日期：2026-11-25
 状态：已确认（brainstorming），v6 — 最简版
 范围：`2026-11-24-learning-first-principles-design.md` 待整改 #19「教 AI」的**最小可行版本**。

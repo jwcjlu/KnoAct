@@ -643,7 +643,7 @@ class AnswerRecord(Base):
 class ExpressionNote(Base):
     """孩子用自己的话讲一个知识点的记录。
 
-    刻意不含 verdict / score / ai_* 字段：本功能不做判定，也不做 AI 交互。
+    刻意不含 verdict / score / ai_* 字段：本功能不做判定；可选追问痕迹与家长提示不算判定。
     详见 docs/superpowers/specs/2026-11-25-feynman-teach-ai-design.md 的「五轮失败记录」。
     """
     __tablename__ = "expression_notes"
@@ -661,6 +661,10 @@ class ExpressionNote(Base):
     # 冗余存标题：知识点被删后家长端仍可读
     title: Mapped[str] = mapped_column(String(255), default="")
     text: Mapped[str] = mapped_column(LongText)
+    # 追问 Q/A JSON 数组文本，未追问为 ""；不是判定结果
+    probe_turns: Mapped[str] = mapped_column(LongText, default="")
+    # 一句「可能卡在…」；未追问或生成失败为 ""
+    parent_hint: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

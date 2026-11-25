@@ -17,8 +17,15 @@ class FakeExpressionRepository extends ExpressionRepository {
 
   Object? topicsError;
   Object? createNoteError;
+  Object? probeError;
   List<ExpressionTopic> topicsResult = const [];
   int createNoteCalls = 0;
+  int probeCalls = 0;
+  ProbeResult nextProbeResult = const ProbeResult(
+    done: false,
+    question: '问一问？',
+  );
+  List<Map<String, String>>? lastCreateProbeTurns;
 
   @override
   Future<List<ExpressionTopic>> topics({required int userId}) async {
@@ -28,13 +35,33 @@ class FakeExpressionRepository extends ExpressionRepository {
   }
 
   @override
+  Future<ProbeResult> probe({
+    required int userId,
+    int? knowledgePointId,
+    int? itemId,
+    required String text,
+    required List<Map<String, String>> turns,
+  }) async {
+    probeCalls++;
+    assertExpressionNoteTarget(
+      knowledgePointId: knowledgePointId,
+      itemId: itemId,
+    );
+    final err = probeError;
+    if (err != null) throw err;
+    return nextProbeResult;
+  }
+
+  @override
   Future<void> createNote({
     required int userId,
     int? knowledgePointId,
     int? itemId,
     required String text,
+    List<Map<String, String>>? probeTurns,
   }) async {
     createNoteCalls++;
+    lastCreateProbeTurns = probeTurns;
     assertExpressionNoteTarget(
       knowledgePointId: knowledgePointId,
       itemId: itemId,
@@ -169,6 +196,93 @@ void main() {
       await ctl.loadTopics();
 
       expect(container.read(expressionControllerProvider).error, 'failed');
+    });
+
+    test('openProbe with empty text does not call probe', () async {
+      final repo = FakeExpressionRepository();
+      final container = _container(repo);
+      addTearDown(container.dispose);
+
+      final ctl = container.read(expressionControllerProvider.notifier);
+      ctl.select(_topic);
+      ctl.setText('   ');
+      await ctl.openProbe();
+
+      expect(repo.probeCalls, 0);
+      expect(container.read(expressionControllerProvider).probeOpen, isFalse);
+    });
+
+    test('after 3 answers no further probe API calls', () async {
+      final repo = FakeExpressionRepository()
+        ..nextProbeResult = const ProbeResult(
+          done: false,
+          question: '第二问？',
+        );
+      final container = _container(repo);
+      addTearDown(container.dispose);
+
+      final ctl = container.read(expressionControllerProvider.notifier);
+      ctl.select(_topic);
+      ctl.setText('我讲一讲比喻');
+      await ctl.openProbe();
+      expect(repo.probeCalls, 1);
+
+      await ctl.answerProbe('答一');
+      expect(repo.probeCalls, 2);
+
+      repo.nextProbeResult = const ProbeResult(
+        done: false,
+        question: '第三问？',
+      );
+      await ctl.answerProbe('答二');
+      expect(repo.probeCalls, 3);
+
+      await ctl.answerProbe('答三');
+      expect(repo.probeCalls, 3);
+      final s = container.read(expressionControllerProvider);
+      expect(s.probeDone, isTrue);
+      expect(s.probeTurns.length, 3);
+    });
+
+    test('submit includes probeTurns when present', () async {
+      final repo = FakeExpressionRepository();
+      final container = _container(repo);
+      addTearDown(container.dispose);
+
+      final ctl = container.read(expressionControllerProvider.notifier);
+      ctl.select(_topic);
+      ctl.setText('终稿内容');
+      await ctl.openProbe();
+      await ctl.answerProbe('我的回答');
+
+      await ctl.submit();
+
+      expect(repo.createNoteCalls, 1);
+      expect(repo.lastCreateProbeTurns, [
+        {'q': '问一问？', 'a': '我的回答'},
+      ]);
+    });
+
+    test('probe failure sets probeError but submit can still succeed', () async {
+      final repo = FakeExpressionRepository()
+        ..probeError = ApiException('unavailable', statusCode: 503);
+      final container = _container(repo);
+      addTearDown(container.dispose);
+
+      final ctl = container.read(expressionControllerProvider.notifier);
+      ctl.select(_topic);
+      ctl.setText('讲完了');
+      await ctl.openProbe();
+
+      expect(container.read(expressionControllerProvider).probeError, 'unavailable');
+
+      repo.probeError = null;
+      await ctl.submit();
+
+      expect(repo.createNoteCalls, 1);
+      final s = container.read(expressionControllerProvider);
+      expect(s.done, isTrue);
+      expect(repo.lastCreateProbeTurns, isNull);
     });
 
     test('again clears selected text done keeps topics', () async {
