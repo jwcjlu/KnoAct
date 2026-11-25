@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/text_utils.dart';
 import '../../../core/theme.dart';
+import '../ask_controller.dart';
 import '../data/read_ask_cards_models.dart';
 import '../immersive_quiz_controller.dart';
+import 'quiz_verdict_text.dart';
 
 /// Web `.quiz-card`（沉浸阅读对话区内的测验）
 class ImmersiveQuizCard extends ConsumerWidget {
@@ -13,6 +16,7 @@ class ImmersiveQuizCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final s = ref.watch(immersiveQuizProvider);
     final ctl = ref.read(immersiveQuizProvider.notifier);
+    final sentences = splitSentences(ref.watch(askControllerProvider).context);
     if (!s.active) return const SizedBox.shrink();
 
     return Padding(
@@ -36,6 +40,10 @@ class ImmersiveQuizCard extends ConsumerWidget {
                   submitted: s.submitted,
                   result: s.submitted ? _resultFor(s, qi) : null,
                   onPick: (i) => ctl.pickAnswer(s.questions[qi].id, i),
+                  sentences: sentences,
+                  pickedEvidence: s.evidencePicks[s.questions[qi].id],
+                  onPickEvidence: (sent) =>
+                      ctl.pickEvidence(s.questions[qi].id, sent),
                 ),
               const SizedBox(height: 8),
               if (s.submitted)
@@ -45,8 +53,16 @@ class ImmersiveQuizCard extends ConsumerWidget {
                 )
               else
                 FilledButton(
-                  onPressed: s.busy || s.answers.length < s.questions.length ? null : ctl.submit,
-                  child: s.busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('提交答案'),
+                  onPressed: s.busy || s.answers.length < s.questions.length
+                      ? null
+                      : ctl.submit,
+                  child: s.busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('提交答案'),
                 ),
             ],
           ),
@@ -72,6 +88,9 @@ class _QuizQuestionBlock extends StatelessWidget {
     required this.submitted,
     required this.result,
     required this.onPick,
+    required this.sentences,
+    required this.pickedEvidence,
+    required this.onPickEvidence,
   });
 
   final int index;
@@ -80,48 +99,196 @@ class _QuizQuestionBlock extends StatelessWidget {
   final bool submitted;
   final ReaderQuizGradeRow? result;
   final ValueChanged<int> onPick;
+  final List<String> sentences;
+  final String? pickedEvidence;
+  final ValueChanged<String> onPickEvidence;
 
   @override
   Widget build(BuildContext context) {
+    final verdict = result?.verdict ?? 'unknown';
+    final showEvidencePicker = sentences.isNotEmpty && !submitted;
+    final verdictText = submitted ? quizVerdictText(verdict) : '';
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(question.prompt, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.45)),
+          Text(
+            question.prompt,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              height: 1.45,
+            ),
+          ),
           for (var i = 0; i < question.choices.length; i++)
             _ChoiceTile(
               label: '${String.fromCharCode(65 + i)}. ${question.choices[i]}',
-              state: _choiceVisual(i, chosen, submitted, result, question.choices.length),
+              state: _choiceVisual(
+                i,
+                chosen,
+                submitted,
+                result,
+                question.choices.length,
+              ),
               onTap: submitted ? null : () => onPick(i),
+            ),
+          if (showEvidencePicker && chosen != null) ...[
+            const SizedBox(height: 8),
+            const Text(
+              '👆 你是从课文哪一句看出来的？点亮那一句',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.gray,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 168),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var si = 0; si < sentences.length; si++)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: _EvidenceTile(
+                          label: sentences[si],
+                          selected: pickedEvidence == sentences[si],
+                          onTap: () => onPickEvidence(sentences[si]),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            if (sentences.length > 4)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '共 ${sentences.length} 句，可以上下滑动找一句',
+                  style: const TextStyle(fontSize: 11, color: AppColors.gray),
+                ),
+              ),
+          ],
+          if (verdictText.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                verdictText,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: quizVerdictColor(verdict),
+                  height: 1.5,
+                ),
+              ),
             ),
         ],
       ),
     );
   }
 
-  _ChoiceVisual _choiceVisual(int i, int? chosen, bool submitted, ReaderQuizGradeRow? r, int nChoices) {
-    if (!submitted) {
-      return chosen == i ? _ChoiceVisual.selected : _ChoiceVisual.normal;
-    }
-    final ci = r?.correctIndex;
-    final sel = r?.selectedIndex ?? chosen;
-    final hasKey = ci != null && ci >= 0 && ci < nChoices;
-    if (hasKey && i == ci) return _ChoiceVisual.correct;
-    if (hasKey && i == sel && sel != ci) return _ChoiceVisual.wrong;
-    if (!hasKey && r != null && r.isCorrect && i == sel) return _ChoiceVisual.correct;
-    if (!hasKey && r != null && !r.isCorrect && i == sel) return _ChoiceVisual.wrong;
-    return _ChoiceVisual.normal;
+  ChoiceVisual _choiceVisual(
+    int i,
+    int? chosen,
+    bool submitted,
+    ReaderQuizGradeRow? r,
+    int nChoices,
+  ) {
+    return choiceVisualFor(
+      index: i,
+      chosen: chosen,
+      submitted: submitted,
+      correctIndex: r?.correctIndex,
+      selectedIndex: r?.selectedIndex,
+      isCorrect: r?.isCorrect ?? false,
+      verdict: r?.verdict ?? 'unknown',
+      nChoices: nChoices,
+    );
   }
 }
 
-enum _ChoiceVisual { normal, selected, correct, wrong }
+class _EvidenceTile extends StatelessWidget {
+  const _EvidenceTile({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? AppColors.blueSoft : Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected ? AppColors.blue : const Color(0xFFE3E6E2),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: selected ? AppColors.blue : const Color(0xFF2B332E),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum ChoiceVisual { normal, selected, correct, softWrong, wrong }
+
+/// 选项的视觉状态（可单测）：expression_weak 时把「选错的项」降为中性色。
+ChoiceVisual choiceVisualFor({
+  required int index,
+  required int? chosen,
+  required bool submitted,
+  required int? correctIndex,
+  required int? selectedIndex,
+  required bool isCorrect,
+  required String verdict,
+  required int nChoices,
+}) {
+  if (!submitted) {
+    return chosen == index ? ChoiceVisual.selected : ChoiceVisual.normal;
+  }
+  final ci = correctIndex;
+  final sel = selectedIndex ?? chosen;
+  final hasKey = ci != null && ci >= 0 && ci < nChoices;
+  // 理解对、表达没到位：孩子其实找对了依据，不要用红叉否定他
+  final soft = verdict == 'expression_weak';
+  if (hasKey && index == ci) return ChoiceVisual.correct;
+  if (hasKey && index == sel && sel != ci) {
+    return soft ? ChoiceVisual.softWrong : ChoiceVisual.wrong;
+  }
+  if (!hasKey && isCorrect && index == sel) {
+    return ChoiceVisual.correct;
+  }
+  if (!hasKey && !isCorrect && index == sel) {
+    return soft ? ChoiceVisual.softWrong : ChoiceVisual.wrong;
+  }
+  return ChoiceVisual.normal;
+}
 
 class _ChoiceTile extends StatelessWidget {
   const _ChoiceTile({required this.label, required this.state, this.onTap});
 
   final String label;
-  final _ChoiceVisual state;
+  final ChoiceVisual state;
   final VoidCallback? onTap;
 
   @override
@@ -131,21 +298,25 @@ class _ChoiceTile extends StatelessWidget {
     Color fg = const Color(0xFF2B332E);
     String suffix = '';
     switch (state) {
-      case _ChoiceVisual.selected:
+      case ChoiceVisual.selected:
         border = AppColors.blue;
         bg = AppColors.blueSoft;
         fg = AppColors.blue;
-      case _ChoiceVisual.correct:
+      case ChoiceVisual.correct:
         border = AppColors.green;
         bg = const Color(0xFFE8F5E9);
         fg = AppColors.green;
         suffix = ' ✓';
-      case _ChoiceVisual.wrong:
+      case ChoiceVisual.softWrong:
+        border = const Color(0xFFB9C2BC);
+        bg = const Color(0xFFF3F5F3);
+        fg = const Color(0xFF5C6761);
+      case ChoiceVisual.wrong:
         border = const Color(0xFFC05B4A);
         bg = const Color(0xFFFDF0EE);
         fg = const Color(0xFFC05B4A);
         suffix = ' ✗';
-      case _ChoiceVisual.normal:
+      case ChoiceVisual.normal:
         break;
     }
     return Padding(
@@ -163,7 +334,10 @@ class _ChoiceTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: border),
             ),
-            child: Text('$label$suffix', style: TextStyle(fontSize: 13, color: fg)),
+            child: Text(
+              '$label$suffix',
+              style: TextStyle(fontSize: 13, color: fg),
+            ),
           ),
         ),
       ),
@@ -181,7 +355,9 @@ class ImmersiveDiagnosticCard extends ConsumerWidget {
     final ctl = ref.read(immersiveDiagnosticProvider.notifier);
     if (!s.active) return const SizedBox.shrink();
 
-    final allAnswered = s.questions.every((q) => (s.replies[q.id] ?? '').trim().isNotEmpty);
+    final allAnswered = s.questions.every(
+      (q) => (s.replies[q.id] ?? '').trim().isNotEmpty,
+    );
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -199,16 +375,32 @@ class ImmersiveDiagnosticCard extends ConsumerWidget {
               if (s.intro.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(s.intro, style: const TextStyle(fontSize: 13, color: AppColors.gray, height: 1.5)),
+                  child: Text(
+                    s.intro,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.gray,
+                      height: 1.5,
+                    ),
+                  ),
                 ),
               for (final q in s.questions) ...[
-                Text(q.prompt, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.45)),
+                Text(
+                  q.prompt,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    height: 1.45,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 if (q.options.isNotEmpty)
                   for (final o in q.options)
                     _ChoiceTile(
                       label: o.label,
-                      state: s.replies[q.id] == o.label ? _ChoiceVisual.selected : _ChoiceVisual.normal,
+                      state: s.replies[q.id] == o.label
+                          ? ChoiceVisual.selected
+                          : ChoiceVisual.normal,
                       onTap: () => ctl.pickReply(q.id, o.label),
                     )
                 else
@@ -216,7 +408,9 @@ class ImmersiveDiagnosticCard extends ConsumerWidget {
                     decoration: const InputDecoration(
                       hintText: '你的回答…',
                       isDense: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(10)),
+                      ),
                     ),
                     onChanged: (v) => ctl.pickReply(q.id, v),
                   ),
@@ -224,7 +418,13 @@ class ImmersiveDiagnosticCard extends ConsumerWidget {
               ],
               FilledButton(
                 onPressed: !allAnswered || s.busy ? null : ctl.submit,
-                child: s.busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('继续'),
+                child: s.busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('继续'),
               ),
             ],
           ),

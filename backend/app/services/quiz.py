@@ -170,6 +170,59 @@ def grade_answers(questions: list[dict], answers: list[dict]) -> list[dict]:
     return out
 
 
+VERDICT_CONFIRMED = "confirmed"
+VERDICT_LUCKY = "lucky"
+VERDICT_EXPRESSION_WEAK = "expression_weak"
+VERDICT_NOT_UNDERSTOOD = "not_understood"
+VERDICT_UNKNOWN = "unknown"
+
+
+def evidence_matches(chosen: str, correct: str) -> bool:
+    """孩子指出的句子是否等价于（或包含于）支持答案的原文。
+
+    两边都用 evidence_key 归一化（去空白、去行号、去连字符断词），再做双向包含：
+    孩子可能只点中原文的一部分，也可能原文比孩子点的短。
+    """
+    chosen_key = evidence_key(chosen or "")
+    correct_key = evidence_key(correct or "")
+    if not chosen_key or not correct_key:
+        return False
+    return chosen_key in correct_key or correct_key in chosen_key
+
+
+def grade_verdict(
+    answer_correct: bool,
+    chosen_evidence: str,
+    correct_evidence: str,
+) -> str:
+    """四态判定：答案对错 × 出处对错。
+
+    与 spec 5.1 的 2×2 一一对应。任一侧无法判定（孩子没指 / 题目没 evidence /
+    归一化后只剩空白与连字符）都返回 unknown，不猜测——这与「允许未决」一致：
+    证据不足时不强行判决。
+    """
+    if not evidence_key(chosen_evidence or "") or not evidence_key(correct_evidence or ""):
+        return VERDICT_UNKNOWN
+    evidence_ok = evidence_matches(chosen_evidence, correct_evidence)
+    if answer_correct and evidence_ok:
+        return VERDICT_CONFIRMED
+    if answer_correct:
+        return VERDICT_LUCKY
+    if evidence_ok:
+        return VERDICT_EXPRESSION_WEAK
+    return VERDICT_NOT_UNDERSTOOD
+
+
+def verdict_evidence_ok(verdict: str) -> bool | None:
+    """verdict 对应的「出处是否找对」。unknown = 无法判定（None），不是找错。
+
+    集中在这里而不是在路由里反推，是为了避免新增 verdict 时静默落成 False。
+    """
+    if verdict == VERDICT_UNKNOWN:
+        return None
+    return verdict in (VERDICT_CONFIRMED, VERDICT_EXPRESSION_WEAK)
+
+
 def record_quiz_mistake(db: Session, user_id: int, question: str,
                         your_answer: str, correct_answer: str,
                         kp_id: int | None = None,

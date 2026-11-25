@@ -632,6 +632,9 @@ class AnswerRecord(Base):
     is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
     difficulty: Mapped[str] = mapped_column(String(16), default="")
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 答 + 指：孩子指出的出处原文与是否正确（None = 本次未指出处 / 题目无 evidence）
+    evidence_text: Mapped[str] = mapped_column(LongText, default="")
+    evidence_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     source_type: Mapped[str] = mapped_column(String(16), default="")
     source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

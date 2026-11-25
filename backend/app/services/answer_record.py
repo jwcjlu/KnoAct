@@ -16,6 +16,8 @@ def record_answer(
     is_correct: bool = False,
     difficulty: str = "",
     duration_ms: int | None = None,
+    evidence_text: str = "",
+    evidence_ok: bool | None = None,
     source_type: str = "",
     source_id: int | None = None,
     lesson_id: int | None = None,
@@ -26,7 +28,8 @@ def record_answer(
         module=module, lesson_id=lesson_id, question=question or "",
         student_answer=student_answer or "", correct_answer=correct_answer or "",
         is_correct=is_correct, difficulty=difficulty or "",
-        duration_ms=duration_ms, source_type=source_type, source_id=source_id,
+        duration_ms=duration_ms, evidence_text=evidence_text or "", evidence_ok=evidence_ok,
+        source_type=source_type, source_id=source_id,
     )
     db.add(row)
     return row

@@ -18,3 +18,43 @@ def test_answer_record_fields(setup_db, db):
     assert got.source_type == "word_bank"
     assert got.source_id == 7
     assert got.created_at is not None
+
+
+def test_record_answer_persists_evidence_fields(db):
+    from conftest import make_user
+
+    child = make_user(db)
+    row = record_answer(
+        db,
+        user_id=child.id,
+        subject="语文",
+        module="quiz",
+        question="「月亮像一条小船」用了什么修辞？",
+        student_answer="比喻",
+        correct_answer="比喻",
+        is_correct=True,
+        source_type="quiz",
+        source_id=None,
+        evidence_text="弯弯的月亮像一条小船。",
+        evidence_ok=True,
+    )
+    db.commit()
+
+    saved = db.get(AnswerRecord, row.id)
+    assert saved.evidence_text == "弯弯的月亮像一条小船。"
+    assert saved.evidence_ok is True
+
+
+def test_record_answer_evidence_defaults_to_empty(db):
+    from conftest import make_user
+
+    child = make_user(db)
+    row = record_answer(
+        db, user_id=child.id, subject="语文", module="quiz",
+        question="q", student_answer="a", correct_answer="a", is_correct=True,
+    )
+    db.commit()
+
+    saved = db.get(AnswerRecord, row.id)
+    assert saved.evidence_text == ""
+    assert saved.evidence_ok is None

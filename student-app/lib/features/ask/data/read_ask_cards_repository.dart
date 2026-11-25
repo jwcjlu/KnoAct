@@ -9,11 +9,13 @@ class ReadAskCardsRepository {
 
   final ApiClient _api;
 
-  Future<({int? quizId, List<ReaderQuizQuestion> questions, String? error})> generateQuiz({
-    required int lessonId,
-  }) async {
+  Future<({int? quizId, List<ReaderQuizQuestion> questions, String? error})>
+  generateQuiz({required int lessonId}) async {
     try {
-      final raw = await _api.post('/api/quiz/generate', body: {'lesson_id': lessonId});
+      final raw = await _api.post(
+        '/api/quiz/generate',
+        body: {'lesson_id': lessonId},
+      );
       final m = asMap(raw);
       final qs = m['questions'];
       final questions = <ReaderQuizQuestion>[];
@@ -24,9 +26,17 @@ class ReadAskCardsRepository {
         }
       }
       final quizId = m['quiz_id'] is num ? (m['quiz_id'] as num).toInt() : null;
-      return (quizId: quizId, questions: questions, error: questions.isEmpty ? '${m['detail'] ?? ''}' : null);
+      return (
+        quizId: quizId,
+        questions: questions,
+        error: questions.isEmpty ? '${m['detail'] ?? ''}' : null,
+      );
     } on ApiException catch (e) {
-      return (quizId: null, questions: const <ReaderQuizQuestion>[], error: e.message);
+      return (
+        quizId: null,
+        questions: const <ReaderQuizQuestion>[],
+        error: e.message,
+      );
     }
   }
 
@@ -35,6 +45,7 @@ class ReadAskCardsRepository {
     required List<ReaderQuizQuestion> questions,
     required Map<String, int> answers,
     required int durationMs,
+    Map<String, String> evidenceSentences = const {},
   }) async {
     final payload = [
       for (final q in questions)
@@ -42,20 +53,32 @@ class ReadAskCardsRepository {
           'question_id': q.id,
           'selected_index': answers[q.id],
           'duration_ms': durationMs,
+          if (evidenceSentences[q.id] != null &&
+              evidenceSentences[q.id]!.isNotEmpty)
+            'evidence_sentence': evidenceSentences[q.id],
         },
     ];
-    final raw = await _api.post('/api/quiz/submit', body: {'quiz_id': quizId, 'answers': payload});
+    final raw = await _api.post(
+      '/api/quiz/submit',
+      body: {'quiz_id': quizId, 'answers': payload},
+    );
     final m = asMap(raw);
     final rows = m['answers'];
     if (rows is! List) return const [];
-    return [for (final r in rows) ReaderQuizGradeRow.tryParse(r)].whereType<ReaderQuizGradeRow>().toList();
+    return [for (final r in rows) ReaderQuizGradeRow.tryParse(r)]
+        .whereType<ReaderQuizGradeRow>()
+        .toList();
   }
 
-  Future<({List<DiagnosticQuestion> questions, String intro})> fetchDiagnosticQuestions({
+  Future<({List<DiagnosticQuestion> questions, String intro})>
+  fetchDiagnosticQuestions({
     required int lessonId,
     required String context,
   }) async {
-    final raw = await _api.post('/api/ask/questions', body: {'lesson_id': lessonId, 'context': context});
+    final raw = await _api.post(
+      '/api/ask/questions',
+      body: {'lesson_id': lessonId, 'context': context},
+    );
     final m = asMap(raw);
     final qs = m['questions'];
     final questions = <DiagnosticQuestion>[];
@@ -73,17 +96,19 @@ class ReadAskCardsRepository {
     required String context,
     required Map<String, String> replies,
   }) async {
-    final raw = await _api.post('/api/ask/reply', body: {
-      'lesson_id': lessonId,
-      'context': context,
-      'replies': replies,
-    });
+    final raw = await _api.post(
+      '/api/ask/reply',
+      body: {'lesson_id': lessonId, 'context': context, 'replies': replies},
+    );
     final m = asMap(raw);
     final c = m['citations'];
-    final citations = c is List ? c.whereType<num>().map((n) => n.toInt()).toList() : <int>[];
+    final citations = c is List
+        ? c.whereType<num>().map((n) => n.toInt()).toList()
+        : <int>[];
     return (answer: '${m['answer'] ?? ''}', citations: citations);
   }
 }
 
-final readAskCardsRepositoryProvider =
-    Provider<ReadAskCardsRepository>((ref) => ReadAskCardsRepository(ref.watch(apiClientProvider)));
+final readAskCardsRepositoryProvider = Provider<ReadAskCardsRepository>(
+  (ref) => ReadAskCardsRepository(ref.watch(apiClientProvider)),
+);
