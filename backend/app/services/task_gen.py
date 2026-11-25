@@ -11,8 +11,8 @@ from ..models import (
 
 
 def _content_lesson_ids(db: Session, subject: str, document_ids: list[int], up_to_lesson_id: int) -> list[int]:
-    """已学范围内的课。书末「单词列表」只供查阅，不进听写/知识点池，避免和各课生词重复。"""
-    from .pdf_split import is_word_list_title
+    """已学范围内的课。书末「单词列表」、语文识字/写字/词语表汇总课只供查阅，不进听写/知识点池。"""
+    from .pdf_split import is_cn_table_title, is_word_list_title
     if not document_ids:
         return []
     rows = db.query(Lesson.id, Lesson.title).filter(
@@ -21,7 +21,10 @@ def _content_lesson_ids(db: Session, subject: str, document_ids: list[int], up_t
         Lesson.audit_status == "approved",
         Lesson.id <= up_to_lesson_id,
     ).all()
-    return [i for i, title in rows if not is_word_list_title(title)]
+    return [
+        i for i, title in rows
+        if not is_word_list_title(title) and not is_cn_table_title(title)
+    ]
 
 
 def _current_lesson(db: Session, subject: str, user_id: int):

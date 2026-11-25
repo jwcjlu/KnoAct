@@ -18,14 +18,20 @@ from .word_kinds import (
 from .pdf_split import (
     SUBJECT_RULES,
     WORD_LIST_OCR_PROMPT,
+    _CN_TABLE_TITLES,
+    _detect_chinese_word_tables,
     _detect_word_list,
     _is_scanned,
     _ocr_page,
     _page_continues_word_list,
     _page_text,
+    is_cn_table_title,
     is_word_list_title,
     split_gloss_line,
 )
+
+_LESSON_NO_LINE = re.compile(r"^\s*(\d{1,2})\s*$")
+_HAN_TOKEN = re.compile(r"[\u4e00-\u9fff]+")
 
 
 def _lesson_texts(pdf_path: str, start_page: int, end_page: int, db=None) -> str:
@@ -191,6 +197,62 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
     return {"words": words, "points": [], "text": text}
 
 
+def _table_tokens_from_line(s: str, kind: str) -> list[str]:
+    """按 kind 从一行抽出词/字 token。"""
+    out: list[str] = []
+    for tok in _HAN_TOKEN.findall(s):
+        if kind == KIND_PHRASE:
+            if len(tok) >= 2:
+                out.append(tok)
+        elif len(tok) == 1:
+            out.append(tok)
+        else:
+            out.extend(list(tok))
+    return out
+
+
+def parse_chinese_table_text(raw: str, kind: str) -> dict[int, list[dict]]:
+    """册末表文本 → {lesson_no: [{word, extra, kind}, ...]}。同课同词去重保序。"""
+    kind = normalize_kind(kind)
+    by: dict[int, list[dict]] = {}
+    seen: dict[int, set[str]] = {}
+    cur: int | None = None
+    for line in (raw or "").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s in _CN_TABLE_TITLES or any(s.startswith(t) for t in _CN_TABLE_TITLES):
+            continue
+        m = _LESSON_NO_LINE.match(s)
+        if m:
+            cur = int(m.group(1))
+            by.setdefault(cur, [])
+            seen.setdefault(cur, set())
+            continue
+        m2 = re.match(r"^(\d{1,2})\s+(.+)$", s)
+        if m2:
+            cur = int(m2.group(1))
+            by.setdefault(cur, [])
+            seen.setdefault(cur, set())
+            s = m2.group(2)
+        elif cur is None:
+            continue
+        for w in _table_tokens_from_line(s, kind):
+            if w in seen[cur]:
+                continue
+            seen[cur].add(w)
+            by[cur].append({"word": w, "extra": "", "kind": kind})
+    return {n: rows for n, rows in by.items() if rows}
+
+
+def extract_chinese_table_units(
+    pdf_path: str, db, kind: str, start_page: int, end_page: int,
+) -> dict[int, list[dict]]:
+    """读取册末表页码区间文本并解析为课号桶。"""
+    block = _lesson_texts(pdf_path, start_page, end_page, db)
+    return parse_chinese_table_text(block, kind)
+
+
 def parse_word_list_text(raw: str) -> dict[int, list[dict]]:
     """把 Word list 的 OCR 文本拆成 {单元号: [{word, extra}, ...]}。
 
@@ -300,6 +362,68 @@ def _replace_lesson_words(db: Session, lesson, items: list[dict]) -> None:
     detach_words(db, drop)
     if drop:
         db.query(WordBank).filter(WordBank.id.in_(drop)).delete(synchronize_session=False)
+
+
+def _replace_lesson_words_kind(db: Session, lesson, kind: str, items: list[dict]) -> None:
+    """只替换该课该 kind；其它 kind 不动。items 为空则 no-op（由调用方保证有表才调用）。"""
+    from ..models import WordBank
+    from .cleanup import detach_words
+
+    kind = normalize_kind(kind)
+    subject = lesson.subject or "语文"
+    old = db.query(WordBank).filter_by(lesson_id=lesson.id, kind=kind).all()
+    old_by_key: dict[str, list] = {}
+    for w in old:
+        old_by_key.setdefault(_norm_word(w.word), []).append(w)
+    used: set[int] = set()
+    for item in items:
+        key = _norm_word(item["word"])
+        bucket = old_by_key.get(key) or []
+        if bucket:
+            row = bucket.pop(0)
+            row.word = item["word"]
+            row.extra = item.get("extra") or ""
+            row.kind = kind
+            used.add(row.id)
+        else:
+            db.add(WordBank(
+                lesson_id=lesson.id, subject=subject,
+                word=item["word"], extra=item.get("extra") or "", kind=kind,
+            ))
+    drop = [w.id for w in old if w.id not in used]
+    detach_words(db, drop)
+    if drop:
+        db.query(WordBank).filter(WordBank.id.in_(drop)).delete(synchronize_session=False)
+
+
+def apply_chinese_word_tables(db: Session, document_id: int, pdf_path: str) -> dict:
+    from ..models import Lesson
+
+    texts = _page_text(pdf_path) or []
+    tables = _detect_chinese_word_tables(pdf_path, "语文", texts, len(texts), db)
+    if not tables:
+        return {"tables": 0, "lessons": 0, "words": 0}
+    lessons = (
+        db.query(Lesson)
+        .filter_by(document_id=document_id, subject="语文")
+        .order_by(Lesson.start_page, Lesson.id)
+        .all()
+    )
+    lessons = [l for l in lessons if not is_cn_table_title(l.title) and not is_word_list_title(l.title)]
+    updated = words_n = 0
+    for tbl in tables:
+        by = extract_chinese_table_units(
+            pdf_path, db, tbl["kind"], tbl["start_page"], tbl["end_page"],
+        )
+        for idx, lesson in enumerate(lessons, start=1):
+            items = by.get(idx)
+            if not items:
+                continue
+            _replace_lesson_words_kind(db, lesson, tbl["kind"], items)
+            updated += 1
+            words_n += len(items)
+    db.commit()
+    return {"tables": len(tables), "lessons": updated, "words": words_n}
 
 
 def _ensure_word_list_lesson(db: Session, document_id: int, pdf_path: str, by_unit: dict, content_lessons: list) -> None:
