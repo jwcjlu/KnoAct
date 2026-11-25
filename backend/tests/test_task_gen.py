@@ -189,6 +189,32 @@ def test_gen_knowledge_content_has_question_fields():
     db.close()
 
 
+def test_dictation_excludes_cn_table_summary_lesson():
+    """册末「词语表」汇总课的生词不进听写池。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    doc = db.query(PdfDocument).first()
+    table = Lesson(
+        document_id=doc.id, subject="语文", title="词语表",
+        start_page=10, end_page=11, extract_status="done", audit_status="approved",
+    )
+    db.add(table)
+    db.flush()
+    db.add(WordBank(lesson_id=table.id, subject="语文", word="汇总独占", extra="", kind="phrase"))
+    db.add(LearningProgress(user_id=uid, subject="语文", current_lesson_id=table.id))
+    db.commit()
+
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(
+        user_id=uid, subject="语文", date=date.today(), task_type="dictation",
+    ).first()
+    assert t is not None
+    got = {w["word"] for w in json.loads(t.content)}
+    assert "汇总独占" not in got
+    assert {"白鹭", "矗立"} <= got
+    db.close()
+
+
 def test_dictation_picks_new_and_due_words():
     """当前课内：新词与到期词都进；到期词不足不硬补。"""
     db = SessionLocal()
