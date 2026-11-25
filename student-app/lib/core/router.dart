@@ -15,6 +15,7 @@ import '../features/brain_games/ui/sudoku_page.dart';
 import '../features/center/ui/center_page.dart';
 import '../features/dictation/ui/dictation_page.dart';
 import '../features/drill/ui/drill_page.dart';
+import '../features/expression/ui/expression_page.dart';
 import '../features/home/ui/home_page.dart';
 import '../features/knowledge_review/ui/knowledge_page.dart';
 import '../features/lesson_audio/ui/listening_page.dart';
@@ -57,6 +58,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           path == '/assignment' ||
           path == '/math' ||
           path == '/knowledge' ||
+          path == '/expression' ||
           path == '/dictation' ||
           path == '/drill' ||
           path == '/reader' ||
@@ -79,6 +81,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/assignment', builder: (_, _) => const AssignmentPage()),
       GoRoute(path: '/math', builder: (_, _) => const MathPage()),
       GoRoute(path: '/knowledge', builder: (_, _) => const KnowledgePage()),
+      GoRoute(path: '/expression', builder: (_, _) => const ExpressionPage()),
       GoRoute(path: '/dictation', builder: (_, _) => const DictationPage()),
       GoRoute(path: '/drill', builder: (_, _) => const DrillPage()),
       GoRoute(path: '/reader', builder: (_, _) => const ReaderHomePage()),
