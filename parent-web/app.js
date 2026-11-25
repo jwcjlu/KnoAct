@@ -78,6 +78,26 @@ let reportRows = [];
 let masteryReport = null;
 let answerRecords = [];   // 当天做题明细
 let expressionNotes = [];
+let expressionUnread = 0;
+async function loadExpressionUnread(){
+  if(!uid){ expressionUnread = 0; return 0; }
+  const u = uid;
+  try{
+    const r = await api(`/api/expression/unread-count?user_id=${u}`);
+    if(u !== uid) return expressionUnread;
+    expressionUnread = Number(r.count) || 0;
+  }catch(_){
+    if(u === uid) expressionUnread = 0;
+  }
+  return expressionUnread;
+}
+async function markExpressionSeen(){
+  if(!uid) return;
+  try{ await api('/api/expression/mark-seen', {method:'POST', body:{user_id: uid}}); }
+  catch(_){ return; }
+  expressionUnread = 0;
+  renderNav();
+}
 async function loadMasteryReport(){
   if(!uid){ masteryReport = null; return null; }
   const u = uid, b = bucketId;
@@ -254,9 +274,12 @@ function browserSpeak(text){
 
 // ===== 渲染入口 =====
 function renderNav(){
-  document.getElementById('nav').innerHTML = PARENT_TABS.map(([label,ic])=>
-    `<button class="nav-item ${parentTab===label?'active':''}" onclick="setParentTab('${label}')">${icon(ic,19)}${label}</button>`
-  ).join('');
+  document.getElementById('nav').innerHTML = PARENT_TABS.map(([label,ic])=>{
+    const dot = (label==='报告' && expressionUnread>0)
+      ? `<span class="nav-dot" title="孩子又讲了 ${expressionUnread} 条">${expressionUnread}</span>`
+      : '';
+    return `<button class="nav-item ${parentTab===label?'active':''}" onclick="setParentTab('${label}')">${icon(ic,19)}${label}${dot}</button>`;
+  }).join('');
 }
 function render(){
   document.getElementById('main').innerHTML = renderParent();
@@ -297,7 +320,7 @@ async function switchChild(id){
   if(childSwitching) return;
   uid = Number(id) || null;
   try{ localStorage.setItem(CHILD_KEY, String(uid)); }catch(e){}
-  goalRows = []; reportRows = []; masteryReport = null; expressionNotes = []; parentTasks = [];
+  goalRows = []; reportRows = []; masteryReport = null; expressionNotes = []; expressionUnread = 0; parentTasks = [];
   buckets = []; bucketId = null;
   // 进度面板按孩子取数，切换孩子后要重取（否则显示上一个孩子的进度）
   progressRows = [];
@@ -307,7 +330,10 @@ async function switchChild(id){
   await loadBuckets();
   // 非孩子 Tab 只刷新下拉框，避免整页重绘冲掉未保存的输入
   childSwitching = true; CHILD_TABS.includes(parentTab) ? render() : renderChildSelect();
-  try{ await reloadChildData(); }
+  try{
+    await reloadChildData();
+    try{ await loadExpressionUnread(); }catch(e){}
+  }
   catch(e){ toast('加载孩子数据失败，请稍后重试'); }
   finally { childSwitching = false; CHILD_TABS.includes(parentTab) ? render() : renderChildSelect(); }
 }
@@ -461,6 +487,7 @@ async function unbindFromChild(childId, documentId){
 
 function setParentTab(t){
   parentTab=t;
+  if(t==='报告' && expressionUnread>0){ markExpressionSeen(); }
   renderNav();
   if(t==='教材'){ loadPdfDocs().then(()=>render()); return; }
   if(t==='知识点'){ loadKnowledge().then(()=>render()); return; }
@@ -4274,6 +4301,7 @@ async function init(){
   try{ await loadParentData(); }catch(e){}
   if(!Array.isArray(pdfDocs)) pdfDocs = [];
   try{ await reloadChildData(); }catch(e){}
+  try{ await loadExpressionUnread(); }catch(e){}
   render();
 }
 
