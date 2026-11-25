@@ -273,6 +273,35 @@ def test_extract_done_english_syncs_word_list(setup_db, tmp_path, monkeypatch):
     assert prog["finished"] is True
 
 
+def test_extract_done_chinese_syncs_word_tables(setup_db, tmp_path, monkeypatch):
+    """语文课都已提取过时，再点提取会按册末字词表回填生词，而不是直接说没有可提取课程。"""
+    from app.models import PdfDocument, Lesson
+    pdf = tmp_path / "cn.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    s = SessionLocal()
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path=str(pdf))
+    s.add(doc); s.flush()
+    s.add(Lesson(document_id=doc.id, subject="语文", title="第 1 课",
+                 start_page=1, end_page=10, extract_status="done", audit_status="approved"))
+    s.commit()
+    did = doc.id
+    s.close()
+    called = {}
+
+    def fake_apply(db, document_id, pdf_path):
+        called["id"] = document_id
+        return {"tables": 1, "lessons": 1, "words": 3}
+
+    monkeypatch.setattr("app.routers.pdf.apply_chinese_word_tables", fake_apply)
+    h = _parent_headers()
+    resp = _client().post(f"/api/pdf/documents/{did}/extract", headers=h)
+    assert resp.status_code == 200
+    assert resp.json().get("chinese_word_tables") is True
+    assert called["id"] == did
+    prog = _client().get(f"/api/pdf/documents/{did}/extract/progress", headers=h).json()
+    assert prog["finished"] is True
+
+
 def test_list_lessons_has_document_version(setup_db):
     """lesson 接口带 document_version（= document.created_at 毫秒时间戳），供前端页图缓存拼 ?v=。"""
     from datetime import datetime

@@ -15,7 +15,13 @@ from ..models import User
 from ..models import PdfDocument, PdfPage, Lesson, LessonAudio, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
 from ..services.cleanup import detach_points, detach_words, purge_lesson_content, purge_lessons
 from ..services.pdf_split import render_pages, detect_lessons_from_pdf
-from ..services.lesson_extract import apply_word_list, extract_lesson_content, _replace_lesson_words, _kind_key
+from ..services.lesson_extract import (
+    apply_chinese_word_tables,
+    apply_word_list,
+    extract_lesson_content,
+    _replace_lesson_words,
+    _kind_key,
+)
 from ..services.word_kinds import normalize_kind, KIND_WORD
 from ..services.question_gen import generate_reading_questions
 
@@ -216,6 +222,14 @@ def extract_document(document_id: int, background_tasks: BackgroundTasks,
             }
             background_tasks.add_task(_run_word_list_sync, document_id, doc.storage_path)
             return {"started": True, "total": 1, "word_list": True}
+        # 语文课都已提取过时，再走一遍册末识字表/写字表/词语表回填。
+        if doc.subject == "语文":
+            _EXTRACT_PROGRESS[document_id] = {
+                "total": 1, "done": 0, "current": "册末字词表",
+                "finished": False, "error": "",
+            }
+            background_tasks.add_task(_run_chinese_word_tables_sync, document_id, doc.storage_path)
+            return {"started": True, "total": 1, "chinese_word_tables": True}
         return {"extracted": 0, "message": "无可提取课程"}
 
     _EXTRACT_PROGRESS[document_id] = {
@@ -265,6 +279,9 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
         if any(t.get("subject") == "英语" for t in tasks):
             prog["current"] = "Word list"
             _sync_word_list(document_id, storage_path, prog)
+        if any(t.get("subject") == "语文" for t in tasks):
+            prog["current"] = "册末字词表"
+            _sync_chinese_word_tables(document_id, storage_path, prog)
         prog["done"] = len(tasks)
         prog["finished"] = True
     except Exception as e:
@@ -287,6 +304,26 @@ def _run_word_list_sync(document_id: int, storage_path: str):
     prog = _EXTRACT_PROGRESS.get(document_id, {})
     try:
         _sync_word_list(document_id, storage_path, prog)
+        prog["done"] = 1
+    finally:
+        prog["finished"] = True
+
+
+def _sync_chinese_word_tables(document_id: int, storage_path: str, prog: dict) -> None:
+    db = SessionLocal()
+    try:
+        apply_chinese_word_tables(db, document_id, storage_path)
+    except Exception as e:
+        prog["error"] = str(e)[:300]
+    finally:
+        db.close()
+
+
+def _run_chinese_word_tables_sync(document_id: int, storage_path: str):
+    """各课已提取完成时，只重解析册末字词表并写回生词表。"""
+    prog = _EXTRACT_PROGRESS.get(document_id, {})
+    try:
+        _sync_chinese_word_tables(document_id, storage_path, prog)
         prog["done"] = 1
     finally:
         prog["finished"] = True
