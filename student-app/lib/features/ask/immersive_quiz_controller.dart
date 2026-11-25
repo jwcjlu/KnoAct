@@ -10,6 +10,7 @@ class ImmersiveQuizState {
     this.quizId,
     this.questions = const [],
     this.answers = const {},
+    this.evidencePicks = const {},
     this.submitted = false,
     this.results = const [],
     this.busy = false,
@@ -19,6 +20,9 @@ class ImmersiveQuizState {
   final int? quizId;
   final List<ReaderQuizQuestion> questions;
   final Map<String, int> answers;
+
+  /// 答 + 指：题目 id → 孩子选中的句子原文（空 = 未指）
+  final Map<String, String> evidencePicks;
   final bool submitted;
   final List<ReaderQuizGradeRow> results;
   final bool busy;
@@ -30,20 +34,21 @@ class ImmersiveQuizState {
     int? Function()? quizId,
     List<ReaderQuizQuestion>? questions,
     Map<String, int>? answers,
+    Map<String, String>? evidencePicks,
     bool? submitted,
     List<ReaderQuizGradeRow>? results,
     bool? busy,
     String? Function()? error,
-  }) =>
-      ImmersiveQuizState(
-        quizId: quizId != null ? quizId() : this.quizId,
-        questions: questions ?? this.questions,
-        answers: answers ?? this.answers,
-        submitted: submitted ?? this.submitted,
-        results: results ?? this.results,
-        busy: busy ?? this.busy,
-        error: error != null ? error() : this.error,
-      );
+  }) => ImmersiveQuizState(
+    quizId: quizId != null ? quizId() : this.quizId,
+    questions: questions ?? this.questions,
+    answers: answers ?? this.answers,
+    evidencePicks: evidencePicks ?? this.evidencePicks,
+    submitted: submitted ?? this.submitted,
+    results: results ?? this.results,
+    busy: busy ?? this.busy,
+    error: error != null ? error() : this.error,
+  );
 }
 
 class ImmersiveQuizController extends Notifier<ImmersiveQuizState> {
@@ -64,26 +69,45 @@ class ImmersiveQuizController extends Notifier<ImmersiveQuizState> {
     ref.read(askControllerProvider.notifier).ensureReaderBound();
     final lessonId = ref.read(askControllerProvider).lessonId;
     if (lessonId == null || state.busy) return;
-    state = state.copyWith(busy: true, error: () => null, questions: const [], submitted: false, results: const []);
+    state = state.copyWith(
+      busy: true,
+      error: () => null,
+      questions: const [],
+      submitted: false,
+      results: const [],
+    );
     final repo = ref.read(readAskCardsRepositoryProvider);
     final r = await repo.generateQuiz(lessonId: lessonId);
     if (!ref.mounted) return;
     if (r.questions.isEmpty) {
       final err = (r.error != null && r.error!.isNotEmpty) ? r.error! : null;
       state = state.copyWith(busy: false, error: () => err);
-      ref.read(askControllerProvider.notifier).pushAiMessage(
+      ref
+          .read(askControllerProvider.notifier)
+          .pushAiMessage(
             '出题失败${err != null ? '（$err）' : ''}，请稍后再试一次。',
             mode: 'quiz',
           );
       return;
     }
-    state = ImmersiveQuizState(quizId: r.quizId, questions: r.questions, busy: false);
+    state = ImmersiveQuizState(
+      quizId: r.quizId,
+      questions: r.questions,
+      busy: false,
+    );
     _startedAt = DateTime.now();
   }
 
   void pickAnswer(String questionId, int index) {
     if (state.submitted) return;
     state = state.copyWith(answers: {...state.answers, questionId: index});
+  }
+
+  void pickEvidence(String questionId, String sentence) {
+    if (state.submitted) return;
+    state = state.copyWith(
+      evidencePicks: {...state.evidencePicks, questionId: sentence},
+    );
   }
 
   Future<void> submit() async {
@@ -93,11 +117,14 @@ class ImmersiveQuizController extends Notifier<ImmersiveQuizState> {
     state = state.copyWith(busy: true);
     try {
       final durationMs = DateTime.now().difference(_startedAt).inMilliseconds;
-      final results = await ref.read(readAskCardsRepositoryProvider).submitQuiz(
+      final results = await ref
+          .read(readAskCardsRepositoryProvider)
+          .submitQuiz(
             quizId: quizId,
             questions: state.questions,
             answers: state.answers,
             durationMs: durationMs,
+            evidenceSentences: state.evidencePicks,
           );
       if (!ref.mounted) return;
       state = state.copyWith(busy: false, submitted: true, results: results);
@@ -110,7 +137,10 @@ class ImmersiveQuizController extends Notifier<ImmersiveQuizState> {
   void clear() => state = const ImmersiveQuizState();
 }
 
-final immersiveQuizProvider = NotifierProvider<ImmersiveQuizController, ImmersiveQuizState>(ImmersiveQuizController.new);
+final immersiveQuizProvider =
+    NotifierProvider<ImmersiveQuizController, ImmersiveQuizState>(
+      ImmersiveQuizController.new,
+    );
 
 class ImmersiveDiagnosticState {
   const ImmersiveDiagnosticState({
@@ -132,13 +162,12 @@ class ImmersiveDiagnosticState {
     Map<String, String>? replies,
     String? intro,
     bool? busy,
-  }) =>
-      ImmersiveDiagnosticState(
-        questions: questions ?? this.questions,
-        replies: replies ?? this.replies,
-        intro: intro ?? this.intro,
-        busy: busy ?? this.busy,
-      );
+  }) => ImmersiveDiagnosticState(
+    questions: questions ?? this.questions,
+    replies: replies ?? this.replies,
+    intro: intro ?? this.intro,
+    busy: busy ?? this.busy,
+  );
 }
 
 class ImmersiveDiagnosticController extends Notifier<ImmersiveDiagnosticState> {
@@ -160,14 +189,15 @@ class ImmersiveDiagnosticController extends Notifier<ImmersiveDiagnosticState> {
     final ctx = ask.selected.isNotEmpty ? ask.selected : ask.context;
     state = const ImmersiveDiagnosticState(busy: true);
     try {
-      final r = await ref.read(readAskCardsRepositoryProvider).fetchDiagnosticQuestions(
-            lessonId: lessonId,
-            context: ctx,
-          );
+      final r = await ref
+          .read(readAskCardsRepositoryProvider)
+          .fetchDiagnosticQuestions(lessonId: lessonId, context: ctx);
       if (!ref.mounted) return;
       if (r.questions.isEmpty) {
         state = const ImmersiveDiagnosticState();
-        ref.read(askControllerProvider.notifier).pushAiMessage('提问失败，请确认已配置 AI');
+        ref
+            .read(askControllerProvider.notifier)
+            .pushAiMessage('提问失败，请确认已配置 AI');
         return;
       }
       state = ImmersiveDiagnosticState(questions: r.questions, intro: r.intro);
@@ -202,4 +232,6 @@ class ImmersiveDiagnosticController extends Notifier<ImmersiveDiagnosticState> {
 }
 
 final immersiveDiagnosticProvider =
-    NotifierProvider<ImmersiveDiagnosticController, ImmersiveDiagnosticState>(ImmersiveDiagnosticController.new);
+    NotifierProvider<ImmersiveDiagnosticController, ImmersiveDiagnosticState>(
+      ImmersiveDiagnosticController.new,
+    );

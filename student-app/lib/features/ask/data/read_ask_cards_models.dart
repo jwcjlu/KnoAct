@@ -1,5 +1,9 @@
 class ReaderQuizQuestion {
-  const ReaderQuizQuestion({required this.id, required this.prompt, required this.choices});
+  const ReaderQuizQuestion({
+    required this.id,
+    required this.prompt,
+    required this.choices,
+  });
 
   final String id;
   final String prompt;
@@ -25,6 +29,8 @@ class ReaderQuizGradeRow {
     required this.isCorrect,
     this.correctIndex,
     this.selectedIndex,
+    this.verdict = 'unknown',
+    this.evidenceOk,
   });
 
   final String questionId;
@@ -32,20 +38,38 @@ class ReaderQuizGradeRow {
   final int? correctIndex;
   final int? selectedIndex;
 
+  /// 答 + 指四态：confirmed | lucky | expression_weak | not_understood | unknown
+  final String verdict;
+
+  /// 出处是否正确；null 表示本次未指出处（旧客户端）或题目无 evidence
+  final bool? evidenceOk;
+
   static ReaderQuizGradeRow? tryParse(Object? raw) {
     if (raw is! Map) return null;
     final qid = '${raw['question_id'] ?? ''}';
     return ReaderQuizGradeRow(
       questionId: qid,
       isCorrect: raw['is_correct'] == true,
-      correctIndex: raw['correct_index'] is num ? (raw['correct_index'] as num).toInt() : null,
-      selectedIndex: raw['selected_index'] is num ? (raw['selected_index'] as num).toInt() : null,
+      correctIndex: raw['correct_index'] is num
+          ? (raw['correct_index'] as num).toInt()
+          : null,
+      selectedIndex: raw['selected_index'] is num
+          ? (raw['selected_index'] as num).toInt()
+          : null,
+      verdict: '${raw['verdict'] ?? 'unknown'}',
+      evidenceOk: raw['evidence_ok'] is bool
+          ? raw['evidence_ok'] as bool
+          : null,
     );
   }
 }
 
 class DiagnosticQuestion {
-  const DiagnosticQuestion({required this.id, required this.prompt, required this.options});
+  const DiagnosticQuestion({
+    required this.id,
+    required this.prompt,
+    required this.options,
+  });
 
   final String id;
   final String prompt;
