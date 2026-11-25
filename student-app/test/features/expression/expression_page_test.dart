@@ -29,6 +29,7 @@ class FakeExpressionRepository extends ExpressionRepository {
     int? knowledgePointId,
     int? itemId,
     required String text,
+    List<Map<String, String>>? probeTurns,
   }) async {
     final error = createNoteError;
     if (error != null) throw error;
