@@ -458,3 +458,33 @@ def test_list_notes_clamps_limit():
         f"/api/expression/notes?user_id={uid}&limit=999", headers=h)
     assert high.status_code == 200
     assert len(high.json()["notes"]) == 2
+
+
+def test_purge_lesson_detaches_expression_notes():
+    """删课（含知识点）时，expression_notes 的外键必须被置空，记录本身保留。"""
+    from app.database import SessionLocal
+    from app.models import ExpressionNote, KnowledgePoint
+    from app.services.cleanup import purge_lessons
+
+    uid, h = _seed_child(prefix="pg1")
+    kp_id = _seed_kp_with_mastery(uid, "要被删的", prefix="pg1")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "我讲过了"
+    }, headers=h)
+
+    s = SessionLocal()
+    lesson_id = s.get(KnowledgePoint, kp_id).lesson_id
+    purge_lessons(s, [lesson_id])          # 不应抛外键异常
+    s.commit()
+    s.close()
+
+    # 记录仍在，但外键已置空，title 快照可读
+    s = SessionLocal()
+    try:
+        rows = s.query(ExpressionNote).filter_by(user_id=uid).all()
+        assert len(rows) == 1
+        assert rows[0].knowledge_point_id is None, "外键应为 NULL"
+        assert rows[0].title == "要被删的"
+        assert rows[0].text == "我讲过了"
+    finally:
+        s.close()

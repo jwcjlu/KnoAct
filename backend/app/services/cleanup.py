@@ -6,7 +6,7 @@
 from sqlalchemy.orm import Session
 
 from ..models import (
-    Annotation, AnswerRecord, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson,
+    Annotation, AnswerRecord, ExpressionNote, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson,
     LessonAudio, Mistake, Note, Question, Quiz, Text, Turn, WordBank, WordMastery,
 )
 
@@ -27,6 +27,8 @@ def detach_points(db: Session, point_ids: list[int]) -> None:
         {Mistake.knowledge_point_id: None}, synchronize_session=False)
     db.query(Note).filter(Note.knowledge_point_id.in_(point_ids)).update(
         {Note.knowledge_point_id: None}, synchronize_session=False)
+    db.query(ExpressionNote).filter(ExpressionNote.knowledge_point_id.in_(point_ids)).update(
+        {ExpressionNote.knowledge_point_id: None}, synchronize_session=False)
 
 
 def purge_lesson_content(db: Session, lesson_ids: list[int]) -> None:
