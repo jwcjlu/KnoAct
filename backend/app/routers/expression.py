@@ -15,7 +15,9 @@ from ..models import (
     ChildConfig, ExpressionNote, KnowledgeMastery, KnowledgePoint, TrainingGroup,
     TrainingItem, User,
 )
+from ..services.ai import get_provider
 from ..services.bucket_guard import assert_writable, resolve_bucket_id
+from ..services.expression_probe import ask_next_question, normalize_probe_turns
 
 router = APIRouter(prefix="/api/expression", tags=["expression"])
 
@@ -131,6 +133,44 @@ def create_note(req: NoteReq, user: User = Depends(require_learning_user),
     )
     db.add(note); db.commit(); db.refresh(note)
     return {"id": note.id, "created_at": note.created_at.isoformat()}
+
+
+class ProbeReq(BaseModel):
+    user_id: int
+    knowledge_point_id: int | None = None
+    item_id: int | None = None
+    text: str
+    turns: list[dict] = []
+
+
+@router.post("/probe")
+def expression_probe(req: ProbeReq, user: User = Depends(require_learning_user),
+                     db: Session = Depends(get_db)):
+    ensure_user_access(user, req.user_id, db)
+    if user.id != req.user_id:
+        raise HTTPException(status_code=403, detail={"error": "forbidden"})
+
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="内容不能为空")
+    if len(text) > MAX_TEXT_LEN:
+        raise HTTPException(status_code=400, detail=f"内容不能超过 {MAX_TEXT_LEN} 字")
+
+    child = _require_grade(req.user_id, db)
+    title = _validate_target(child, NoteReq(
+        user_id=req.user_id,
+        knowledge_point_id=req.knowledge_point_id,
+        item_id=req.item_id,
+        text=text,
+    ), db)
+
+    try:
+        turns = normalize_probe_turns(req.turns)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    provider = get_provider(db, child_id=req.user_id)
+    return ask_next_question(provider, title=title, text=text, turns=turns)
 
 
 @router.get("/notes")

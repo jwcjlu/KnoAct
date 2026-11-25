@@ -612,3 +612,82 @@ def test_unread_count_rejects_other_child():
     other_uid, _ = _seed_child(prefix="u8b")
     r = _client().get(f"/api/expression/unread-count?user_id={other_uid}", headers=h)
     assert r.status_code == 403
+
+
+def _probe_body(uid, kp_id, text="比喻就是把一件事说成另一件事", turns=None):
+    body = {
+        "user_id": uid,
+        "knowledge_point_id": kp_id,
+        "text": text,
+    }
+    if turns is not None:
+        body["turns"] = turns
+    return body
+
+
+def test_probe_requires_nonempty_text():
+    uid, h = _seed_child(prefix="pr1")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="pr1")
+    for bad in ("", "   ", "\n\n"):
+        r = _client().post(
+            "/api/expression/probe",
+            json=_probe_body(uid, kp_id, text=bad),
+            headers=h,
+        )
+        assert r.status_code == 400, f"{bad!r} 应被拒"
+
+
+def test_probe_returns_question_then_done_at_3():
+    uid, h = _seed_child(prefix="pr2")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="pr2")
+    r0 = _client().post(
+        "/api/expression/probe",
+        json=_probe_body(uid, kp_id),
+        headers=h,
+    )
+    assert r0.status_code == 200
+    j0 = r0.json()
+    assert j0["done"] is False
+    assert j0.get("question")
+
+    turns = [
+        {"q": "本体是什么？", "a": "被比喻的东西"},
+        {"q": "喻体呢？", "a": "用来比的"},
+        {"q": "相似点？", "a": "有共同点"},
+    ]
+    r3 = _client().post(
+        "/api/expression/probe",
+        json=_probe_body(uid, kp_id, turns=turns),
+        headers=h,
+    )
+    assert r3.status_code == 200
+    assert r3.json()["done"] is True
+    assert r3.json().get("question") in ("", None)
+
+
+def test_probe_rejects_grade_below_3():
+    uid, h = _seed_child(grade=2, prefix="pr3")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="pr3")
+    r = _client().post(
+        "/api/expression/probe",
+        json=_probe_body(uid, kp_id),
+        headers=h,
+    )
+    assert r.status_code == 403
+
+
+def test_probe_rejects_parent_actor():
+    from app.database import SessionLocal
+    from app.models import User
+
+    uid, _h = _seed_child(prefix="pr4")
+    kp_id = _seed_kp_with_mastery(uid, "借代", prefix="pr4")
+    s = SessionLocal()
+    parent_h = auth_headers(s.get(User, s.get(User, uid).parent_id))
+    s.close()
+    r = _client().post(
+        "/api/expression/probe",
+        json=_probe_body(uid, kp_id),
+        headers=parent_h,
+    )
+    assert r.status_code == 403
