@@ -2,10 +2,9 @@
 
 刻意不做判定、不写掌握度——见 docs/superpowers/specs/2026-11-25-feynman-teach-ai-design.md。
 """
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.access import (
@@ -165,17 +164,18 @@ def delete_note(note_id: int, user: User = Depends(require_learning_user),
     return {"ok": True}
 
 
-SEEN_AT_KEY = "expression_seen_at"
+SEEN_ID_KEY = "expression_seen_note_id"
 
 
-def _get_seen_at(db: Session, user_id: int) -> datetime | None:
-    row = db.query(ChildConfig).filter_by(user_id=user_id, key=SEEN_AT_KEY).first()
+def _get_seen_note_id(db: Session, user_id: int) -> int:
+    """已读水位线：家长看过的最大的 note id。没记录就是 0。"""
+    row = db.query(ChildConfig).filter_by(user_id=user_id, key=SEEN_ID_KEY).first()
     if row is None or not row.value:
-        return None
+        return 0
     try:
-        return datetime.fromisoformat(row.value)
+        return int(row.value)
     except ValueError:
-        return None
+        return 0
 
 
 class SeenReq(BaseModel):
@@ -186,34 +186,42 @@ class SeenReq(BaseModel):
 def unread_count(user_id: int = Depends(resolve_target_user_id),
                  _auth: User = Depends(require_learning_user),
                  db: Session = Depends(get_db)):
-    """孩子讲了几条家长还没看过的。不判定内容，只数条数。"""
+    """孩子讲了几条家长还没看过的。不判定内容，只数条数。
+
+    用 id 水位线而不是时间戳：MySQL 的 DATETIME 不存微秒，
+    同秒内先 mark-seen 再写笔记会被时间戳方案误判成已读。
+    """
     _require_grade(user_id, db)
-    q = db.query(ExpressionNote).filter_by(user_id=user_id)
-    seen_at = _get_seen_at(db, user_id)
-    if seen_at is not None:
-        q = q.filter(ExpressionNote.created_at > seen_at)
-    return {"count": q.count()}
+    seen_id = _get_seen_note_id(db, user_id)
+    n = (db.query(ExpressionNote)
+         .filter(ExpressionNote.user_id == user_id,
+                 ExpressionNote.id > seen_id)
+         .count())
+    return {"count": n}
 
 
 @router.post("/mark-seen")
 def mark_seen(req: SeenReq, user: User = Depends(require_learning_user),
               db: Session = Depends(get_db)):
-    """把「家长看到哪儿了」推到当前时刻。单调：不会往回退。"""
+    """把已读水位线推到当前最大的 note id。只会前进，不会后退。"""
     ensure_user_access(user, req.user_id, db)
     _require_grade(req.user_id, db)
-    now = datetime.utcnow()
+
+    max_id = (db.query(func.max(ExpressionNote.id))
+              .filter(ExpressionNote.user_id == req.user_id)
+              .scalar()) or 0
+
     row = db.query(ChildConfig).filter_by(
-        user_id=req.user_id, key=SEEN_AT_KEY).first()
+        user_id=req.user_id, key=SEEN_ID_KEY).first()
     if row is None:
-        db.add(ChildConfig(user_id=req.user_id, key=SEEN_AT_KEY,
-                           value=now.isoformat()))
+        db.add(ChildConfig(user_id=req.user_id, key=SEEN_ID_KEY,
+                           value=str(max_id)))
     else:
-        prev = None
         try:
-            prev = datetime.fromisoformat(row.value) if row.value else None
+            prev = int(row.value or 0)
         except ValueError:
-            prev = None
-        if prev is None or now > prev:
-            row.value = now.isoformat()
+            prev = 0
+        if max_id > prev:
+            row.value = str(max_id)
     db.commit()
-    return {"ok": True, "seen_at": now.isoformat()}
+    return {"ok": True, "seen_id": max_id}
