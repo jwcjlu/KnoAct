@@ -82,10 +82,11 @@ def _validate_target(child: User, req: NoteReq, db: Session) -> str:
 
     if req.knowledge_point_id is not None:
         bid = resolve_bucket_id(db, child.id, None)
+        if bid is None:
+            raise HTTPException(status_code=403, detail={"error": "forbidden"})
         q = db.query(KnowledgeMastery).filter_by(
-            user_id=child.id, knowledge_point_id=req.knowledge_point_id)
-        if bid is not None:
-            q = q.filter(KnowledgeMastery.bucket_id == bid)
+            user_id=child.id, knowledge_point_id=req.knowledge_point_id,
+            bucket_id=bid)
         if q.first() is None:
             raise HTTPException(status_code=403, detail={"error": "forbidden"})
         kp = db.query(KnowledgePoint).filter_by(id=req.knowledge_point_id).first()

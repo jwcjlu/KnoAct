@@ -319,3 +319,142 @@ def test_note_survives_knowledge_point_deletion():
     assert len(notes) == 1
     assert notes[0]["title"] == "被删掉的知识点"
     assert notes[0]["text"] == "我讲过了"
+
+
+def test_create_note_rejects_knowledge_point_from_archived_bucket():
+    """旧学年桶里的知识点不能用于新建表达记录。"""
+    from app.database import SessionLocal
+    from app.models import KnowledgeMastery
+    from app.services.bucket_service import ensure_bucket
+
+    uid, h = _seed_child(prefix="archived_post")
+    kp_id = _seed_kp_with_mastery(
+        uid, "旧桶的知识点", prefix="archived_post")
+
+    s = SessionLocal()
+    old = ensure_bucket(s, uid)
+    mastery = (s.query(KnowledgeMastery)
+               .filter_by(user_id=uid, knowledge_point_id=kp_id)
+               .first())
+    mastery.bucket_id = old.id
+    old.status = "archived"
+    old.ended_at = old.started_at
+    s.commit()
+    s.close()
+
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid,
+        "knowledge_point_id": kp_id,
+        "text": "这是旧学年学过的",
+    }, headers=h)
+    assert r.status_code == 403
+
+
+def test_create_note_with_owned_explore_item_snapshots_primary():
+    from app.database import SessionLocal
+    from app.models import TrainingGroup, TrainingItem, User
+
+    uid, h = _seed_child(prefix="item_ok")
+    s = SessionLocal()
+    parent_id = s.get(User, uid).parent_id
+    group = TrainingGroup(
+        owner_id=parent_id, subject="语文", title="探究组",
+        source="custom", kind="explore")
+    s.add(group); s.flush()
+    item = TrainingItem(
+        group_id=group.id, kind="explore", primary="比喻的相似关系")
+    s.add(item); s.commit()
+    item_id = item.id
+    s.close()
+
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "item_id": item_id, "text": "我来讲讲这个关系",
+    }, headers=h)
+    assert r.status_code == 200
+
+    notes = _client().get(
+        f"/api/expression/notes?user_id={uid}", headers=h).json()["notes"]
+    assert notes[0]["title"] == "比喻的相似关系"
+
+
+def test_create_note_rejects_another_familys_item():
+    from app.database import SessionLocal
+    from app.models import TrainingGroup, TrainingItem, User
+
+    uid, h = _seed_child(prefix="item_family_a")
+    other_uid, _ = _seed_child(prefix="item_family_b")
+    s = SessionLocal()
+    other_parent_id = s.get(User, other_uid).parent_id
+    group = TrainingGroup(
+        owner_id=other_parent_id, subject="语文", title="别家的组",
+        source="custom", kind="explore")
+    s.add(group); s.flush()
+    item = TrainingItem(
+        group_id=group.id, kind="explore", primary="别家的探究")
+    s.add(item); s.commit()
+    item_id = item.id
+    s.close()
+
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "item_id": item_id, "text": "不该能讲",
+    }, headers=h)
+    assert r.status_code == 403
+
+
+def test_create_note_rejects_non_explore_item():
+    from app.database import SessionLocal
+    from app.models import TrainingGroup, TrainingItem, User
+
+    uid, h = _seed_child(prefix="item_drill")
+    s = SessionLocal()
+    parent_id = s.get(User, uid).parent_id
+    group = TrainingGroup(
+        owner_id=parent_id, subject="语文", title="练习组",
+        source="custom", kind="explore")
+    s.add(group); s.flush()
+    item = TrainingItem(
+        group_id=group.id, kind="drill_item", primary="普通练习")
+    s.add(item); s.commit()
+    item_id = item.id
+    s.close()
+
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "item_id": item_id, "text": "不该能讲",
+    }, headers=h)
+    assert r.status_code == 403
+
+
+def test_admin_cannot_create_note_for_child():
+    from app.database import SessionLocal
+
+    uid, _ = _seed_child(prefix="admin_write")
+    kp_id = _seed_kp_with_mastery(uid, "借喻", prefix="admin_write")
+    s = SessionLocal()
+    admin = make_account(s, "expression_admin", "admin")
+    admin_h = auth_headers(admin)
+    s.close()
+
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "管理员代写",
+    }, headers=admin_h)
+    assert r.status_code == 403
+
+
+def test_list_notes_clamps_limit():
+    uid, h = _seed_child(prefix="limit")
+    kp_id = _seed_kp_with_mastery(uid, "排比", prefix="limit")
+    for text in ("第一条", "第二条"):
+        r = _client().post("/api/expression/notes", json={
+            "user_id": uid, "knowledge_point_id": kp_id, "text": text,
+        }, headers=h)
+        assert r.status_code == 200
+
+    low = _client().get(
+        f"/api/expression/notes?user_id={uid}&limit=0", headers=h)
+    assert low.status_code == 200
+    assert len(low.json()["notes"]) == 1
+
+    high = _client().get(
+        f"/api/expression/notes?user_id={uid}&limit=999", headers=h)
+    assert high.status_code == 200
+    assert len(high.json()["notes"]) == 2
