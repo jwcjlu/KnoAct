@@ -44,6 +44,7 @@ class ExpressionPage extends ConsumerWidget {
                 topic: s.selected!,
                 text: s.text,
                 busy: s.busy,
+                submitError: s.submitError,
                 onChanged: ctl.setText,
                 onSubmit: ctl.submit,
               ),
@@ -164,6 +165,7 @@ class _ExpressionInput extends StatelessWidget {
     required this.topic,
     required this.text,
     required this.busy,
+    required this.submitError,
     required this.onChanged,
     required this.onSubmit,
   });
@@ -171,6 +173,7 @@ class _ExpressionInput extends StatelessWidget {
   final ExpressionTopic topic;
   final String text;
   final bool busy;
+  final String? submitError;
   final ValueChanged<String> onChanged;
   final VoidCallback onSubmit;
 
@@ -212,6 +215,15 @@ class _ExpressionInput extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+        if (submitError == 'failed')
+          const Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: Text(
+              '没存上，再点一下试试？',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.gray),
+            ),
+          ),
         FilledButton(
           onPressed: text.trim().isEmpty || busy ? null : onSubmit,
           child: const Text('讲完了'),

@@ -12,6 +12,7 @@ class ExpressionState {
     this.busy = false,
     this.done = false,
     this.error,
+    this.submitError,
   });
 
   final List<ExpressionTopic> topics;
@@ -23,6 +24,9 @@ class ExpressionState {
   /// `forbidden`：功能未对该用户开放（如 403）；`failed`：加载失败。
   final String? error;
 
+  /// `failed`：保存失败（与 [error] 加载失败分开）。
+  final String? submitError;
+
   ExpressionState copyWith({
     List<ExpressionTopic>? topics,
     ExpressionTopic? Function()? selected,
@@ -30,6 +34,7 @@ class ExpressionState {
     bool? busy,
     bool? done,
     String? Function()? error,
+    String? Function()? submitError,
   }) => ExpressionState(
     topics: topics ?? this.topics,
     selected: selected != null ? selected() : this.selected,
@@ -37,6 +42,7 @@ class ExpressionState {
     busy: busy ?? this.busy,
     done: done ?? this.done,
     error: error != null ? error() : this.error,
+    submitError: submitError != null ? submitError() : this.submitError,
   );
 }
 
@@ -96,7 +102,7 @@ class ExpressionController extends Notifier<ExpressionState> {
     final text = state.text.trim();
     if (uid == null || topic == null || text.isEmpty || state.busy) return;
 
-    state = state.copyWith(busy: true);
+    state = state.copyWith(busy: true, submitError: () => null);
     try {
       await ref
           .read(expressionRepositoryProvider)
@@ -108,12 +114,17 @@ class ExpressionController extends Notifier<ExpressionState> {
           );
     } catch (_) {
       if (ref.mounted && _uid == uid) {
-        state = state.copyWith(busy: false);
+        state = state.copyWith(busy: false, submitError: () => 'failed');
       }
       return;
     }
     if (!ref.mounted || _uid != uid) return;
-    state = state.copyWith(busy: false, done: true, text: text);
+    state = state.copyWith(
+      busy: false,
+      done: true,
+      text: text,
+      submitError: () => null,
+    );
   }
 
   void again() {

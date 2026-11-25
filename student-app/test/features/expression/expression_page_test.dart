@@ -13,6 +13,7 @@ class FakeExpressionRepository extends ExpressionRepository {
   FakeExpressionRepository() : super(ApiClient('http://test.invalid'));
 
   Object? topicsError;
+  Object? createNoteError;
   List<ExpressionTopic> topicsResult = const [];
 
   @override
@@ -20,6 +21,17 @@ class FakeExpressionRepository extends ExpressionRepository {
     final error = topicsError;
     if (error != null) throw error;
     return topicsResult;
+  }
+
+  @override
+  Future<void> createNote({
+    required int userId,
+    int? knowledgePointId,
+    int? itemId,
+    required String text,
+  }) async {
+    final error = createNoteError;
+    if (error != null) throw error;
   }
 }
 
@@ -77,6 +89,26 @@ void main() {
     await _pumpPage(tester, FakeExpressionRepository());
 
     expect(find.textContaining('还没有可以讲的知识点'), findsOneWidget);
+  });
+
+  testWidgets('保存失败显示重试提示', (tester) async {
+    final repository = FakeExpressionRepository()
+      ..topicsResult = const [_topic]
+      ..createNoteError = ApiException('server error', statusCode: 500);
+
+    await _pumpPage(tester, repository);
+    await tester.tap(find.text('比喻'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('expression-input')),
+      '我讲一讲',
+    );
+    await tester.pump();
+    await tester.tap(find.text('讲完了'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('没存上'), findsOneWidget);
+    expect(find.text('讲完了'), findsOneWidget);
   });
 
   testWidgets('选择主题后显示表达输入框', (tester) async {

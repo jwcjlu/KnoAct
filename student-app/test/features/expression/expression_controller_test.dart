@@ -16,6 +16,7 @@ class FakeExpressionRepository extends ExpressionRepository {
       : super(ApiClient('http://test.invalid'));
 
   Object? topicsError;
+  Object? createNoteError;
   List<ExpressionTopic> topicsResult = const [];
   int createNoteCalls = 0;
 
@@ -38,6 +39,8 @@ class FakeExpressionRepository extends ExpressionRepository {
       knowledgePointId: knowledgePointId,
       itemId: itemId,
     );
+    final err = createNoteError;
+    if (err != null) throw err;
   }
 }
 
@@ -85,6 +88,45 @@ void main() {
 
       expect(repo.createNoteCalls, 0);
       expect(container.read(expressionControllerProvider).done, isFalse);
+    });
+
+    test('submit failure keeps text and sets submitError', () async {
+      final repo = FakeExpressionRepository()
+        ..createNoteError = ApiException('server error', statusCode: 500);
+      final container = _container(repo);
+      addTearDown(container.dispose);
+
+      final ctl = container.read(expressionControllerProvider.notifier);
+      ctl.select(_topic);
+      const draft = '我这样理解的';
+      ctl.setText(draft);
+      await ctl.submit();
+
+      final s = container.read(expressionControllerProvider);
+      expect(s.busy, isFalse);
+      expect(s.submitError, 'failed');
+      expect(s.done, isFalse);
+      expect(s.text, draft);
+    });
+
+    test('retry after submit failure succeeds', () async {
+      final repo = FakeExpressionRepository()
+        ..createNoteError = ApiException('server error', statusCode: 500);
+      final container = _container(repo);
+      addTearDown(container.dispose);
+
+      final ctl = container.read(expressionControllerProvider.notifier);
+      ctl.select(_topic);
+      ctl.setText('我讲一讲');
+      await ctl.submit();
+      expect(container.read(expressionControllerProvider).submitError, 'failed');
+
+      repo.createNoteError = null;
+      await ctl.submit();
+
+      final s = container.read(expressionControllerProvider);
+      expect(s.done, isTrue);
+      expect(s.submitError, isNull);
     });
 
     test('successful submit sets done', () async {
