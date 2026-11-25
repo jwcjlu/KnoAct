@@ -869,7 +869,7 @@ class ExpressionRepository {
   final ApiClient _api;
 
   Future<List<ExpressionTopic>> topics({required int userId}) async {
-    final raw = await _api.get('/api/expression/topics?user_id=$userId');
+    final raw = await _api.get('/api/expression/topics', query: {'user_id': userId});
     final m = asMap(raw);
     final list = m['topics'];
     if (list is! List) return const [];
