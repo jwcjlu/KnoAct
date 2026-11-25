@@ -90,7 +90,8 @@ def test_reextract_lesson_detaches_word_and_point_references(setup_db, monkeypat
     import app.routers.pdf as pdf
     ids = _seed()
     monkeypatch.setattr(pdf, "extract_lesson_content", lambda *a, **k: {
-        "words": [{"word": "新词", "extra": "xīn cí"}], "points": ["新知识点"], "text": "新课文。"})
+        "words": [{"word": "新词", "extra": "xīn cí", "kind": "phrase"}],
+        "points": ["新知识点"], "text": "新课文。"})
     monkeypatch.setattr(pdf, "generate_reading_questions",
                         lambda db, text, n=3: [{"question": "新题", "answer": "新答"}])
     pdf._EXTRACT_PROGRESS[ids["doc"]] = {"total": 1, "done": 0, "current": "", "finished": False, "error": ""}

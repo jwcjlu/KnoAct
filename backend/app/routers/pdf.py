@@ -15,7 +15,7 @@ from ..models import User
 from ..models import PdfDocument, PdfPage, Lesson, LessonAudio, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
 from ..services.cleanup import detach_points, detach_words, purge_lesson_content, purge_lessons
 from ..services.pdf_split import render_pages, detect_lessons_from_pdf
-from ..services.lesson_extract import apply_word_list, extract_lesson_content
+from ..services.lesson_extract import apply_word_list, extract_lesson_content, _replace_lesson_words
 from ..services.question_gen import generate_reading_questions
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf"])
@@ -237,10 +237,13 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
                 if lesson is None:
                     continue
                 content = extract_lesson_content(storage_path, t["subject"], t["start_page"], t["end_page"], db)
-                # 清除本课旧数据后写入新结果
-                purge_lesson_content(db, [t["id"]])
-                for w in content["words"]:
-                    db.add(WordBank(lesson_id=t["id"], subject=t["subject"], word=w["word"], extra=w["extra"]))
+                lesson_id = t["id"]
+                point_ids = [r[0] for r in db.query(KnowledgePoint.id).filter_by(lesson_id=lesson_id).all()]
+                detach_points(db, point_ids)
+                db.query(KnowledgePoint).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                db.query(Text).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                db.query(Question).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                _replace_lesson_words(db, lesson, content.get("words") or [])
                 for p in content["points"]:
                     db.add(KnowledgePoint(lesson_id=t["id"], subject=t["subject"], category="本课", content=p))
                 if content["text"]:

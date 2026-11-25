@@ -108,3 +108,69 @@ def test_migrate_idempotent(setup_db, db):
     migrate(db)
     migrate(db)
     assert db.query(WordBank).filter_by(lesson_id=lesson.id).count() == 1
+
+
+def test_replace_lesson_words_keeps_mastery_per_kind(setup_db, db):
+    from conftest import make_lesson, make_user
+    from app.models import WordBank, WordMastery
+    from app.services.lesson_extract import _replace_lesson_words
+
+    lesson = make_lesson(db, subject="语文")
+    user = make_user(db)
+    rec_old = WordBank(lesson_id=lesson.id, subject="语文", word="箩", extra="", kind="recognize")
+    wr_old = WordBank(lesson_id=lesson.id, subject="语文", word="箩", extra="", kind="write")
+    db.add_all([rec_old, wr_old])
+    db.flush()
+    rec_m = WordMastery(word_bank_id=rec_old.id, user_id=user.id, correct_count=5, mastery=0.7)
+    wr_m = WordMastery(word_bank_id=wr_old.id, user_id=user.id, correct_count=2, mastery=0.4)
+    db.add_all([rec_m, wr_m])
+    db.commit()
+    rec_m_id, wr_m_id = rec_m.id, wr_m.id
+
+    _replace_lesson_words(db, lesson, [
+        {"word": "箩", "extra": "luó", "kind": "recognize"},
+        {"word": "箩", "extra": "luó 竹箩", "kind": "write"},
+    ])
+    db.commit()
+
+    rows = {w.kind: w for w in db.query(WordBank).filter_by(lesson_id=lesson.id).all()}
+    assert set(rows) == {"recognize", "write"}
+    assert db.get(WordMastery, rec_m_id).word_bank_id == rows["recognize"].id
+    assert db.get(WordMastery, wr_m_id).word_bank_id == rows["write"].id
+    assert db.get(WordMastery, rec_m_id).correct_count == 5
+    assert db.get(WordMastery, wr_m_id).correct_count == 2
+
+
+def test_parse_ai_output_chinese_three_kinds():
+    from app.services.lesson_extract import _parse_ai_output
+
+    raw = """识字：
+箩|luó
+写字：
+箩|luó
+词语：
+枚|máo 一枚
+知识点：
+白鹭
+课文：
+一首诗。"""
+    parsed = _parse_ai_output(raw, "语文")
+    kinds = [(w["word"], w["kind"]) for w in parsed["words"]]
+    assert kinds == [("箩", "recognize"), ("箩", "write"), ("枚", "phrase")]
+    assert parsed["points"] == ["白鹭"]
+    assert "一首诗" in parsed["text"]
+
+
+def test_parse_ai_output_english_words_have_kind_word():
+    from app.services.lesson_extract import _parse_ai_output
+
+    raw = """生词：
+apple|/ˈæpl/ n. 苹果
+busy|/ˈbɪzi/ adj. 忙碌的
+知识点：
+可数名词
+课文：
+Hello."""
+    parsed = _parse_ai_output(raw, "英语")
+    assert all(w["kind"] == "word" for w in parsed["words"])
+    assert [w["word"] for w in parsed["words"]] == ["apple", "busy"]
