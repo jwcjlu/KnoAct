@@ -19,6 +19,9 @@ venv/
 # Claude Code worktrees (session metadata — never commit)
 .claude/worktrees/
 
+# Superpowers worktrees (implemented-plan isolation — never commit)
+.worktrees/
+
 # Render service generated media (mp4 output)
 render_service/media/
 
