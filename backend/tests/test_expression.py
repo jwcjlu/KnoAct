@@ -691,3 +691,41 @@ def test_probe_rejects_parent_actor():
         headers=parent_h,
     )
     assert r.status_code == 403
+
+
+def test_create_note_without_probe_has_empty_hint():
+    uid, h = _seed_child(prefix="hint0")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="hint0")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "只写一段",
+    }, headers=h)
+    assert r.status_code == 200
+    notes = _client().get(f"/api/expression/notes?user_id={uid}", headers=h).json()["notes"]
+    assert notes[0]["parent_hint"] in ("", None)
+    assert "probe_turns" not in notes[0]
+
+
+def test_create_note_with_probe_turns_may_set_hint():
+    uid, h = _seed_child(prefix="hint1")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="hint1")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "比喻就是像",
+        "probe_turns": [{"q": "什么时候不算？", "a": "不知道"}],
+    }, headers=h)
+    assert r.status_code == 200
+    notes = _client().get(f"/api/expression/notes?user_id={uid}", headers=h).json()["notes"]
+    n = notes[0]
+    assert "parent_hint" in n
+    assert "probe_turns" not in n
+    for bad in ("很好", "掌握", "正确", "错误"):
+        assert bad not in (n.get("parent_hint") or "")
+
+
+def test_create_note_rejects_too_many_probe_turns():
+    uid, h = _seed_child(prefix="hint2")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="hint2")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "x",
+        "probe_turns": [{"q": "q", "a": "a"}] * 4,
+    }, headers=h)
+    assert r.status_code == 400

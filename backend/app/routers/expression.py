@@ -17,6 +17,7 @@ from ..models import (
 )
 from ..services.ai import get_provider
 from ..services.bucket_guard import assert_writable, resolve_bucket_id
+from ..services import expression_probe as probe_svc
 from ..services.expression_probe import ask_next_question, normalize_probe_turns
 
 router = APIRouter(prefix="/api/expression", tags=["expression"])
@@ -76,6 +77,7 @@ class NoteReq(BaseModel):
     knowledge_point_id: int | None = None
     item_id: int | None = None
     text: str
+    probe_turns: list[dict] | None = None
 
 
 def _validate_target(child: User, req: NoteReq, db: Session) -> str:
@@ -125,11 +127,29 @@ def create_note(req: NoteReq, user: User = Depends(require_learning_user),
     child = _require_grade(req.user_id, db)
     title = _validate_target(child, req, db)
 
+    turns: list[dict] = []
+    if req.probe_turns is not None:
+        try:
+            turns = probe_svc.normalize_probe_turns(req.probe_turns)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    hint = ""
+    if turns:
+        try:
+            provider = get_provider(db, child_id=req.user_id)
+            hint = probe_svc.build_parent_hint(
+                provider, title=title, text=text, turns=turns) or ""
+        except Exception:
+            hint = ""
+
     bid = resolve_bucket_id(db, req.user_id, None)
     note = ExpressionNote(
         user_id=req.user_id, bucket_id=bid,
         knowledge_point_id=req.knowledge_point_id, item_id=req.item_id,
         title=title, text=text,
+        probe_turns=probe_svc.dumps_turns(turns) if turns else "",
+        parent_hint=hint,
     )
     db.add(note); db.commit(); db.refresh(note)
     return {"id": note.id, "created_at": note.created_at.isoformat()}
@@ -184,6 +204,7 @@ def list_notes(user_id: int = Depends(resolve_target_user_id),
             .limit(max(1, min(limit, 200))).all())
     return {"notes": [
         {"id": n.id, "title": n.title, "text": n.text,
+         "parent_hint": n.parent_hint or "",
          "created_at": n.created_at.isoformat()}
         for n in rows
     ]}
