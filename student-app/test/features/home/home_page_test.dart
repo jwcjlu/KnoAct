@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_app/core/api_client.dart';
 import 'package:student_app/features/auth/data/auth_repository.dart';
@@ -110,6 +111,7 @@ Future<void> pumpHome(
   WidgetTester tester,
   FakeHomeRepository repo, {
   Size size = const Size(420, 900),
+  GoRouter? router,
 }) async {
   SharedPreferences.setMockInitialValues({
     'knoact_child_id': 4,
@@ -134,7 +136,9 @@ Future<void> pumpHome(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: const MaterialApp(home: Scaffold(body: HomePage())),
+      child: router == null
+          ? const MaterialApp(home: Scaffold(body: HomePage()))
+          : MaterialApp.router(routerConfig: router),
     ),
   );
   await tester.pumpAndSettle();
@@ -289,5 +293,34 @@ void main() {
     expect(find.text('数独'), findsOneWidget);
     expect(find.text('舒尔特'), findsOneWidget);
     expect(find.text('扫雷'), findsOneWidget);
+  });
+
+  testWidgets('首页讲一遍入口点击后进入表达页', (tester) async {
+    final router = GoRouter(
+      initialLocation: '/home',
+      routes: [
+        GoRoute(
+          path: '/home',
+          builder: (_, _) => const Scaffold(body: HomePage()),
+        ),
+        GoRoute(
+          path: '/expression',
+          builder: (_, _) => const Scaffold(body: Text('表达页')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await pumpHome(tester, FakeHomeRepository(), router: router);
+
+    final entry = find.byKey(const ValueKey('expression-home-entry'));
+    await tester.scrollUntilVisible(entry, 300);
+    expect(entry, findsOneWidget);
+    expect(find.text('讲一遍'), findsOneWidget);
+    expect(find.text('用自己的话讲讲你学的知识点'), findsOneWidget);
+
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+
+    expect(find.text('表达页'), findsOneWidget);
   });
 }

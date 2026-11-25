@@ -268,6 +268,32 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ),
               const SizedBox(height: 16),
+              // 表达练习：独立入口，不进每日任务
+              Card(
+                child: ListTile(
+                  key: const ValueKey('expression-home-entry'),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 8,
+                  ),
+                  leading: const Icon(
+                    Icons.record_voice_over,
+                    color: AppColors.blue,
+                    size: 32,
+                  ),
+                  title: const Text(
+                    '讲一遍',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  subtitle: const Text('用自己的话讲讲你学的知识点'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/expression'),
+                ),
+              ),
+              const SizedBox(height: 16),
               // 思维训练：独立入口，孩子自由玩，不进每日任务
               Card(
                 child: Padding(

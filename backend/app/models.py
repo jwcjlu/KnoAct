@@ -640,6 +640,30 @@ class AnswerRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ExpressionNote(Base):
+    """孩子用自己的话讲一个知识点的记录。
+
+    刻意不含 verdict / score / ai_* 字段：本功能不做判定，也不做 AI 交互。
+    详见 docs/superpowers/specs/2026-11-25-feynman-teach-ai-design.md 的「五轮失败记录」。
+    """
+    __tablename__ = "expression_notes"
+    __table_args__ = (
+        Index("ix_expression_notes_user_created", "user_id", "created_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    bucket_id: Mapped[int | None] = mapped_column(ForeignKey("school_year_buckets.id"), nullable=True)
+    # 讲的是哪个：两个来源二选一（服务层校验至少一个非空）
+    knowledge_point_id: Mapped[int | None] = mapped_column(
+        ForeignKey("knowledge_points.id", ondelete="SET NULL"), nullable=True)
+    item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("training_items.id", ondelete="SET NULL"), nullable=True)
+    # 冗余存标题：知识点被删后家长端仍可读
+    title: Mapped[str] = mapped_column(String(255), default="")
+    text: Mapped[str] = mapped_column(LongText)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class BrainGameResult(Base):
     """思维训练小游戏成绩：客户端本地出题，后端只记录结果用于统计最佳。
 
