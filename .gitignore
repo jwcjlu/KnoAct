@@ -44,3 +44,6 @@ knoact-student-app-*.tar
 
 # ±¾µØÁÙÊ±äÖÈ¾²úÎï
 /build/
+
+# æœ¬åœ°æœåŠ¡æ—¥å¿—ï¼ˆscripts/dev.ps1 äº§ç”Ÿï¼‰
+.devlogs/
