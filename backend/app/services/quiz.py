@@ -213,6 +213,16 @@ def grade_verdict(
     return VERDICT_NOT_UNDERSTOOD
 
 
+def verdict_evidence_ok(verdict: str) -> bool | None:
+    """verdict 对应的「出处是否找对」。unknown = 无法判定（None），不是找错。
+
+    集中在这里而不是在路由里反推，是为了避免新增 verdict 时静默落成 False。
+    """
+    if verdict == VERDICT_UNKNOWN:
+        return None
+    return verdict in (VERDICT_CONFIRMED, VERDICT_EXPRESSION_WEAK)
+
+
 def record_quiz_mistake(db: Session, user_id: int, question: str,
                         your_answer: str, correct_answer: str,
                         kp_id: int | None = None,

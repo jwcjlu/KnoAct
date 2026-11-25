@@ -149,3 +149,65 @@ def test_submit_score_unchanged_by_evidence():
     }, headers=headers)
     assert r.json()["score"] == 1
     assert r.json()["total"] == 1
+
+
+def test_submit_pairs_results_by_question_id_not_submission_order():
+    """客户端乱序提交时，判分必须按 question_id 对齐到题目，而不是按位置。
+
+    旧实现用 zip(questions, results)，results 却是 req.answers 的顺序；
+    乱序提交会把对错/出处写到错误的题目上。
+    """
+    questions = [
+        {
+            "id": "qa",
+            "prompt": "第一题（正确答案是 A）",
+            "choices": [EVIDENCE, OTHER, "云朵仿佛棉花糖。", "湖水很清很清。"],
+            "correct_index": 0,
+            "evidence": EVIDENCE,
+        },
+        {
+            "id": "qb",
+            "prompt": "第二题（正确答案是 B）",
+            "choices": [OTHER, EVIDENCE, "云朵仿佛棉花糖。", "湖水很清很清。"],
+            "correct_index": 1,
+            "evidence": EVIDENCE,
+        },
+    ]
+    quiz_id, headers = _seed_quiz(questions)
+    # 按 qb、qa 的倒序提交；qa 答对且出处对，qb 答错且出处错。
+    # 两题结果必须不同，否则交换两个相同结果无法暴露位置错配。
+    r = client.post("/api/quiz/submit", json={
+        "quiz_id": quiz_id,
+        "answers": [
+            {"question_id": "qb", "selected_index": 0, "evidence_sentence": OTHER},
+            {"question_id": "qa", "selected_index": 0, "evidence_sentence": EVIDENCE},
+        ],
+    }, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["score"] == 1
+
+    db = SessionLocal()
+    try:
+        rows = {row.question: row for row in
+                db.query(AnswerRecord).filter_by(module="quiz").all()}
+        assert len(rows) == 2
+        assert rows["第一题（正确答案是 A）"].is_correct is True
+        assert rows["第一题（正确答案是 A）"].evidence_text == EVIDENCE
+        assert rows["第一题（正确答案是 A）"].evidence_ok is True
+        assert rows["第二题（正确答案是 B）"].is_correct is False
+        assert rows["第二题（正确答案是 B）"].evidence_text == OTHER
+        assert rows["第二题（正确答案是 B）"].evidence_ok is False
+    finally:
+        db.close()
+
+
+def test_verdict_evidence_ok_maps_each_verdict():
+    from app.services.quiz import (
+        VERDICT_CONFIRMED, VERDICT_EXPRESSION_WEAK, VERDICT_LUCKY,
+        VERDICT_NOT_UNDERSTOOD, VERDICT_UNKNOWN, verdict_evidence_ok,
+    )
+    assert verdict_evidence_ok(VERDICT_CONFIRMED) is True
+    assert verdict_evidence_ok(VERDICT_EXPRESSION_WEAK) is True
+    assert verdict_evidence_ok(VERDICT_LUCKY) is False
+    assert verdict_evidence_ok(VERDICT_NOT_UNDERSTOOD) is False
+    assert verdict_evidence_ok(VERDICT_UNKNOWN) is None
