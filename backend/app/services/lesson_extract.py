@@ -380,7 +380,10 @@ def _parse_ai_output(raw: str, subject: str) -> dict:
                 section = f"cn_{ck}"
                 continue
         if s.startswith("生词"):
-            section = "words"
+            if cn:
+                section = None
+            else:
+                section = "words"
             continue
         if s.startswith("知识点"):
             section = "points"
@@ -390,7 +393,9 @@ def _parse_ai_output(raw: str, subject: str) -> dict:
             continue
         if not s:
             continue
-        if section in ("words",) or (section and section.startswith("cn_")):
+        if (section in ("words",) and not cn) or (
+            section and section.startswith("cn_")
+        ):
             parsed = _parse_word_line(s)
             if not parsed:
                 continue

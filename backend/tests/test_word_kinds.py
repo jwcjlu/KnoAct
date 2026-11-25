@@ -192,6 +192,21 @@ def test_parse_ai_output_chinese_three_kinds():
     assert "一首诗" in parsed["text"]
 
 
+def test_parse_ai_output_chinese_rejects_shengci_section():
+    from app.services.lesson_extract import _parse_ai_output
+
+    raw = """生词：
+箩|luó
+知识点：
+白鹭
+课文：
+一首诗。"""
+    parsed = _parse_ai_output(raw, "语文")
+    assert parsed["words"] == []
+    assert parsed["points"] == ["白鹭"]
+    assert "一首诗" in parsed["text"]
+
+
 def test_parse_ai_output_english_words_have_kind_word():
     from app.services.lesson_extract import _parse_ai_output
 
