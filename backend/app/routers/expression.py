@@ -4,6 +4,7 @@
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.access import (
@@ -11,7 +12,7 @@ from ..core.access import (
 )
 from ..database import get_db
 from ..models import (
-    ExpressionNote, KnowledgeMastery, KnowledgePoint, TrainingGroup,
+    ChildConfig, ExpressionNote, KnowledgeMastery, KnowledgePoint, TrainingGroup,
     TrainingItem, User,
 )
 from ..services.bucket_guard import assert_writable, resolve_bucket_id
@@ -161,3 +162,66 @@ def delete_note(note_id: int, user: User = Depends(require_learning_user),
         raise HTTPException(status_code=400, detail="历史学年只读")
     db.delete(note); db.commit()
     return {"ok": True}
+
+
+SEEN_ID_KEY = "expression_seen_note_id"
+
+
+def _get_seen_note_id(db: Session, user_id: int) -> int:
+    """已读水位线：家长看过的最大的 note id。没记录就是 0。"""
+    row = db.query(ChildConfig).filter_by(user_id=user_id, key=SEEN_ID_KEY).first()
+    if row is None or not row.value:
+        return 0
+    try:
+        return int(row.value)
+    except ValueError:
+        return 0
+
+
+class SeenReq(BaseModel):
+    user_id: int
+
+
+@router.get("/unread-count")
+def unread_count(user_id: int = Depends(resolve_target_user_id),
+                 _auth: User = Depends(require_learning_user),
+                 db: Session = Depends(get_db)):
+    """孩子讲了几条家长还没看过的。不判定内容，只数条数。
+
+    用 id 水位线而不是时间戳：MySQL 的 DATETIME 不存微秒，
+    同秒内先 mark-seen 再写笔记会被时间戳方案误判成已读。
+    """
+    _require_grade(user_id, db)
+    seen_id = _get_seen_note_id(db, user_id)
+    n = (db.query(ExpressionNote)
+         .filter(ExpressionNote.user_id == user_id,
+                 ExpressionNote.id > seen_id)
+         .count())
+    return {"count": n}
+
+
+@router.post("/mark-seen")
+def mark_seen(req: SeenReq, user: User = Depends(require_learning_user),
+              db: Session = Depends(get_db)):
+    """把已读水位线推到当前最大的 note id。只会前进，不会后退。"""
+    ensure_user_access(user, req.user_id, db)
+    _require_grade(req.user_id, db)
+
+    max_id = (db.query(func.max(ExpressionNote.id))
+              .filter(ExpressionNote.user_id == req.user_id)
+              .scalar()) or 0
+
+    row = db.query(ChildConfig).filter_by(
+        user_id=req.user_id, key=SEEN_ID_KEY).first()
+    if row is None:
+        db.add(ChildConfig(user_id=req.user_id, key=SEEN_ID_KEY,
+                           value=str(max_id)))
+    else:
+        try:
+            prev = int(row.value or 0)
+        except ValueError:
+            prev = 0
+        if max_id > prev:
+            row.value = str(max_id)
+    db.commit()
+    return {"ok": True, "seen_id": max_id}

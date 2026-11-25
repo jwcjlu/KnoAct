@@ -488,3 +488,127 @@ def test_purge_lesson_detaches_expression_notes():
         assert rows[0].text == "我讲过了"
     finally:
         s.close()
+
+
+def test_unread_count_counts_all_when_never_seen():
+    """家长从没看过 → 全部笔记都算未读。"""
+    uid, h = _seed_child(prefix="u1")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="u1")
+    for text in ("第一条", "第二条"):
+        _client().post("/api/expression/notes", json={
+            "user_id": uid, "knowledge_point_id": kp_id, "text": text
+        }, headers=h)
+
+    assert _client().get(f"/api/expression/unread-count?user_id={uid}",
+                         headers=h).json()["count"] == 2
+
+
+def test_unread_count_zero_after_mark_seen():
+    uid, h = _seed_child(prefix="u2")
+    kp_id = _seed_kp_with_mastery(uid, "拟人", prefix="u2")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "看过之前的"
+    }, headers=h)
+
+    assert _client().post("/api/expression/mark-seen",
+                          json={"user_id": uid}, headers=h).status_code == 200
+    assert _client().get(f"/api/expression/unread-count?user_id={uid}",
+                         headers=h).json()["count"] == 0
+
+
+def test_unread_count_rises_when_new_note_after_seen():
+    uid, h = _seed_child(prefix="u3")
+    kp_id = _seed_kp_with_mastery(uid, "排比", prefix="u3")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "旧的"
+    }, headers=h)
+    _client().post("/api/expression/mark-seen", json={"user_id": uid}, headers=h)
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "新的"
+    }, headers=h)
+
+    assert _client().get(f"/api/expression/unread-count?user_id={uid}",
+                         headers=h).json()["count"] == 1
+
+
+def test_unread_is_stable_within_the_same_second():
+    """同秒内先 mark-seen 再写笔记，必须算未读。
+
+    这是换成 id 水位线的原因：MySQL 的 DATETIME 不存微秒，
+    时间戳方案会把同秒的新笔记当成已读。
+    """
+    uid, h = _seed_child(prefix="u4")
+    kp_id = _seed_kp_with_mastery(uid, "夸张", prefix="u4")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "同秒内先有的"
+    }, headers=h)
+    _client().post("/api/expression/mark-seen", json={"user_id": uid}, headers=h)
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "同秒内新写的"
+    }, headers=h)
+
+    assert _client().get(f"/api/expression/unread-count?user_id={uid}",
+                         headers=h).json()["count"] == 1
+
+
+def test_mark_seen_never_decreases_watermark():
+    """已读水位线不能往回退：先看 3 条，再手动把水位改小，mark-seen 应拉回最大值。"""
+    from app.database import SessionLocal
+    from app.models import ChildConfig
+
+    uid, h = _seed_child(prefix="u5")
+    kp_id = _seed_kp_with_mastery(uid, "对偶", prefix="u5")
+    for i in range(3):
+        _client().post("/api/expression/notes", json={
+            "user_id": uid, "knowledge_point_id": kp_id, "text": f"第{i}条"
+        }, headers=h)
+    _client().post("/api/expression/mark-seen", json={"user_id": uid}, headers=h)
+
+    # 人为把水位改小
+    s = SessionLocal()
+    row = s.query(ChildConfig).filter_by(
+        user_id=uid, key="expression_seen_note_id").first()
+    row.value = "0"
+    s.commit()
+    s.close()
+
+    _client().post("/api/expression/mark-seen", json={"user_id": uid}, headers=h)
+    assert _client().get(f"/api/expression/unread-count?user_id={uid}",
+                         headers=h).json()["count"] == 0
+
+
+def test_mark_seen_with_no_notes_is_safe():
+    """还没有任何笔记时标记已读，不应报错。"""
+    uid, h = _seed_child(prefix="u6")
+    assert _client().post("/api/expression/mark-seen",
+                          json={"user_id": uid}, headers=h).status_code == 200
+    assert _client().get(f"/api/expression/unread-count?user_id={uid}",
+                         headers=h).json()["count"] == 0
+
+
+def test_unread_count_is_per_child():
+    uid_a, h_a = _seed_child(prefix="u7a")
+    uid_b, h_b = _seed_child(prefix="u7b")
+    kp_a = _seed_kp_with_mastery(uid_a, "A的", prefix="u7a")
+    kp_b = _seed_kp_with_mastery(uid_b, "B的", prefix="u7b")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid_a, "knowledge_point_id": kp_a, "text": "A"
+    }, headers=h_a)
+    _client().post("/api/expression/notes", json={
+        "user_id": uid_b, "knowledge_point_id": kp_b, "text": "B1"
+    }, headers=h_b)
+    _client().post("/api/expression/notes", json={
+        "user_id": uid_b, "knowledge_point_id": kp_b, "text": "B2"
+    }, headers=h_b)
+
+    assert _client().get(f"/api/expression/unread-count?user_id={uid_a}",
+                         headers=h_a).json()["count"] == 1
+    assert _client().get(f"/api/expression/unread-count?user_id={uid_b}",
+                         headers=h_b).json()["count"] == 2
+
+
+def test_unread_count_rejects_other_child():
+    uid, h = _seed_child(prefix="u8")
+    other_uid, _ = _seed_child(prefix="u8b")
+    r = _client().get(f"/api/expression/unread-count?user_id={other_uid}", headers=h)
+    assert r.status_code == 403
