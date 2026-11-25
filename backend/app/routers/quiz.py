@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..core.access import ensure_lesson_document_access, ensure_user_access, require_learning_user
 from ..database import get_db
 from ..models import Quiz, Text, KnowledgePoint, Lesson, User
-from ..services.quiz import grade_answers, strip_key
+from ..services.quiz import grade_answers, grade_verdict, strip_key
 from ..services.answer_record import record_answer
 from ..services.bucket_guard import resolve_bucket_id
 
@@ -102,6 +102,20 @@ def quiz_submit(req: QuizSubmitReq, user: User = Depends(require_learning_user),
         if not isinstance(a.get("selected_index"), int):
             raise HTTPException(status_code=422, detail="选项无效")
     results = grade_answers(questions, req.answers)
+    # 答 + 指：把每条答案的出处与题目 evidence 比较，产出四态 verdict
+    chosen_by_qid = {a.get("question_id"): (a.get("evidence_sentence") or "").strip()
+                     for a in req.answers}
+    q_by_id = {q["id"]: q for q in questions}
+    for r in results:
+        q = q_by_id.get(r.get("question_id")) or {}
+        chosen = chosen_by_qid.get(r.get("question_id"), "")
+        verdict = grade_verdict(
+            answer_correct=r["is_correct"] is True,
+            chosen_evidence=chosen,
+            correct_evidence=q.get("evidence") or "",
+        )
+        r["verdict"] = verdict
+        r["evidence_ok"] = None if verdict == "unknown" else (verdict in ("confirmed", "expression_weak"))
     # 题目里的知识点 id 由 AI 选出，可能已被删除或是编造的；只认库里存在的
     kp_ids = {q.get("knowledge_point_id") for q in questions if isinstance(q.get("knowledge_point_id"), int)}
     valid_kp = {r[0] for r in db.query(KnowledgePoint.id).filter(KnowledgePoint.id.in_(kp_ids)).all()} if kp_ids else set()
@@ -133,6 +147,8 @@ def quiz_submit(req: QuizSubmitReq, user: User = Depends(require_learning_user),
                 source_type="quiz", source_id=q["id"],
                 duration_ms=next((a.get("duration_ms") for a in req.answers
                                   if a.get("question_id") == q["id"]), None),
+                evidence_text=chosen_by_qid.get(q["id"], ""),
+                evidence_ok=r["evidence_ok"],
                 bucket_id=quiz.bucket_id,
             )
             if not r["is_correct"]:
