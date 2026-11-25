@@ -129,9 +129,9 @@ class ExpressionNote(Base):
 
     # 讲的是哪个知识点：两个来源二选一
     knowledge_point_id: Mapped[int | None] = mapped_column(
-        ForeignKey("knowledge_points.id"), nullable=True)
+        ForeignKey("knowledge_points.id", ondelete="SET NULL"), nullable=True)
     item_id: Mapped[int | None] = mapped_column(
-        ForeignKey("training_items.id"), nullable=True)
+        ForeignKey("training_items.id", ondelete="SET NULL"), nullable=True)
 
     # 冗余存一份标题，便于家长端展示（知识点可能被删）
     title: Mapped[str] = mapped_column(String(255), default="")
@@ -212,7 +212,10 @@ child = db.get(User, user_id)
 parent_id = child.parent_id if child else None
 if parent_id:
     group_ids = [g.id for g in db.query(TrainingGroup.id).filter_by(owner_id=parent_id)]
-    items = db.query(TrainingItem).filter(TrainingItem.group_id.in_(group_ids)).all()
+    items = (db.query(TrainingItem)
+             .filter(TrainingItem.group_id.in_(group_ids),
+                     TrainingItem.kind == "explore")
+             .all())
 ```
 
 `title` 取 `TrainingItem.primary`（空则 `block_title`）。
@@ -236,7 +239,7 @@ if (child.grade or 3) < 3:   # None 视为 3（与桶的缺省年级一致）
 
 | 来源 | 校验 |
 | --- | --- |
-| `knowledge_point_id` | 该孩子（该桶）有 `KnowledgeMastery` 记录 |
+| `knowledge_point_id` | 该孩子在 **active 桶**（`resolve_bucket_id`）上有 `KnowledgeMastery` 记录 |
 | `item_id` | 属于 `child.parent_id` 名下的 group，且 `kind == "explore"` |
 
 不满足 → 403。
@@ -260,7 +263,7 @@ if (child.grade or 3) < 3:   # None 视为 3（与桶的缺省年级一致）
 
 **不新增权限模型**——`ensure_user_access`（已有）已覆盖「孩子看自己 / 家长看孩子 / admin 全部」。
 
-`DELETE` 时：`assert_writable(db, note.user_id, note.bucket_id)`（历史学年只读），与 `mistakes.py` 的写法一致。
+`DELETE` 时：`assert_writable(db, note.user_id, note.bucket_id)`（历史学年只读），并捕获 `PermissionError` 返回 400——参照 `routers/goals.py` / `routers/points.py` 的写法。
 
 ---
 
@@ -305,7 +308,7 @@ if (child.grade or 3) < 3:   # None 视为 3（与桶的缺省年级一致）
 7. `GET /topics`：只返回该孩子 active 桶下有 `KnowledgeMastery` 的 `KnowledgePoint`，以及 `parent_id` 名下 group 的 `explore` 条目。
 8. `POST` 可见性：传一个不属于该孩子的 `knowledge_point_id` → 403。
 9. **模型层断言**：`ExpressionNote` 没有 `verdict` / `score` / `ai_*` 字段（防止未来偷偷加判定）。
-10. 年级门槛：`grade < 3` 或 `grade is None` → 四个端点全部 403。
+10. 年级门槛：`grade` 为 1 或 2 → 四个端点全部 403；**`grade is None` 视为 3，放行**（与 §3.2 的 `(grade or 3) < 3` 一致）。
 11. 外键 `SET NULL`：删掉 `KnowledgePoint` 后，`GET /notes` 仍能返回该条记录（`title` 快照保留）。
 
 **Flutter**
