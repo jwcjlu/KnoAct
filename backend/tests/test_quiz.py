@@ -1,4 +1,4 @@
-from app.services.quiz import evidence_key, grade_answers, quiz_system_prompt
+from app.services.quiz import evidence_key, grade_answers, grade_verdict, quiz_system_prompt
 
 
 def test_quiz_system_prompt_english():
@@ -112,3 +112,72 @@ def test_submit_quiz_ignores_unknown_knowledge_point(setup_db):
     m = db.query(Mistake).filter_by(user_id=uid).one()
     assert m.knowledge_point_id is None and m.your_answer == "画"
     db.close()
+
+
+def test_grade_verdict_confirmed_when_answer_and_evidence_correct():
+    # 答案对、指出的句子就是支持答案的原文
+    assert grade_verdict(
+        answer_correct=True,
+        chosen_evidence="弯弯的月亮像一条小船",
+        correct_evidence="弯弯的月亮像一条小船。",
+    ) == "confirmed"
+
+
+def test_grade_verdict_lucky_when_answer_right_but_evidence_wrong():
+    assert grade_verdict(
+        answer_correct=True,
+        chosen_evidence="小鸟在枝头唱歌",
+        correct_evidence="弯弯的月亮像一条小船。",
+    ) == "lucky"
+
+
+def test_grade_verdict_expression_weak_when_answer_wrong_but_evidence_right():
+    # 这是最要紧的一态：理解到位、表达没到位
+    assert grade_verdict(
+        answer_correct=False,
+        chosen_evidence="弯弯的月亮像一条小船。",
+        correct_evidence="弯弯的月亮像一条小船。",
+    ) == "expression_weak"
+
+
+def test_grade_verdict_not_understood_when_both_wrong():
+    assert grade_verdict(
+        answer_correct=False,
+        chosen_evidence="小鸟在枝头唱歌",
+        correct_evidence="弯弯的月亮像一条小船。",
+    ) == "not_understood"
+
+
+def test_grade_verdict_unknown_when_no_evidence_provided():
+    assert grade_verdict(
+        answer_correct=True,
+        chosen_evidence="",
+        correct_evidence="弯弯的月亮像一条小船。",
+    ) == "unknown"
+
+
+def test_grade_verdict_unknown_when_question_has_no_evidence():
+    # 题库题可能没 evidence，此时无法判出处
+    assert grade_verdict(
+        answer_correct=True,
+        chosen_evidence="随便一句",
+        correct_evidence="",
+    ) == "unknown"
+
+
+def test_grade_verdict_evidence_match_ignores_whitespace_and_punctuation_spacing():
+    # 归一化后比较：换行、行号都不影响
+    assert grade_verdict(
+        answer_correct=True,
+        chosen_evidence="弯弯的月亮\n像一条小船",
+        correct_evidence="弯弯的月亮像一条小船。",
+    ) == "confirmed"
+
+
+def test_grade_verdict_evidence_match_allows_partial_sentence():
+    # 孩子可能只点到句中的短语，只要归一化后是子串就算对
+    assert grade_verdict(
+        answer_correct=True,
+        chosen_evidence="像一条小船",
+        correct_evidence="弯弯的月亮像一条小船。",
+    ) == "confirmed"
