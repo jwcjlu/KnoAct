@@ -52,10 +52,29 @@ class ExpressionRepository {
     int? itemId,
     required String text,
   }) async {
+    assertExpressionNoteTarget(
+      knowledgePointId: knowledgePointId,
+      itemId: itemId,
+    );
     final body = <String, dynamic>{'user_id': userId, 'text': text};
     if (knowledgePointId != null) body['knowledge_point_id'] = knowledgePointId;
     if (itemId != null) body['item_id'] = itemId;
     await _api.post('/api/expression/notes', body: body);
+  }
+}
+
+/// [createNote] 必须且只能指定 knowledge_point 或 training_item 之一。
+void assertExpressionNoteTarget({
+  int? knowledgePointId,
+  int? itemId,
+}) {
+  final hasKp = knowledgePointId != null;
+  final hasItem = itemId != null;
+  if (hasKp == hasItem) {
+    throw ArgumentError(
+      'createNote requires exactly one of knowledgePointId or itemId '
+      '(got knowledgePointId=$knowledgePointId, itemId=$itemId)',
+    );
   }
 }
 

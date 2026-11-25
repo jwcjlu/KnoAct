@@ -10,8 +10,13 @@ void main() {
     );
 
     expect(find.textContaining('记下来了'), findsOneWidget);
+    expect(
+      find.textContaining(RegExp(r'看到|爸爸/妈妈')),
+      findsOneWidget,
+      reason: '应说明家长能看到讲解',
+    );
 
-    const banned = ['好', '棒', '正确', '完整', '不错', '优秀', '错'];
+    const banned = ['好', '棒', '正确', '完整', '不错', '优秀', '错', '厉害', '真棒'];
     for (final word in banned) {
       expect(
         find.textContaining(word),

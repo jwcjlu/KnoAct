@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api_client.dart';
 import '../auth/session.dart';
 import 'data/expression_repository.dart';
 
@@ -10,6 +11,7 @@ class ExpressionState {
     this.text = '',
     this.busy = false,
     this.done = false,
+    this.error,
   });
 
   final List<ExpressionTopic> topics;
@@ -18,18 +20,23 @@ class ExpressionState {
   final bool busy;
   final bool done;
 
+  /// `forbidden`：功能未对该用户开放（如 403）；`failed`：加载失败。
+  final String? error;
+
   ExpressionState copyWith({
     List<ExpressionTopic>? topics,
     ExpressionTopic? Function()? selected,
     String? text,
     bool? busy,
     bool? done,
+    String? Function()? error,
   }) => ExpressionState(
     topics: topics ?? this.topics,
     selected: selected != null ? selected() : this.selected,
     text: text ?? this.text,
     busy: busy ?? this.busy,
     done: done ?? this.done,
+    error: error != null ? error() : this.error,
   );
 }
 
@@ -51,13 +58,28 @@ class ExpressionController extends Notifier<ExpressionState> {
     final token = ++_loadToken;
     state = state.copyWith(busy: true);
     List<ExpressionTopic>? topics;
+    String? loadError;
     try {
       topics = await ref.read(expressionRepositoryProvider).topics(userId: uid);
+      loadError = null;
+    } on ApiException catch (e) {
+      if (e.statusCode == 403) {
+        topics = const [];
+        loadError = 'forbidden';
+      } else {
+        topics = null;
+        loadError = 'failed';
+      }
     } catch (_) {
       topics = null;
+      loadError = 'failed';
     }
     if (!ref.mounted || token != _loadToken || _uid != uid) return;
-    state = state.copyWith(topics: topics ?? state.topics, busy: false);
+    state = state.copyWith(
+      topics: topics ?? state.topics,
+      busy: false,
+      error: () => loadError,
+    );
   }
 
   void select(ExpressionTopic topic) {
