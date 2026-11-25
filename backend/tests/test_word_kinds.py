@@ -23,6 +23,37 @@ def test_default_kind_for_subject():
     assert wk.default_kind_for_subject("english") == "word"
 
 
+def test_get_dictation_kinds_cn_default(setup_db, db):
+    from conftest import make_account
+    from app.services.child_config import get_dictation_kinds_cn
+
+    child = make_account(db, "kinds_child", "child")
+    db.commit()
+    assert get_dictation_kinds_cn(db, child.id) == list(wk.DEFAULT_CN_ENABLED)
+
+
+def test_get_dictation_kinds_cn_parses_json(setup_db, db):
+    from conftest import make_account
+    from app.models import ChildConfig
+    from app.services.child_config import get_dictation_kinds_cn
+
+    child = make_account(db, "kinds_json", "child")
+    db.add(ChildConfig(user_id=child.id, key="dictation_kinds_语文", value='["write","phrase"]'))
+    db.commit()
+    assert get_dictation_kinds_cn(db, child.id) == ["write", "phrase"]
+
+
+def test_get_dictation_kinds_cn_empty_list(setup_db, db):
+    from conftest import make_account
+    from app.models import ChildConfig
+    from app.services.child_config import get_dictation_kinds_cn
+
+    child = make_account(db, "kinds_empty", "child")
+    db.add(ChildConfig(user_id=child.id, key="dictation_kinds_语文", value="[]"))
+    db.commit()
+    assert get_dictation_kinds_cn(db, child.id) == []
+
+
 def test_migrate_backfills_kind_by_subject(setup_db, db):
     from sqlalchemy import text
 

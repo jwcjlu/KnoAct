@@ -88,6 +88,12 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
     words = (db.query(WordBank)
              .filter(WordBank.lesson_id.in_(lesson_ids))
              .order_by(WordBank.id).all())
+    if subject == "语文":
+        from .child_config import get_dictation_kinds_cn
+        allowed = set(get_dictation_kinds_cn(db, user_id))
+        words = [w for w in words if w.kind in allowed]
+    else:
+        words = [w for w in words if (w.kind or "word") == "word"]
     if not words:
         return None
 
@@ -158,7 +164,10 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
     return Task(
         task_type="dictation", subject=subject, title=f"{lesson.title} 生词听写",
         detail=f"今日听写 · {len(picked)} 个（复习 {n_review} + 新课 {n_new} + 轮转 {n_rot}）",
-        content=json.dumps([{"id": w.id, "word": w.word, "extra": w.extra} for w in picked], ensure_ascii=False),
+        content=json.dumps([
+            {"id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind}
+            for w in picked
+        ], ensure_ascii=False),
         points=20,
     )
 
@@ -283,13 +292,24 @@ def _gen_review(db, lesson, user_id, count):
         WordMastery.next_review_at.isnot(None), WordMastery.next_review_at <= now).all()]
     if not weak_ids:
         return None
-    words = db.query(WordBank).filter(WordBank.id.in_(weak_ids), WordBank.lesson_id == lesson.id).limit(count).all()
+    words = db.query(WordBank).filter(WordBank.id.in_(weak_ids), WordBank.lesson_id == lesson.id).all()
+    subject = lesson.subject
+    if subject == "语文":
+        from .child_config import get_dictation_kinds_cn
+        allowed = set(get_dictation_kinds_cn(db, user_id))
+        words = [w for w in words if w.kind in allowed]
+    else:
+        words = [w for w in words if (w.kind or "word") == "word"]
+    words = words[:count]
     if not words:
         return None
     return Task(
         task_type="review", subject=lesson.subject, title="到期复习",
         detail=f"遗忘曲线 · {len(words)} 个到期生词",
-        content=json.dumps([{"id": w.id, "word": w.word, "extra": w.extra} for w in words], ensure_ascii=False),
+        content=json.dumps([
+            {"id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind}
+            for w in words
+        ], ensure_ascii=False),
         points=25,
     )
 
