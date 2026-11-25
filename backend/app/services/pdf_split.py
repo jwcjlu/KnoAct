@@ -424,10 +424,30 @@ def detect_lessons_from_pdf(pdf_path: str, subject: str, db=None) -> list[dict]:
     if word_list is not None:
         hits = [(p, t) for p, t in hits if p < word_list["start_page"]]
 
+    cn_tables = _detect_chinese_word_tables(pdf_path, subject, texts, len(texts), db)
+    if cn_tables:
+        table_pages = {
+            p
+            for seg in cn_tables
+            for p in range(seg["start_page"], seg["end_page"] + 1)
+        }
+        hits = [(p, t) for p, t in hits if p not in table_pages]
+        tail_start = min(seg["start_page"] for seg in cn_tables)
+        if hits and hits[-1][0] < tail_start:
+            pass  # last_end 在下方与 word_list 逻辑合并
+
     lessons = []
-    last_end = word_list["start_page"] - 1 if word_list is not None else len(texts)
+    last_end = len(texts)
+    if word_list is not None:
+        last_end = word_list["start_page"] - 1
+    elif cn_tables:
+        tail_start = min(seg["start_page"] for seg in cn_tables)
+        if not hits or hits[-1][0] < tail_start:
+            last_end = min(last_end, tail_start - 1)
     for j, (page_no, title) in enumerate(hits):
         end = hits[j + 1][0] - 1 if j + 1 < len(hits) else last_end
+        if cn_tables:
+            end = _lesson_end_clear_of_cn_tables(page_no, end, cn_tables)
         if end < page_no:
             end = page_no
         lessons.append({"title": title, "start_page": page_no, "end_page": end})
@@ -436,6 +456,12 @@ def detect_lessons_from_pdf(pdf_path: str, subject: str, db=None) -> list[dict]:
             "title": "单词列表",
             "start_page": word_list["start_page"],
             "end_page": word_list["end_page"],
+        })
+    for seg in sorted(cn_tables, key=lambda s: s["start_page"]):
+        lessons.append({
+            "title": seg["title"],
+            "start_page": seg["start_page"],
+            "end_page": seg["end_page"],
         })
     return lessons
 
@@ -483,6 +509,113 @@ def _detect_lessons_scanned(pdf_path: str, subject: str, texts: list[str], db) -
         seen.add(phys)
         hits.append((phys, title))
     return hits
+
+
+_CN_TABLE_TITLES = ("识字表", "写字表", "词语表")
+_CN_TABLE_KIND = {"识字表": "recognize", "写字表": "write", "词语表": "phrase"}
+_CN_TABLE_SUMMARY_TITLES = {"识字表汇总", "写字表汇总", "词语表汇总"}
+
+
+def is_cn_table_title(title: str) -> bool:
+    t = (title or "").strip()
+    return t in _CN_TABLE_TITLES or t in _CN_TABLE_SUMMARY_TITLES
+
+
+def _cn_table_kind_from_text(text: str) -> str | None:
+    head = "\n".join((text or "").strip().splitlines()[:5])
+    for name, kind in _CN_TABLE_KIND.items():
+        if name in head:
+            return kind
+    return None
+
+
+def _page_is_cn_word_table(text: str) -> bool:
+    return _cn_table_kind_from_text(text) is not None
+
+
+def _page_continues_cn_table(text: str) -> bool:
+    """表内续页：无新表标题，但有课号行或大量汉字词条。"""
+    if not text or not text.strip():
+        return False
+    if _page_is_cn_word_table(text):
+        return False
+    lesson_nos = cn_lines = 0
+    for line in text.splitlines():
+        s = line.strip()
+        if re.match(r"^\d{1,2}$", s):
+            lesson_nos += 1
+        elif re.search(r"[\u4e00-\u9fff]", s) and 1 < len(s) <= 24:
+            cn_lines += 1
+    return lesson_nos >= 1 or cn_lines >= 5
+
+
+def _cn_table_title_from_kind(kind: str) -> str:
+    for name, k in _CN_TABLE_KIND.items():
+        if k == kind:
+            return name
+    return kind
+
+
+def _lesson_end_clear_of_cn_tables(page_no: int, end: int, tables: list[dict]) -> int:
+    for seg in tables:
+        ts, te = seg["start_page"], seg["end_page"]
+        if page_no <= te and end >= ts:
+            end = min(end, ts - 1)
+    return max(end, page_no)
+
+
+def _detect_chinese_word_tables(
+    pdf_path: str, subject: str, texts: list[str], total_pages: int, db
+) -> list[dict]:
+    """检测语文教材识字/写字/词语表页码范围。返回多段 {kind, title, start_page, end_page}。"""
+    if subject != "语文" or not texts or total_pages <= 0:
+        return []
+
+    segments: list[dict] = []
+    i = 0
+    while i < total_pages:
+        raw = texts[i] or ""
+        if not _page_is_cn_word_table(raw) and db is not None:
+            ocr = _ocr_page(
+                pdf_path,
+                i,
+                db,
+                "若本页是识字表、写字表或词语表（含课号与汉字词），请原样转写页眉与正文；否则只回复 no。",
+            )
+            if ocr and ocr.strip().lower() not in {"no", "no.", "否", "不是"}:
+                raw = ocr
+        kind = _cn_table_kind_from_text(raw)
+        if not kind:
+            i += 1
+            continue
+        end = i
+        j = i + 1
+        while j < total_pages:
+            nxt = texts[j] or ""
+            if _cn_table_kind_from_text(nxt):
+                break
+            if not _page_continues_cn_table(nxt) and db is not None:
+                ocr = _ocr_page(pdf_path, j, db, "若仍在上一张识字/写字/词语表内，原样转写；否则只回复 no。")
+                if ocr and ocr.strip().lower() not in {"no", "no.", "否", "不是"}:
+                    if _cn_table_kind_from_text(ocr):
+                        break
+                    if _page_continues_cn_table(ocr):
+                        nxt = ocr
+            if _cn_table_kind_from_text(nxt):
+                break
+            if _page_continues_cn_table(nxt):
+                end = j
+                j += 1
+            else:
+                break
+        segments.append({
+            "kind": kind,
+            "title": _cn_table_title_from_kind(kind),
+            "start_page": i + 1,
+            "end_page": end + 1,
+        })
+        i = end + 1
+    return segments
 
 
 def is_word_list_title(title: str) -> bool:
