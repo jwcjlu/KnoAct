@@ -35,6 +35,10 @@ pdfjs_files_tmp.json
 backend/_*.txt
 backend/*.db.bak_*
 
+# flutter run çš„æ—¥å¿—ï¼ˆæœ¬åœ°èµ· web-server æ—¶äº§ç”Ÿï¼‰
+student-app/flutter_run.log
+student-app/flutter_run.err
+
 # ±¾µØ¹¹½¨²úÎï
 knoact-student-app-*.tar
 
