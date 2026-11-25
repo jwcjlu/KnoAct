@@ -77,6 +77,7 @@ let goalRows = [];
 let reportRows = [];
 let masteryReport = null;
 let answerRecords = [];   // 当天做题明细
+let expressionNotes = [];
 async function loadMasteryReport(){
   if(!uid){ masteryReport = null; return null; }
   const u = uid, b = bucketId;
@@ -84,6 +85,14 @@ async function loadMasteryReport(){
   const report = await api(`/api/mastery/report?user_id=${u}${q}`);
   if(u === uid) masteryReport = report;
   return masteryReport;
+}
+async function loadExpressionNotes(){
+  if(!uid){ expressionNotes = []; return []; }
+  try{
+    const r = await api(`/api/expression/notes?user_id=${uid}&limit=20`);
+    expressionNotes = r.notes || [];
+  }catch(_){ expressionNotes = []; }
+  return expressionNotes;
 }
 let configMap = {};
 let aiConfig = {provider:'deepseek', model:'deepseek-chat', key:'', baseUrl:''};
@@ -276,7 +285,7 @@ async function loadBuckets(){
 }
 async function reloadChildData(){
   if(parentTab==='目标') await loadGoals();
-  else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport(), loadAnswerRecords()]);
+  else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport(), loadExpressionNotes(), loadAnswerRecords()]);
   else if(parentTab==='任务') await loadParentTasks();
   else if(parentTab==='屏幕时间') await Promise.all([loadScreenGroups(), loadScreenUsage()]);
 }
@@ -285,7 +294,7 @@ async function switchChild(id){
   if(childSwitching) return;
   uid = Number(id) || null;
   try{ localStorage.setItem(CHILD_KEY, String(uid)); }catch(e){}
-  goalRows = []; reportRows = []; masteryReport = null; parentTasks = [];
+  goalRows = []; reportRows = []; masteryReport = null; expressionNotes = []; parentTasks = [];
   buckets = []; bucketId = null;
   // 进度面板按孩子取数，切换孩子后要重取（否则显示上一个孩子的进度）
   progressRows = [];
@@ -325,7 +334,7 @@ function childSelectHtml(){
 }
 function switchBucket(id){
   bucketId = Number(id) || null;
-  goalRows = []; reportRows = []; masteryReport = null; parentTasks = [];
+  goalRows = []; reportRows = []; masteryReport = null; expressionNotes = []; parentTasks = [];
   reloadChildData().catch(()=>toast('加载孩子数据失败，请稍后重试'));
   if(CHILD_TABS.includes(parentTab)) render(); else renderChildSelect();
 }
@@ -455,7 +464,7 @@ function setParentTab(t){
   if(t==='题库管理'){ loadBankList().then(()=>render()); return; }
   if(t==='题目审核台'){ loadReviewQuestions().then(()=>render()); return; }
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
-  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport(), loadAnswerRecords()]).then(()=>render()); return; }
+  if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport(), loadExpressionNotes(), loadAnswerRecords()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
   if(t==='专项训练'){ loadDrillGroups().then(()=>render()); return; }
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
@@ -3330,6 +3339,19 @@ function renderReportTab(){
             </div>
             <div class="m-bar"><div class="m-fill" style="width:${Math.round(r.mastery*100)}%;background:${r.mastered?'var(--green2)':'var(--orange2)'}"></div></div>
           </div>`).join('') || '<p style="font-size:13px;color:var(--gray2)">暂无掌握度记录</p>'}</div>
+      </div>
+    </div>
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head"><div class="ic purple">${icon('pen',20)}</div>
+        <div><h3>孩子讲的</h3><div class="sub">孩子用自己的话讲知识点（原话，未做对错判断）</div></div></div>
+      <div class="bd">
+        ${expressionNotes.length ? expressionNotes.map(n=>`
+          <div class="goal-item" style="display:block">
+            <div class="g-top"><span class="g-name">${escapeAttr(n.title||'（未命名）')}</span></div>
+            <div class="g-meta" style="white-space:pre-wrap;line-height:1.7">${escapeAttr(n.text)}</div>
+            <div class="g-meta">${escapeAttr((n.created_at||'').slice(0,16).replace('T',' '))}</div>
+          </div>`).join('')
+          : '<p style="font-size:13px;color:var(--gray2)">还没有讲过</p>'}
       </div>
     </div>
     <div class="parent-panel" style="grid-column:1/-1">
