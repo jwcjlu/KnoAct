@@ -20,7 +20,7 @@ def test_expression_note_has_no_judgement_columns():
 def test_expression_note_required_columns_exist():
     cols = _cols()
     for name in ("id", "user_id", "bucket_id", "knowledge_point_id", "item_id",
-                 "title", "text", "created_at"):
+                 "title", "text", "probe_turns", "parent_hint", "created_at"):
         assert name in cols, f"缺列 {name}"
 
 
