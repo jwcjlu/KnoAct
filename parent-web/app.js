@@ -338,7 +338,11 @@ async function switchChild(id){
     try{ await loadExpressionUnread(); }catch(e){}
   }
   catch(e){ toast('加载孩子数据失败，请稍后重试'); }
-  finally { childSwitching = false; CHILD_TABS.includes(parentTab) ? render() : renderChildSelect(); }
+  finally {
+    childSwitching = false;
+    if(CHILD_TABS.includes(parentTab)){ render(); }
+    else { renderChildSelect(); renderNav(); }
+  }
 }
 function renderChildSelect(){
   const host = document.getElementById('child-select-host');
