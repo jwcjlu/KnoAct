@@ -20,11 +20,13 @@
 | 词语表 | 词语 | `phrase` |
 | （英语生词） | 单词 | `word` |
 
+合法枚举仅上表四值。**不引入 `unknown`。**
+
 ## 决策摘要
 
 | 项 | 选择 |
 | --- | --- |
-| 范围 | 拆课 + 家长编辑 + 听写全链路三分 |
+| 范围 | 拆课 + 家长编辑 + 听写/复习生词池全链路三分 |
 | 听写形态 | 家长开关启用哪些 kind；**仍一张** `dictation` 任务混抽 |
 | 出题交互 | 与现听写一致 |
 | 认/写同字 | **各记各的**（两行 WordBank → 两套 WordMastery） |
@@ -40,10 +42,10 @@
 `WordBank` 增加：
 
 ```text
-kind: str  # recognize | write | phrase | word
+kind: str  # recognize | write | phrase | word；默认见迁移
 ```
 
-建议唯一约束：`(lesson_id, kind, word)`（同课同 kind 不重复；同字可同时有 recognize + write）。
+唯一约束：`(lesson_id, kind, word)`（同课同 kind 不重复；同字可同时有 recognize + write）。
 
 `WordMastery` / `Mistake.word_bank_id` **不改结构**——认、写分挂不同 `word_bank_id`。
 
@@ -51,103 +53,124 @@ kind: str  # recognize | write | phrase | word
 
 | 现有行 | 迁移后 kind |
 | --- | --- |
-| `subject=语文` | `phrase`（保守默认；**不**自动猜识字/写字） |
-| `subject=英语`（及其他非语文有词库） | `word` |
+| `subject=语文` | `phrase`（保守；**不**自动猜识字/写字） |
+| 其他有词库学科 | `word` |
 
-另允许过渡值 `unknown`：**默认不进听写池**，逼重拆或家长归类。本版迁移直接落 `phrase`/`word`，不强制写 `unknown`，除非实现时发现无法判断学科。
+步骤：
 
-列由现有 `schema_sync` 补齐；缺省值写入迁移一步（UPDATE 或启动一次性 UPDATE）。
+1. `schema_sync` 加列，默认 `phrase`（或空串后 UPDATE）。  
+2. 按学科 UPDATE 如上。  
+3. **加唯一约束前去重**：同 `(lesson_id, kind, word)` 多行时保留最小 `id`，其余行的 `WordMastery` / `Mistake` 的 `word_bank_id` 改挂保留行后删除重复行。  
+4. 再创建唯一索引。
 
-### 1.3 任务快照
+验收预期：旧语文课在重拆或家长手调前，词会堆在「词语」栏；**三类可分**以新拆课或手调为准。
 
-听写 `Task.content` 每项：`{id, word, extra, kind}`。旧客户端忽略未知字段仍可做题。
+### 1.3 任务快照与读接口
+
+听写 `Task.content` 每项：`{id, word, extra, kind}`。  
+课详情等返回 `words` 的接口须带 `kind`。孩子端可忽略展示，作答仍按 `id`。
 
 ---
 
 ## 二、拆课提取 + 家长编辑
 
-### 2.1 提取（语文）
+### 2.1 提取中间结构
 
-`lesson_extract`：
+提取函数对语文产出**扁平**列表：
 
-- Prompt 要求三段输出，标题对齐教材：**识字表 / 写字表 / 词语表**。
-- 正则兜底按同名标题切页内文本。
-- 入库分别写 `kind=recognize|write|phrase`；同一字可进识字与写字两行。
-- 某段缺失 → 该类为空，**禁止**把未分类整坨塞进单一 kind。
+```text
+[{"word", "extra", "kind"}, ...]  # kind ∈ {recognize, write, phrase}
+```
 
-英语：保持现单词表逻辑 → `kind=word`。
+（实现可内部先分三段再 flatten；入库与 API 统一扁平 + kind。）
 
-### 2.2 家长编辑
+- Prompt / 正则：按 **识字表 / 写字表 / 词语表** 切段。  
+- 某段缺失 → 该 kind 无条目，**禁止**把未分段整坨标成单一 kind。  
+- 仅有一段表时：只填对应 kind，其余为空。  
+- 英语：`[{"word","extra","kind":"word"}, ...]`。
 
-`PUT /api/pdf/lessons/{id}/content`：`words[]` 每项带 `kind`（缺省时语文可拒或默认 phrase，实现计划钉死）。
+### 2.2 重拆 / 覆盖旧词时的掌握度匹配
 
-家长端课编辑：原「生词」一栏改为 **三栏**（识字 / 写字 / 词语）；展示芯片可分组。  
-重拆课：按三类重建（沿用现「覆盖旧词」语义，掌握度外键策略与现 cleanup 一致）。
+**禁止**仅按词面匹配。  
+`_replace_lesson_words`（及同类逻辑）匹配键必须是 **`(word, kind)`**：
+
+- 同 `(word, kind)` → 复用原 `WordBank.id`（掌握度跟上）。  
+- 仅词面相同、kind 不同 → **新行**，不继承另一 kind 的掌握度。
+
+### 2.3 家长编辑
+
+`PUT /api/pdf/lessons/{id}/content`：
+
+- `words[]` **每项必填** `kind`，且 ∈ 合法枚举。  
+- 语文缺 `kind` → **400**（不默认 phrase，避免误归类）。  
+- 英语缺省可默认 `word`。
+
+**跨栏改 kind（认↔写↔词语）**：视为删除旧 `(word, old_kind)` + 新建 `(word, new_kind)`——**不迁移** `WordMastery`（与「认/写分轨」一致）。同栏改字面/extra：若 `id` 仍在则原地更新。
+
+家长端：
+
+- **教材课编辑**：原「生词」改为三栏（识字 / 写字 / 词语）。  
+- **学习配置**：增加 `dictation_kinds_语文` 多选（见 §3.3），与课编辑不同入口。
 
 ---
 
-## 三、每日听写与配置
+## 三、每日听写、复习与配置
 
 ### 3.1 任务形态
 
-- 仍 `task_type=dictation`，`(user_id, subject, date, task_type)` 唯一约束**不变**。
-- 孩子端听发音 / 作答 / 提交流程不变。
+- 仍 `task_type=dictation`，唯一约束不变。  
+- 孩子端交互不变。
 
-### 3.2 候选池
+### 3.2 候选池（dictation **与** review 生词）
 
-在现有「已学课 + 到期/错词/新词/轮转」算法前增加 kind 过滤：
+凡从 `WordBank` 抽「今日听写 / 复习生词」的生成器（至少 `_gen_dictation`、`_gen_review`）均先按孩子启用 kind 过滤：
 
-- 语文：只含孩子配置开启的 `recognize` / `write` / `phrase`。
-- 英语：只含 `word`。
-- 未开启的 kind、以及 `unknown`（若有）不进池。
+- 语文：∈ 配置开启的 `{recognize, write, phrase}`。  
+- 英语：`word`。  
+- 关光所有语文 kind → **不生成** dictation；review 若仅依赖生词池则同样跳过或生成空（与现「无词」行为对齐）。
 
-**本版不做每类单独名额**——混池后共用 `task_dictation_count_*` 与 due/new 护栏。
+听力等非 WordBank 池**本版不改**。
+
+**不做每类单独名额**——混池共用现有 count / due / new 护栏。
 
 ### 3.3 孩子级配置
 
-家长「学习配置」增加听写类型开关，例如：
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `dictation_kinds_语文` | `["recognize","write","phrase"]` | 听写/复习生词启用的 kind |
 
-- `dictation_kinds_语文` = JSON 列表，默认 `["recognize","write","phrase"]`
-
-读写走现有 `GET/PUT /api/learning/preferences`（或等价孩子配置键）。关光所有 kind → 当日不生成听写任务（与「词库为空」同）。
+读写：`GET/PUT /api/learning/preferences`（并入现听写参数那组孩子级键）。  
+parent-web「学习配置」页增加三勾选：识字 / 写字 / 词语。
 
 ### 3.4 文案
 
-标题可仍为「生词听写」；`detail` 可选附种类计数。不做三张任务卡。
+标题可仍「生词听写」；`detail` 可选附种类计数。不做三张任务卡。
 
 ---
 
 ## 四、边界与非目标
 
-**做：**
+**做：** kind、提取三分、家长三栏、dictation+review 过滤、迁移去重、学习配置开关。
 
-- kind 字段、提取三分、家长三栏、听写过滤、迁移、配置开关。
-
-**不做：**
-
-- 三张独立听写任务 / 改唯一约束  
-- 认写交互差异化（如识字只选不写）——本版交互同一套  
-- 每类独立每日名额  
-- 历史词自动重分类为识字/写字  
-- 把识字/写字表挂进「讲一遍」topics  
-- 英语再拆多类  
+**不做：** 三张听写卡；认写交互差异化；每类独立名额；历史自动重分类；讲一遍挂识字表；英语再拆类；`unknown` 状态机。
 
 **成功标准：**
 
 - 新拆语文课三类可分栏看到、可改。  
-- 听写只抽开启 kind；认/写同字错一不影响另一条 mastery。  
-- 英语听写行为与现网等价（仅多 `kind=word`）。
+- 听写与复习生词只抽开启 kind；认/写同字 mastery 互不影响。  
+- 英语听写与现网等价（多 `kind=word`）。  
+- 旧数据迁移后可加唯一约束且无重复键失败。
 
 ---
 
 ## 五、9 问自检（摘要）
 
 1. **类**：识记型（原料层）。  
-2. **关系**：字形/词语检索自动化，无探究变换。  
+2. **关系**：字形/词语检索自动化。  
 3. **变换**：无；不得宣称理解。  
 4. **通过**：听写正确 + SRS；认/写分轨。  
-5. **谁先产出**：孩子默写/听写。  
-6. **通道**：本版仍现听写通道。  
-7. **年龄**：全年级语文适用。  
-8. **测不准**：原料层宁松；错词进错词档。  
-9. **愿学 vs 学会**：听写参与原料掌握；不参与思考层判定。  
+5. **谁先产出**：孩子。  
+6. **通道**：现听写通道。  
+7. **年龄**：全年级语文。  
+8. **测不准**：原料层宁松。  
+9. **愿学 vs 学会**：只影响原料掌握，不进思考层判定。  
