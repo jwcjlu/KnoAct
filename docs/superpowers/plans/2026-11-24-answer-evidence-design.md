@@ -718,7 +718,7 @@ git commit -m "feat(student-app): quiz 控制器记录孩子指出的句子"
 ```dart
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:knoact/features/ask/ui/quiz_verdict_text.dart';
+import 'package:student_app/features/ask/ui/quiz_verdict_text.dart';
 
 void main() {
   group('quizVerdictText', () {
@@ -736,7 +736,7 @@ void main() {
 
     test('expression_weak 肯定理解，指向表达', () {
       final t = quizVerdictText('expression_weak');
-      expect(t, contains('位置'));
+      expect(t, contains('这句'));
       // 关键：不能打红叉式的否定
       expect(t.contains('错'), isFalse);
     });
@@ -793,7 +793,7 @@ String quizVerdictText(String verdict) {
     case 'lucky':
       return '答案对了，但你说的这句不是依据。再看看哪句能支持它？';
     case 'expression_weak':
-      return '你找的位置是对的，只是话没说明白。你想说的是什么？';
+      return '你找的这句是对的，只是话没说明白。你想说的是什么？';
     case 'not_understood':
       return '我们回去再看看这一句。';
     default:
@@ -1014,7 +1014,7 @@ cd student-app && flutter run -d chrome
 | --- | --- | --- |
 | `confirmed` | 选对答案 + 点亮正确句 | 绿色「你找的这句正是关键」 |
 | `lucky` | 选对答案 + 点亮无关句 | 琥珀色「答案对了，但你说的这句不是依据」 |
-| `expression_weak` | 选错答案 + 点亮正确句 | **灰色**「你找的位置是对的，只是话没说明白」，**不得出现红叉** |
+| `expression_weak` | 选错答案 + 点亮正确句 | **灰色**「你找的这句是对的，只是话没说明白」，**不得出现红叉** |
 | `not_understood` | 选错答案 + 点亮无关句 | 琥珀色「我们回去再看看这一句」 |
 
 - [ ] **Step 4: 验证不填出处不阻塞**
