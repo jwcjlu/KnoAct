@@ -174,3 +174,148 @@ def test_topics_does_not_leak_across_buckets():
         t["kind"] == "knowledge_point" and t["id"] == kp_id
         for t in topics
     )
+
+
+def test_create_note_with_knowledge_point():
+    uid, h = _seed_child(prefix="n1")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="n1")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id,
+        "text": "比喻就是把一个东西说成另一个东西，但要有相似点",
+    }, headers=h)
+    assert r.status_code == 200
+    assert r.json()["id"] > 0
+
+
+def test_create_note_snapshots_title():
+    uid, h = _seed_child(prefix="n2")
+    kp_id = _seed_kp_with_mastery(uid, "拟人", prefix="n2")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "拟人是把东西写成人"
+    }, headers=h)
+    notes = _client().get(f"/api/expression/notes?user_id={uid}", headers=h).json()["notes"]
+    assert notes[0]["title"] == "拟人"
+
+
+def test_create_note_rejects_empty_text():
+    uid, h = _seed_child(prefix="n3")
+    kp_id = _seed_kp_with_mastery(uid, "排比", prefix="n3")
+    for bad in ("", "   ", "\n\n"):
+        r = _client().post("/api/expression/notes", json={
+            "user_id": uid, "knowledge_point_id": kp_id, "text": bad
+        }, headers=h)
+        assert r.status_code == 400, f"{bad!r} 应被拒"
+
+
+def test_create_note_rejects_too_long():
+    uid, h = _seed_child(prefix="n4")
+    kp_id = _seed_kp_with_mastery(uid, "夸张", prefix="n4")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "字" * 5001
+    }, headers=h)
+    assert r.status_code == 400
+
+
+def test_create_note_requires_exactly_one_target():
+    uid, h = _seed_child(prefix="n5")
+    kp_id = _seed_kp_with_mastery(uid, "反问", prefix="n5")
+    r = _client().post("/api/expression/notes",
+                       json={"user_id": uid, "text": "讲讲"}, headers=h)
+    assert r.status_code == 400
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "item_id": 1, "text": "讲讲"
+    }, headers=h)
+    assert r.status_code == 400
+
+
+def test_create_note_rejects_unowned_knowledge_point():
+    uid, h = _seed_child(prefix="n6")
+    other_uid, _oh = _seed_child(prefix="n6b")
+    kp_id = _seed_kp_with_mastery(other_uid, "别人的知识点", prefix="n6b")
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "我讲讲"
+    }, headers=h)
+    assert r.status_code == 403
+
+
+def test_parent_cannot_create_note():
+    from app.database import SessionLocal
+    from app.models import User
+    uid, _h = _seed_child(prefix="n7")
+    kp_id = _seed_kp_with_mastery(uid, "借代", prefix="n7")
+    s = SessionLocal()
+    parent_h = auth_headers(s.get(User, s.get(User, uid).parent_id))
+    s.close()
+    r = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "家长代写"
+    }, headers=parent_h)
+    assert r.status_code == 403
+
+
+def test_parent_can_read_child_notes():
+    from app.database import SessionLocal
+    from app.models import User
+    uid, h = _seed_child(prefix="n8")
+    kp_id = _seed_kp_with_mastery(uid, "设问", prefix="n8")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "孩子写的"
+    }, headers=h)
+
+    s = SessionLocal()
+    parent_h = auth_headers(s.get(User, s.get(User, uid).parent_id))
+    s.close()
+    r = _client().get(f"/api/expression/notes?user_id={uid}", headers=parent_h)
+    assert r.status_code == 200
+    assert r.json()["notes"][0]["text"] == "孩子写的"
+
+
+def test_cannot_read_other_child_notes():
+    uid, h = _seed_child(prefix="n9")
+    other_uid, _oh = _seed_child(prefix="n9b")
+    r = _client().get(f"/api/expression/notes?user_id={other_uid}", headers=h)
+    assert r.status_code == 403
+
+
+def test_delete_note():
+    uid, h = _seed_child(prefix="n10")
+    kp_id = _seed_kp_with_mastery(uid, "对偶", prefix="n10")
+    note_id = _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "删掉我"
+    }, headers=h).json()["id"]
+    r = _client().delete(f"/api/expression/notes/{note_id}", headers=h)
+    assert r.status_code == 200
+    assert _client().get(f"/api/expression/notes?user_id={uid}", headers=h).json()["notes"] == []
+
+
+def test_cannot_delete_other_child_note():
+    uid, h = _seed_child(prefix="n11")
+    other_uid, other_h = _seed_child(prefix="n11b")
+    kp_id = _seed_kp_with_mastery(other_uid, "对比", prefix="n11b")
+    note_id = _client().post("/api/expression/notes", json={
+        "user_id": other_uid, "knowledge_point_id": kp_id, "text": "别人的"
+    }, headers=other_h).json()["id"]
+    r = _client().delete(f"/api/expression/notes/{note_id}", headers=h)
+    assert r.status_code == 403
+
+
+def test_note_survives_knowledge_point_deletion():
+    """知识点被删后，记录仍可读（title 快照 + FK SET NULL）。"""
+    from app.database import SessionLocal
+    from app.models import KnowledgeMastery, KnowledgePoint
+    uid, h = _seed_child(prefix="n12")
+    kp_id = _seed_kp_with_mastery(uid, "被删掉的知识点", prefix="n12")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "我讲过了"
+    }, headers=h)
+
+    s = SessionLocal()
+    # knowledge_points 被 KnowledgeMastery 引用，先清掉后者再删前者
+    s.query(KnowledgeMastery).filter_by(knowledge_point_id=kp_id).delete(synchronize_session=False)
+    s.query(KnowledgePoint).filter_by(id=kp_id).delete(synchronize_session=False)
+    s.commit()
+    s.close()
+
+    notes = _client().get(f"/api/expression/notes?user_id={uid}", headers=h).json()["notes"]
+    assert len(notes) == 1
+    assert notes[0]["title"] == "被删掉的知识点"
+    assert notes[0]["text"] == "我讲过了"
