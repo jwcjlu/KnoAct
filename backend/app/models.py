@@ -95,11 +95,15 @@ class LearningProgress(Base):
 
 class WordBank(Base):
     __tablename__ = "word_banks"
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "kind", "word", name="uq_word_banks_lesson_kind_word"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     subject: Mapped[str] = mapped_column(String(16))
     word: Mapped[str] = mapped_column(String(64))
     extra: Mapped[str] = mapped_column(LongText, default="")  # 拼音/音标/词性/释义，按学科
+    kind: Mapped[str] = mapped_column(String(16), default="phrase")
 
 class KnowledgePoint(Base):
     __tablename__ = "knowledge_points"
