@@ -21,7 +21,7 @@
 | `backend/app/main.py` | 启动调用 migrate |
 | `backend/app/services/word_kinds.py` | 常量、校验、`enabled_kinds`、序列化 |
 | `backend/app/services/lesson_extract.py` | 三分提取 + `_replace_lesson_words` 按 kind 匹配 |
-| `backend/app/routers/pdf.py` | PUT/GET words 带 kind；语文缺 kind→400 |
+| `backend/app/routers/pdf.py` | `_run_extract` 写 kind + 走 `_replace_lesson_words`；PUT/GET words 带 kind |
 | `backend/app/services/task_gen.py` | dictation/review 过滤 + content 带 kind |
 | `backend/app/routers/learning.py` | preferences 读写 `dictation_kinds_语文` |
 | `backend/app/services/child_config.py` | getter 默认三开 |
@@ -111,20 +111,20 @@ git commit -m "feat(words): WordBank.kind 与合法枚举"
 
 **Files:**
 - Create: `backend/app/migrate_word_kind.py`
-- Modify: `backend/app/main.py`（startup 调用）
+- Modify: `backend/app/main.py`（startup 调用，对齐 `migrate_reading_passage`）
 - Test: `backend/tests/test_word_kinds.py`（追加）
 
 - [ ] **Step 1: 测试迁移语义（可用 SessionLocal + 手工插重复行）**
 
 ```python
-def test_migrate_dedupes_same_lesson_kind_word():
+def test_migrate_dedupes_same_lesson_kind_word(db_session):
     # 插两行同 lesson/kind/word，挂 mastery 在较大 id
-    # 跑 migrate()
+    # 跑 migrate(db_session)
     # 断言只剩一行；mastery.word_bank_id 指向保留的最小 id
     ...
 ```
 
-- [ ] **Step 2: 实现 migrate**
+- [ ] **Step 2: 实现 `def migrate(db: Session) -> None`**
 
 逻辑：
 
@@ -134,7 +134,16 @@ def test_migrate_dedupes_same_lesson_kind_word():
 4. 找重复 `(lesson_id, kind, word)`：保留 `min(id)`，把 mastery/mistake 的 `word_bank_id` 从重复 id 改到 keep，再 DELETE 重复。  
 5. 创建唯一索引（若不存在）：SQLite `CREATE UNIQUE INDEX IF NOT EXISTS ...`；MySQL 同等。
 
-- [ ] **Step 3: main.py startup 在 schema_sync 后调用 `migrate_word_kind.migrate()`**（try/except 打日志，不阻断启动）
+- [ ] **Step 3: main.py** 在 schema_sync 之后，与其它 migrate 同样：
+
+```python
+try:
+    from .migrate_word_kind import migrate as _migrate_word_kind
+    _migrate_word_kind(db)
+except Exception:
+    db.rollback()
+    logging.exception("migrate_word_kind failed")
+```
 
 - [ ] **Step 4: commit**
 
@@ -144,11 +153,12 @@ git commit -m "feat(words): 迁移 kind 默认值并去重建唯一索引"
 
 ---
 
-### Task 3: `_replace_lesson_words` 按 `(word, kind)` 匹配
+### Task 3: 三分提取 + `_replace_lesson_words` + `_run_extract`
 
 **Files:**
 - Modify: `backend/app/services/lesson_extract.py`
-- Test: `backend/tests/test_word_kinds.py` 或现有 extract 测
+- Modify: `backend/app/routers/pdf.py`（`_run_extract`）
+- Test: `backend/tests/test_word_kinds.py` 或 `test_pdf_router.py`
 
 - [ ] **Step 1: 失败测试**
 
@@ -165,12 +175,24 @@ git commit -m "feat(words): 迁移 kind 默认值并去重建唯一索引"
 
 - AI 输出三段：`识字：` / `写字：` / `词语：`（或「识字表」等），解析为 flat list with kind。  
 - Fallback 正则按标题切。  
-- 英语路径给 `kind=word`。
+- 英语路径给 `kind=word`。  
+- `extract_lesson_content` 返回的 `words` 每项含 `kind`。
 
-- [ ] **Step 4: commit**
+- [ ] **Step 4: 改 `_run_extract`（关键）**
+
+现状：`purge_lesson_content` 后裸 `WordBank(...)` 插入，**丢 kind、丢掌握度跟词**。
+
+改为：
+
+1. `content = extract_lesson_content(...)`（words 已带 kind）。  
+2. **词表**：`_replace_lesson_words(db, lesson, content["words"])`（不要对词表再走会 detach 全部词的 purge，或 purge 时排除 words 后由 replace 处理——实现时选一种，结果须保留 `(word,kind)` 掌握度）。  
+3. 知识点 / 课文 / 阅读题：可继续先清再写（与现网一致）。  
+4. 英语 `kind=word`。
+
+- [ ] **Step 5: commit**
 
 ```bash
-git commit -m "feat(extract): 语文三分提取；换词按 word+kind 跟掌握度"
+git commit -m "feat(extract): 语文三分提取；_run_extract 按 word+kind 跟掌握度"
 ```
 
 ---
@@ -179,14 +201,14 @@ git commit -m "feat(extract): 语文三分提取；换词按 word+kind 跟掌握
 
 **Files:**
 - Modify: `backend/app/routers/pdf.py`（`LessonContentIn` Word 模型、`update_lesson_content`、list 序列化）
-- Test: 追加 API 测
+- Test: `backend/tests/test_pdf_router.py` 追加
 
 规则（spec）：
 
-- 语文：每词必填合法 `kind`，否则 400。  
+- 语文：每词必填合法 `kind`，否则返回错误（与现网课内容 API 一致：可用 `{"error": ...}` 体；家长端认 `r.error`）。  
 - 英语：缺省 `word`。  
 - 有 `id` 且 kind **未变**：原地改 word/extra。  
-- 有 `id` 但 kind **变了**：当作删旧 + 新建（不迁 mastery）——实现：不把旧 id 加入 kept，新插入无 id 行。前端跨栏应清 id 或显式新行。  
+- 有 `id` 但 kind **变了**：当作删旧 + 新建（不迁 mastery）——实现：不把旧 id 加入 kept，新插入无 id 行。前端跨栏应清 id。  
 - GET 课 words 返回 `kind`。
 
 - [ ] **Step 1–4: TDD + commit**
@@ -202,13 +224,17 @@ git commit -m "feat(pdf): 课生词 API 读写 kind（语文必填）"
 **Files:**
 - Modify: `backend/app/services/child_config.py`（`get_dictation_kinds_cn`）
 - Modify: `backend/app/services/task_gen.py`
-- Modify: `backend/app/routers/learning.py`
-- Test: `backend/tests/test_word_kinds.py` + 现有 dictation 测修正
+- Modify: `backend/app/routers/learning.py`（**含扩展 `PreferencesReq`**）
+- Test: `backend/tests/test_word_kinds.py` + `test_dictation_preferences.py` / `test_task_gen.py`
 
 ```python
 def get_dictation_kinds_cn(db, child_id) -> list[str]:
     # ChildConfig key dictation_kinds_语文，JSON list；坏数据回落 DEFAULT_CN_ENABLED
 ```
+
+`PreferencesReq` 增加：`dictation_kinds_语文: list[str] | None = None`。  
+PUT：校验每项 ∈ CN_KINDS，`json.dumps` 写入 ChildConfig。  
+GET：`json.loads` + 回落默认三开。
 
 `_gen_dictation`：在查到 `words` 后：
 
@@ -218,17 +244,11 @@ if subject == "语文":
     words = [w for w in words if w.kind in allowed]
 else:
     words = [w for w in words if (w.kind or "word") == "word"]
+if not words:
+    return None
 ```
 
-content：
-
-```python
-{"id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind}
-```
-
-`_gen_review`：同样过滤；英语只 `word`。
-
-Preferences：GET/PUT 增加 `dictation_kinds_语文: list[str] | None`；PUT 校验 ⊆ CN_KINDS。
+content 带 `kind`。`_gen_review`：同样过滤；过滤后空则 `return None`。
 
 - [ ] **测试：** 只开 write 时抽到的词全是 write；全关 → dictation 不生成。  
 - [ ] **commit**
@@ -242,13 +262,14 @@ git commit -m "feat(dictation): 按 dictation_kinds 过滤听写与复习生词"
 ### Task 6: parent-web 三栏编辑 + 学习配置勾选
 
 **Files:**
-- Modify: `parent-web/app.js`（`lessonEdit`、`renderLessonEdit`、`saveLessonEdit`、学习配置表单、`saveLearningConfig` / `loadLearningPreferences`）
+- Modify: `parent-web/app.js`（`startLessonEdit` / `saveLessonEdit` / `addLessonWord` / 渲染 / 学习配置）
 
-- [ ] 课编辑：三栏列表，每词带 `kind`；跨栏移动时 **清空 id**（触发后端新建）。  
+- [ ] **`startLessonEdit`**：map 保留 `kind`（缺省按学科：语文 `phrase`，英语 `word`）。  
+- [ ] **三栏 UI**：按 kind 分栏；跨栏移动时 **清空 id**。  
+- [ ] **`addLessonWord(kind)`**：新词默认该栏 kind。  
+- [ ] **`saveLessonEdit`**：body.words 每项提交 `kind`（及 id/word/extra）。  
 - [ ] 展示芯片按 kind 分组。  
-- [ ] 学习配置：三 checkbox，读写 `dictation_kinds_语文`。  
-
-手工验收清单写入 PR 描述即可。
+- [ ] 学习配置：三 checkbox ↔ `dictation_kinds_语文`；`loadLearningPreferences` / `saveLearningConfig` 读写该键。  
 
 ```bash
 git commit -m "feat(parent-web): 生词三栏编辑与听写类型开关"
@@ -259,10 +280,10 @@ git commit -m "feat(parent-web): 生词三栏编辑与听写类型开关"
 ### Task 7: 回归
 
 ```bash
-cd backend; python -m pytest tests/test_word_kinds.py tests/test_dictation_selection.py tests/test_pdf_content.py -v
+cd backend; python -m pytest tests/test_word_kinds.py tests/test_dictation_preferences.py tests/test_pdf_router.py tests/test_task_gen.py -v
 ```
 
-（按仓库实际测试文件名调整；缺则跑 `pytest -k "word or dictation or lesson_content"`。）
+若个别文件不存在，用：`pytest -k "word_kind or dictation or pdf_router or task_gen" -v`。
 
 修正因 content 多 `kind` 字段导致的断言。Flutter 听写若强校验 JSON 字段则放宽。
 
