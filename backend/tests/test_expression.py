@@ -64,7 +64,9 @@ def _seed_kp_with_mastery(user_id, content="比喻", prefix="kp"):
     """建一课 + 一个知识点 + 该孩子的 KnowledgeMastery，返回 knowledge_point_id。"""
     from app.database import SessionLocal
     from app.models import KnowledgeMastery, KnowledgePoint, Lesson, PdfDocument
+    from app.services.bucket_service import ensure_bucket
     s = SessionLocal()
+    bucket = ensure_bucket(s, user_id)
     doc = PdfDocument(filename=f"{prefix}.pdf", subject="语文", storage_path="")
     s.add(doc); s.flush()
     lesson = Lesson(document_id=doc.id, subject="语文", title=f"{prefix}课",
@@ -72,7 +74,8 @@ def _seed_kp_with_mastery(user_id, content="比喻", prefix="kp"):
     s.add(lesson); s.flush()
     kp = KnowledgePoint(lesson_id=lesson.id, subject="语文", category="修辞", content=content)
     s.add(kp); s.flush()
-    s.add(KnowledgeMastery(user_id=user_id, knowledge_point_id=kp.id, attempts="[]"))
+    s.add(KnowledgeMastery(user_id=user_id, bucket_id=bucket.id,
+                           knowledge_point_id=kp.id, attempts="[]"))
     s.commit()
     kp_id = kp.id
     s.close()
@@ -142,3 +145,32 @@ def test_topics_allows_grade_none():
     uid, h = _seed_child(grade=None, prefix="expr5")
     r = _client().get(f"/api/expression/topics?user_id={uid}", headers=h)
     assert r.status_code == 200
+
+
+def test_topics_does_not_leak_across_buckets():
+    """旧学年桶里的知识点不该出现在当前可讲列表里。"""
+    from app.database import SessionLocal
+    from app.models import KnowledgeMastery
+    from app.services.bucket_service import ensure_bucket
+
+    uid, h = _seed_child(prefix="bkt")
+    kp_id = _seed_kp_with_mastery(uid, "旧桶的知识点", prefix="bkt")
+
+    s = SessionLocal()
+    old = ensure_bucket(s, uid)
+    m = (s.query(KnowledgeMastery)
+         .filter_by(user_id=uid, knowledge_point_id=kp_id)
+         .first())
+    m.bucket_id = old.id
+    old.status = "archived"
+    old.ended_at = old.started_at
+    s.commit()
+    s.close()
+
+    topics = _client().get(
+        f"/api/expression/topics?user_id={uid}", headers=h
+    ).json()["topics"]
+    assert not any(
+        t["kind"] == "knowledge_point" and t["id"] == kp_id
+        for t in topics
+    )

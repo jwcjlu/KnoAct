@@ -36,14 +36,14 @@ def list_topics(user_id: int = Depends(resolve_target_user_id),
     topics: list[dict] = []
 
     bid = resolve_bucket_id(db, user_id, None)
-    q = (db.query(KnowledgeMastery, KnowledgePoint)
-         .join(KnowledgePoint, KnowledgeMastery.knowledge_point_id == KnowledgePoint.id)
-         .filter(KnowledgeMastery.user_id == user_id))
     if bid is not None:
-        q = q.filter(KnowledgeMastery.bucket_id == bid)
-    for _m, kp in q.order_by(KnowledgePoint.id).all():
-        topics.append({"kind": "knowledge_point", "id": kp.id,
-                       "title": (kp.content or "")[:255]})
+        q = (db.query(KnowledgeMastery, KnowledgePoint)
+             .join(KnowledgePoint, KnowledgeMastery.knowledge_point_id == KnowledgePoint.id)
+             .filter(KnowledgeMastery.user_id == user_id,
+                     KnowledgeMastery.bucket_id == bid))
+        for _m, kp in q.order_by(KnowledgePoint.id).all():
+            topics.append({"kind": "knowledge_point", "id": kp.id,
+                           "title": (kp.content or "")[:255]})
 
     child = db.get(User, user_id)
     parent_id = child.parent_id if child else None
