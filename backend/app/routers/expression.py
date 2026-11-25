@@ -2,6 +2,8 @@
 
 刻意不做判定、不写掌握度——见 docs/superpowers/specs/2026-11-25-feynman-teach-ai-design.md。
 """
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -11,7 +13,7 @@ from ..core.access import (
 )
 from ..database import get_db
 from ..models import (
-    ExpressionNote, KnowledgeMastery, KnowledgePoint, TrainingGroup,
+    ChildConfig, ExpressionNote, KnowledgeMastery, KnowledgePoint, TrainingGroup,
     TrainingItem, User,
 )
 from ..services.bucket_guard import assert_writable, resolve_bucket_id
@@ -161,3 +163,57 @@ def delete_note(note_id: int, user: User = Depends(require_learning_user),
         raise HTTPException(status_code=400, detail="历史学年只读")
     db.delete(note); db.commit()
     return {"ok": True}
+
+
+SEEN_AT_KEY = "expression_seen_at"
+
+
+def _get_seen_at(db: Session, user_id: int) -> datetime | None:
+    row = db.query(ChildConfig).filter_by(user_id=user_id, key=SEEN_AT_KEY).first()
+    if row is None or not row.value:
+        return None
+    try:
+        return datetime.fromisoformat(row.value)
+    except ValueError:
+        return None
+
+
+class SeenReq(BaseModel):
+    user_id: int
+
+
+@router.get("/unread-count")
+def unread_count(user_id: int = Depends(resolve_target_user_id),
+                 _auth: User = Depends(require_learning_user),
+                 db: Session = Depends(get_db)):
+    """孩子讲了几条家长还没看过的。不判定内容，只数条数。"""
+    _require_grade(user_id, db)
+    q = db.query(ExpressionNote).filter_by(user_id=user_id)
+    seen_at = _get_seen_at(db, user_id)
+    if seen_at is not None:
+        q = q.filter(ExpressionNote.created_at > seen_at)
+    return {"count": q.count()}
+
+
+@router.post("/mark-seen")
+def mark_seen(req: SeenReq, user: User = Depends(require_learning_user),
+              db: Session = Depends(get_db)):
+    """把「家长看到哪儿了」推到当前时刻。单调：不会往回退。"""
+    ensure_user_access(user, req.user_id, db)
+    _require_grade(req.user_id, db)
+    now = datetime.utcnow()
+    row = db.query(ChildConfig).filter_by(
+        user_id=req.user_id, key=SEEN_AT_KEY).first()
+    if row is None:
+        db.add(ChildConfig(user_id=req.user_id, key=SEEN_AT_KEY,
+                           value=now.isoformat()))
+    else:
+        prev = None
+        try:
+            prev = datetime.fromisoformat(row.value) if row.value else None
+        except ValueError:
+            prev = None
+        if prev is None or now > prev:
+            row.value = now.isoformat()
+    db.commit()
+    return {"ok": True, "seen_at": now.isoformat()}

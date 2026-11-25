@@ -488,3 +488,86 @@ def test_purge_lesson_detaches_expression_notes():
         assert rows[0].text == "我讲过了"
     finally:
         s.close()
+
+
+def test_unread_count_counts_all_when_never_seen():
+    """家长从没看过 → 全部笔记都算未读。"""
+    uid, h = _seed_child(prefix="u1")
+    kp_id = _seed_kp_with_mastery(uid, "比喻", prefix="u1")
+    for text in ("第一条", "第二条"):
+        _client().post("/api/expression/notes", json={
+            "user_id": uid, "knowledge_point_id": kp_id, "text": text
+        }, headers=h)
+
+    r = _client().get(f"/api/expression/unread-count?user_id={uid}", headers=h)
+    assert r.status_code == 200
+    assert r.json()["count"] == 2
+
+
+def test_unread_count_zero_after_mark_seen():
+    uid, h = _seed_child(prefix="u2")
+    kp_id = _seed_kp_with_mastery(uid, "拟人", prefix="u2")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "看过之前的"
+    }, headers=h)
+
+    assert _client().post("/api/expression/mark-seen",
+                          json={"user_id": uid}, headers=h).status_code == 200
+    r = _client().get(f"/api/expression/unread-count?user_id={uid}", headers=h)
+    assert r.json()["count"] == 0
+
+
+def test_unread_count_rises_when_new_note_after_seen():
+    uid, h = _seed_child(prefix="u3")
+    kp_id = _seed_kp_with_mastery(uid, "排比", prefix="u3")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "旧的"
+    }, headers=h)
+    _client().post("/api/expression/mark-seen", json={"user_id": uid}, headers=h)
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "新的"
+    }, headers=h)
+
+    r = _client().get(f"/api/expression/unread-count?user_id={uid}", headers=h)
+    assert r.json()["count"] == 1
+
+
+def test_mark_seen_is_idempotent_and_monotonic():
+    uid, h = _seed_child(prefix="u4")
+    kp_id = _seed_kp_with_mastery(uid, "夸张", prefix="u4")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid, "knowledge_point_id": kp_id, "text": "x"
+    }, headers=h)
+    for _ in range(2):
+        assert _client().post("/api/expression/mark-seen",
+                              json={"user_id": uid}, headers=h).status_code == 200
+    assert _client().get(f"/api/expression/unread-count?user_id={uid}",
+                         headers=h).json()["count"] == 0
+
+
+def test_unread_count_is_per_child():
+    uid_a, h_a = _seed_child(prefix="u5a")
+    uid_b, h_b = _seed_child(prefix="u5b")
+    kp_a = _seed_kp_with_mastery(uid_a, "A的", prefix="u5a")
+    kp_b = _seed_kp_with_mastery(uid_b, "B的", prefix="u5b")
+    _client().post("/api/expression/notes", json={
+        "user_id": uid_a, "knowledge_point_id": kp_a, "text": "A"
+    }, headers=h_a)
+    _client().post("/api/expression/notes", json={
+        "user_id": uid_b, "knowledge_point_id": kp_b, "text": "B1"
+    }, headers=h_b)
+    _client().post("/api/expression/notes", json={
+        "user_id": uid_b, "knowledge_point_id": kp_b, "text": "B2"
+    }, headers=h_b)
+
+    assert _client().get(f"/api/expression/unread-count?user_id={uid_a}",
+                         headers=h_a).json()["count"] == 1
+    assert _client().get(f"/api/expression/unread-count?user_id={uid_b}",
+                         headers=h_b).json()["count"] == 2
+
+
+def test_unread_count_rejects_other_child():
+    uid, h = _seed_child(prefix="u6")
+    other_uid, _oh = _seed_child(prefix="u6b")
+    r = _client().get(f"/api/expression/unread-count?user_id={other_uid}", headers=h)
+    assert r.status_code == 403
