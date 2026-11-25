@@ -92,9 +92,11 @@ async function loadExpressionUnread(){
   return expressionUnread;
 }
 async function markExpressionSeen(){
-  if(!uid) return;
-  try{ await api('/api/expression/mark-seen', {method:'POST', body:{user_id: uid}}); }
+  const u = uid;
+  if(!u) return;
+  try{ await api('/api/expression/mark-seen', {method:'POST', body:{user_id: u}}); }
   catch(_){ return; }
+  if(u !== uid) return;   // 期间切了孩子，不能动新孩子的角标
   expressionUnread = 0;
   renderNav();
 }
@@ -282,6 +284,7 @@ function renderNav(){
   }).join('');
 }
 function render(){
+  renderNav();
   document.getElementById('main').innerHTML = renderParent();
   decorateMath(document.getElementById('main') || document.body);
   if(parentTab==='题库管理') updateReadingPreview();
@@ -487,7 +490,10 @@ async function unbindFromChild(childId, documentId){
 
 function setParentTab(t){
   parentTab=t;
-  if(t==='报告' && expressionUnread>0){ markExpressionSeen(); }
+  if(t==='报告' && expressionUnread>0){
+    expressionUnread = 0;   // 先进去就先清，别等 POST
+    markExpressionSeen();
+  }
   renderNav();
   if(t==='教材'){ loadPdfDocs().then(()=>render()); return; }
   if(t==='知识点'){ loadKnowledge().then(()=>render()); return; }
