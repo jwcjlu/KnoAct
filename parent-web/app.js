@@ -88,10 +88,13 @@ async function loadMasteryReport(){
 }
 async function loadExpressionNotes(){
   if(!uid){ expressionNotes = []; return []; }
+  const u = uid;
   try{
-    const r = await api(`/api/expression/notes?user_id=${uid}&limit=20`);
-    expressionNotes = r.notes || [];
-  }catch(_){ expressionNotes = []; }
+    const r = await api(`/api/expression/notes?user_id=${u}&limit=20`);
+    if(u === uid) expressionNotes = r.notes || [];
+  }catch(_){
+    if(u === uid) expressionNotes = [];
+  }
   return expressionNotes;
 }
 let configMap = {};
