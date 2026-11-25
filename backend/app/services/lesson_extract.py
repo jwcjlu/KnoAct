@@ -18,6 +18,7 @@ from .word_kinds import (
 from .pdf_split import (
     SUBJECT_RULES,
     WORD_LIST_OCR_PROMPT,
+    _CN_TABLE_TITLES,
     _detect_word_list,
     _is_scanned,
     _ocr_page,
@@ -26,6 +27,9 @@ from .pdf_split import (
     is_word_list_title,
     split_gloss_line,
 )
+
+_LESSON_NO_LINE = re.compile(r"^\s*(\d{1,2})\s*$")
+_HAN_TOKEN = re.compile(r"[\u4e00-\u9fff]+")
 
 
 def _lesson_texts(pdf_path: str, start_page: int, end_page: int, db=None) -> str:
@@ -189,6 +193,62 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
             words = _extract_words_fallback(pdf_path, start_page, end_page, subject, db)
     text = _extract_text_fallback(pdf_path, start_page, end_page, db)
     return {"words": words, "points": [], "text": text}
+
+
+def _table_tokens_from_line(s: str, kind: str) -> list[str]:
+    """按 kind 从一行抽出词/字 token。"""
+    out: list[str] = []
+    for tok in _HAN_TOKEN.findall(s):
+        if kind == KIND_PHRASE:
+            if len(tok) >= 2:
+                out.append(tok)
+        elif len(tok) == 1:
+            out.append(tok)
+        else:
+            out.extend(list(tok))
+    return out
+
+
+def parse_chinese_table_text(raw: str, kind: str) -> dict[int, list[dict]]:
+    """册末表文本 → {lesson_no: [{word, extra, kind}, ...]}。同课同词去重保序。"""
+    kind = normalize_kind(kind)
+    by: dict[int, list[dict]] = {}
+    seen: dict[int, set[str]] = {}
+    cur: int | None = None
+    for line in (raw or "").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s in _CN_TABLE_TITLES or any(s.startswith(t) for t in _CN_TABLE_TITLES):
+            continue
+        m = _LESSON_NO_LINE.match(s)
+        if m:
+            cur = int(m.group(1))
+            by.setdefault(cur, [])
+            seen.setdefault(cur, set())
+            continue
+        m2 = re.match(r"^(\d{1,2})\s+(.+)$", s)
+        if m2:
+            cur = int(m2.group(1))
+            by.setdefault(cur, [])
+            seen.setdefault(cur, set())
+            s = m2.group(2)
+        elif cur is None:
+            continue
+        for w in _table_tokens_from_line(s, kind):
+            if w in seen[cur]:
+                continue
+            seen[cur].add(w)
+            by[cur].append({"word": w, "extra": "", "kind": kind})
+    return {n: rows for n, rows in by.items() if rows}
+
+
+def extract_chinese_table_units(
+    pdf_path: str, db, kind: str, start_page: int, end_page: int,
+) -> dict[int, list[dict]]:
+    """读取册末表页码区间文本并解析为课号桶。"""
+    block = _lesson_texts(pdf_path, start_page, end_page, db)
+    return parse_chinese_table_text(block, kind)
 
 
 def parse_word_list_text(raw: str) -> dict[int, list[dict]]:

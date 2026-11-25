@@ -4,6 +4,20 @@ from app.services.pdf_split import (
     _cn_table_kind_from_text,
     _detect_chinese_word_tables,
 )
+from app.services import lesson_extract as le
+from app.services.lesson_extract import parse_chinese_table_text, extract_chinese_table_units
+
+_PHRASE_SAMPLE = """
+词语表
+1
+桂花 故乡 时节 欣赏 糕饼 成熟 完整
+茶叶
+2
+播种 收获 食品 吩咐 价钱 可贵 果实
+体面
+4
+地道 平原 扫荡 封锁 武装 粉碎 简直
+"""
 
 
 def test_is_cn_table_title():
@@ -36,3 +50,34 @@ def test_detect_chinese_word_tables_multi_page():
 def test_detect_chinese_word_tables_non_chinese_subject():
     texts = ["识字表\n1\n杭"]
     assert _detect_chinese_word_tables("x.pdf", "英语", texts, len(texts), db=None) == []
+
+
+def test_parse_chinese_table_groups_by_lesson_no():
+    by = parse_chinese_table_text(_PHRASE_SAMPLE, kind="phrase")
+    assert [w["word"] for w in by[1]][:3] == ["桂花", "故乡", "时节"]
+    assert any(w["word"] == "茶叶" for w in by[1])
+    assert any(w["word"] == "体面" for w in by[2])
+    assert 3 not in by
+    assert by[4][0]["word"] == "地道"
+    assert all(w.get("kind") == "phrase" for rows in by.values() for w in rows)
+
+
+def test_parse_write_table_single_chars():
+    raw = "写字表\n1\n兰 桂 曼\n2\n亩 亭 吩\n"
+    by = parse_chinese_table_text(raw, kind="write")
+    assert [w["word"] for w in by[1]] == ["兰", "桂", "曼"]
+    assert [w["word"] for w in by[2]] == ["亩", "亭", "吩"]
+
+
+def test_parse_chinese_table_lesson_no_on_same_line():
+    raw = "词语表\n1 桂花 故乡\n2 播种 收获\n"
+    by = parse_chinese_table_text(raw, kind="phrase")
+    assert [w["word"] for w in by[1]] == ["桂花", "故乡"]
+    assert [w["word"] for w in by[2]] == ["播种", "收获"]
+
+
+def test_extract_chinese_table_units(monkeypatch):
+    sample = "词语表\n1\n桂花 故乡\n"
+    monkeypatch.setattr(le, "_lesson_texts", lambda pdf, sp, ep, db=None: sample)
+    by = extract_chinese_table_units("x.pdf", None, "phrase", 6, 6)
+    assert [w["word"] for w in by[1]] == ["桂花", "故乡"]
