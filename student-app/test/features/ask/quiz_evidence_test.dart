@@ -44,5 +44,14 @@ void main() {
     test('confirmed 用绿色', () {
       expect(quizVerdictColor('confirmed'), const Color(0xFF2E8B5A));
     });
+
+    test('lucky 与 not_understood 用琥珀色', () {
+      expect(quizVerdictColor('lucky'), const Color(0xFFDC872D));
+      expect(quizVerdictColor('not_understood'), const Color(0xFFDC872D));
+    });
+
+    test('expression_weak 用中性灰，不用红也不绿', () {
+      expect(quizVerdictColor('expression_weak'), const Color(0xFF78817B));
+    });
   });
 }

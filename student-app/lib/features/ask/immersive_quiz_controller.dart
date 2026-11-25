@@ -100,7 +100,16 @@ class ImmersiveQuizController extends Notifier<ImmersiveQuizState> {
 
   void pickAnswer(String questionId, int index) {
     if (state.submitted) return;
-    state = state.copyWith(answers: {...state.answers, questionId: index});
+    // 改了选项，之前指的句子未必还支持新选项，清掉避免张冠李戴
+    final picks = {...state.evidencePicks};
+    if (state.answers[questionId] != null &&
+        state.answers[questionId] != index) {
+      picks.remove(questionId);
+    }
+    state = state.copyWith(
+      answers: {...state.answers, questionId: index},
+      evidencePicks: picks,
+    );
   }
 
   void pickEvidence(String questionId, String sentence) {

@@ -144,13 +144,31 @@ class _QuizQuestionBlock extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            for (var si = 0; si < sentences.length; si++)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 168),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var si = 0; si < sentences.length; si++)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: _EvidenceTile(
+                          label: sentences[si],
+                          selected: pickedEvidence == sentences[si],
+                          onTap: () => onPickEvidence(sentences[si]),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            if (sentences.length > 4)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: _EvidenceTile(
-                  label: sentences[si],
-                  selected: pickedEvidence == sentences[si],
-                  onTap: () => onPickEvidence(sentences[si]),
+                child: Text(
+                  '共 ${sentences.length} 句，可以上下滑动找一句',
+                  style: const TextStyle(fontSize: 11, color: AppColors.gray),
                 ),
               ),
           ],
