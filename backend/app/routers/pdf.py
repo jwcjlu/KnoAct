@@ -15,7 +15,8 @@ from ..models import User
 from ..models import PdfDocument, PdfPage, Lesson, LessonAudio, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
 from ..services.cleanup import detach_points, detach_words, purge_lesson_content, purge_lessons
 from ..services.pdf_split import render_pages, detect_lessons_from_pdf
-from ..services.lesson_extract import apply_word_list, extract_lesson_content
+from ..services.lesson_extract import apply_word_list, extract_lesson_content, _replace_lesson_words, _kind_key
+from ..services.word_kinds import normalize_kind, KIND_WORD
 from ..services.question_gen import generate_reading_questions
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf"])
@@ -117,7 +118,10 @@ def list_document_lessons(document_id: int, user: User = Depends(require_learnin
     lessons = db.query(Lesson).filter_by(document_id=document_id).order_by(Lesson.start_page).all()
     out = []
     for l in lessons:
-        words = [{"id": w.id, "word": w.word, "extra": w.extra} for w in db.query(WordBank).filter_by(lesson_id=l.id).all()]
+        words = [
+            {"id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind}
+            for w in db.query(WordBank).filter_by(lesson_id=l.id).all()
+        ]
         points = [{"id": p.id, "content": p.content, "category": p.category} for p in db.query(KnowledgePoint).filter_by(lesson_id=l.id).all()]
         texts = [t.content for t in db.query(Text).filter_by(lesson_id=l.id).all()]
         pages = db.query(PdfPage).filter(
@@ -144,6 +148,7 @@ class LessonWordIn(BaseModel):
     id: int | None = None
     word: str = ""
     extra: str = ""
+    kind: str | None = None
 
 
 class LessonPointIn(BaseModel):
@@ -237,10 +242,13 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
                 if lesson is None:
                     continue
                 content = extract_lesson_content(storage_path, t["subject"], t["start_page"], t["end_page"], db)
-                # 清除本课旧数据后写入新结果
-                purge_lesson_content(db, [t["id"]])
-                for w in content["words"]:
-                    db.add(WordBank(lesson_id=t["id"], subject=t["subject"], word=w["word"], extra=w["extra"]))
+                lesson_id = t["id"]
+                point_ids = [r[0] for r in db.query(KnowledgePoint.id).filter_by(lesson_id=lesson_id).all()]
+                detach_points(db, point_ids)
+                db.query(KnowledgePoint).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                db.query(Text).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                db.query(Question).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                _replace_lesson_words(db, lesson, content.get("words") or [])
                 for p in content["points"]:
                     db.add(KnowledgePoint(lesson_id=t["id"], subject=t["subject"], category="本课", content=p))
                 if content["text"]:
@@ -323,6 +331,7 @@ def update_lesson_content(lesson_id: int, req: LessonContentIn,
     if len(title) > 255:
         return {"error": "课名过长"}
 
+    subject = lesson.subject or ""
     words = []
     for w in req.words:
         word = (w.word or "").strip()
@@ -330,7 +339,23 @@ def update_lesson_content(lesson_id: int, req: LessonContentIn,
             continue
         if len(word) > 64:
             return {"error": "生词不能超过 64 个字符"}
-        words.append((w.id, word, (w.extra or "").strip()))
+        raw_kind = (w.kind or "").strip()
+        if subject == "语文":
+            if not raw_kind:
+                return {"error": "语文生词必须指定 kind"}
+            try:
+                kind = normalize_kind(raw_kind)
+            except ValueError:
+                return {"error": f"无效的生词类型: {raw_kind}"}
+        else:
+            if not raw_kind:
+                kind = KIND_WORD
+            else:
+                try:
+                    kind = normalize_kind(raw_kind)
+                except ValueError:
+                    return {"error": f"无效的生词类型: {raw_kind}"}
+        words.append((w.id, word, (w.extra or "").strip(), kind))
     points = []
     for p in req.points:
         content = (p.content or "").strip()
@@ -342,14 +367,18 @@ def update_lesson_content(lesson_id: int, req: LessonContentIn,
     lesson.title = title
     existing_words = {w.id: w for w in db.query(WordBank).filter_by(lesson_id=lesson.id).all()}
     kept_words: set[int] = set()
-    for wid, word, extra in words:
+    for wid, word, extra, kind in words:
         row = existing_words.get(wid) if wid else None
-        if row is None:
-            db.add(WordBank(lesson_id=lesson.id, subject=lesson.subject, word=word, extra=extra))
-        else:
+        if row is not None and _kind_key(row.kind or "", subject) == _kind_key(kind, subject):
             row.word = word
             row.extra = extra
+            row.kind = kind
             kept_words.add(row.id)
+        else:
+            db.add(WordBank(
+                lesson_id=lesson.id, subject=lesson.subject,
+                word=word, extra=extra, kind=kind,
+            ))
     drop_words = [i for i in existing_words if i not in kept_words]
     for i in drop_words:
         db.expunge(existing_words[i])

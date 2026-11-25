@@ -522,6 +522,37 @@ def test_dictation_mistaken_words_fill_review_bucket():
     db.close()
 
 
+def test_dictation_filters_cn_kinds():
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    db.query(WordBank).filter_by(lesson_id=l1_id).delete()
+    db.add(WordBank(lesson_id=l1_id, subject="语文", word="识", extra="", kind="recognize"))
+    db.add(WordBank(lesson_id=l1_id, subject="语文", word="写", extra="", kind="write"))
+    db.add(WordBank(lesson_id=l1_id, subject="语文", word="词", extra="", kind="phrase"))
+    db.add(ChildConfig(user_id=uid, key="dictation_kinds_语文", value='["write"]'))
+    db.commit()
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, subject="语文", date=date.today(),
+                                 task_type="dictation").first()
+    assert t is not None
+    words = json.loads(t.content)
+    assert words
+    assert all(w["kind"] == "write" for w in words)
+    assert {w["word"] for w in words} == {"写"}
+    db.close()
+
+
+def test_dictation_all_kinds_off_skips_task():
+    db = SessionLocal()
+    uid, _l1_id = _setup(db)
+    db.add(ChildConfig(user_id=uid, key="dictation_kinds_语文", value="[]"))
+    db.commit()
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, task_type="dictation").first()
+    assert t is None
+    db.close()
+
+
 def test_dictation_due_cap_truncates_excess_due_words():
     """到期词超过 due_n 上限时被截断，且总数不超过 count。"""
     db = SessionLocal()

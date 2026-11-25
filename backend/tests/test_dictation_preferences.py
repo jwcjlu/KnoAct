@@ -68,6 +68,34 @@ def test_preferences_get_returns_defaults_for_unconfigured_child(setup_db):
     assert body["dictation_input_mode"] == "paper_photo"
     assert body["task_dictation_due_cap"] == 0.5
     assert body["task_dictation_new_floor"] == 0.3
+    assert body["dictation_kinds_语文"] == ["recognize", "write", "phrase"]
+
+
+def test_preferences_put_dictation_kinds_cn(setup_db):
+    session = SessionLocal()
+    _, child, parent_h, child_h = parent_child(session, "dkinds")
+    child_id = child.id
+    session.close()
+    r = client.put(
+        "/api/learning/preferences",
+        json={"user_id": child_id, "dictation_kinds_语文": ["write", "phrase"]},
+        headers=parent_h,
+    )
+    assert r.status_code == 200
+    g = client.get(f"/api/learning/preferences?user_id={child_id}", headers=child_h)
+    assert g.json()["dictation_kinds_语文"] == ["write", "phrase"]
+
+
+def test_preferences_put_rejects_invalid_dictation_kind(setup_db):
+    session = SessionLocal()
+    _, child, parent_h, _ = parent_child(session, "dkbad")
+    session.close()
+    r = client.put(
+        "/api/learning/preferences",
+        json={"user_id": child.id, "dictation_kinds_语文": ["word"]},
+        headers=parent_h,
+    )
+    assert r.status_code == 400
 
 
 def test_preferences_put_parent_only(setup_db):

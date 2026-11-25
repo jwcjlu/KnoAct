@@ -1,6 +1,10 @@
 """孩子配置覆盖：读配置时按 孩子覆盖 > 全局 ModelConfig > 默认 三级降级。"""
+import json
 from sqlalchemy.orm import Session
 from ..models import ModelConfig, ChildConfig
+from .word_kinds import CN_KINDS, DEFAULT_CN_ENABLED, normalize_kind
+
+DICTATION_KINDS_CN_KEY = "dictation_kinds_语文"
 
 
 def get_child_config_str(db: Session, child_id: int, key: str, fallback: str) -> str:
@@ -45,3 +49,26 @@ def get_dictation_input_mode(db: Session, child_id: int) -> str:
     if row and row.value in VALID_DICTATION_MODES:
         return row.value
     return "paper_photo"
+
+
+def get_dictation_kinds_cn(db: Session, child_id: int) -> list[str]:
+    raw = get_child_config_str(db, child_id, DICTATION_KINDS_CN_KEY, "")
+    if not raw:
+        return list(DEFAULT_CN_ENABLED)
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return list(DEFAULT_CN_ENABLED)
+    if not isinstance(parsed, list):
+        return list(DEFAULT_CN_ENABLED)
+    if len(parsed) == 0:
+        return []
+    out: list[str] = []
+    for item in parsed:
+        try:
+            k = normalize_kind(str(item))
+        except ValueError:
+            continue
+        if k in CN_KINDS and k not in out:
+            out.append(k)
+    return out if out else list(DEFAULT_CN_ENABLED)

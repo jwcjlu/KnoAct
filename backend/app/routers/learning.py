@@ -474,6 +474,7 @@ class PreferencesReq(BaseModel):
     task_dictation_count_英语: int | None = None
     task_dictation_due_cap: float | None = None
     task_dictation_new_floor: float | None = None
+    dictation_kinds_语文: list[str] | None = None
 
 
 @router.get("/api/learning/preferences")
@@ -485,6 +486,7 @@ def get_learning_preferences(
     ensure_user_access(user, user_id, db)
     from ..services.child_config import (
         get_dictation_input_mode, get_child_config_int, get_child_config_float,
+        get_dictation_kinds_cn,
     )
 
     return {
@@ -493,6 +495,7 @@ def get_learning_preferences(
         "task_dictation_count_英语": get_child_config_int(db, user_id, "task_dictation_count_英语", 7),
         "task_dictation_due_cap": get_child_config_float(db, user_id, "task_dictation_due_cap", 0.5),
         "task_dictation_new_floor": get_child_config_float(db, user_id, "task_dictation_new_floor", 0.3),
+        "dictation_kinds_语文": get_dictation_kinds_cn(db, user_id),
     }
 
 
@@ -502,7 +505,12 @@ def put_learning_preferences(
     user: User = Depends(require_role("parent")),
     db: Session = Depends(get_db),
 ):
-    from ..services.child_config import VALID_DICTATION_MODES, set_child_config_str
+    import json as _json
+
+    from ..services.child_config import (
+        VALID_DICTATION_MODES, DICTATION_KINDS_CN_KEY, set_child_config_str,
+    )
+    from ..services.word_kinds import CN_KINDS, normalize_kind
 
     child = db.get(User, req.user_id)
     if child is None or child.role != "child" or child.parent_id != user.id:
@@ -523,4 +531,16 @@ def put_learning_preferences(
         set_child_config_str(db, req.user_id, "task_dictation_due_cap", str(req.task_dictation_due_cap))
     if req.task_dictation_new_floor is not None:
         set_child_config_str(db, req.user_id, "task_dictation_new_floor", str(req.task_dictation_new_floor))
+    if req.dictation_kinds_语文 is not None:
+        kinds: list[str] = []
+        for item in req.dictation_kinds_语文:
+            try:
+                k = normalize_kind(item)
+            except ValueError:
+                raise HTTPException(status_code=400, detail={"error": "invalid_kind"})
+            if k not in CN_KINDS:
+                raise HTTPException(status_code=400, detail={"error": "invalid_kind"})
+            if k not in kinds:
+                kinds.append(k)
+        set_child_config_str(db, req.user_id, DICTATION_KINDS_CN_KEY, _json.dumps(kinds, ensure_ascii=False))
     return {"ok": True}
