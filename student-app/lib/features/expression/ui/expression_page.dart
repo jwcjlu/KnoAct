@@ -284,7 +284,7 @@ class _ExpressionInputState extends State<_ExpressionInput> {
                       ),
                     ),
                   ),
-                if (widget.probeError == 'unavailable')
+                if (widget.probeError != null)
                   const Text(
                     '这会儿问不了',
                     textAlign: TextAlign.center,
