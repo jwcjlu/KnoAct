@@ -2,8 +2,6 @@
 
 本表刻意不含 verdict / score / ai_* —— 见 spec 的「五轮失败记录」。
 """
-from sqlalchemy import inspect as sa_inspect
-
 from app.models import ExpressionNote
 
 
