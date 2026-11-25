@@ -197,17 +197,18 @@ def grade_verdict(
 ) -> str:
     """四态判定：答案对错 × 出处对错。
 
-    与 spec 5.1 的 2×2 一一对应。任一侧无法判定（孩子没指 / 题目没 evidence）
-    都返回 unknown，不猜测——这与「允许未决」一致：证据不足时不强行判决。
+    与 spec 5.1 的 2×2 一一对应。任一侧无法判定（孩子没指 / 题目没 evidence /
+    归一化后只剩空白与连字符）都返回 unknown，不猜测——这与「允许未决」一致：
+    证据不足时不强行判决。
     """
-    if not (chosen_evidence or "").strip() or not (correct_evidence or "").strip():
+    if not evidence_key(chosen_evidence or "") or not evidence_key(correct_evidence or ""):
         return VERDICT_UNKNOWN
     evidence_ok = evidence_matches(chosen_evidence, correct_evidence)
     if answer_correct and evidence_ok:
         return VERDICT_CONFIRMED
-    if answer_correct and not evidence_ok:
+    if answer_correct:
         return VERDICT_LUCKY
-    if not answer_correct and evidence_ok:
+    if evidence_ok:
         return VERDICT_EXPRESSION_WEAK
     return VERDICT_NOT_UNDERSTOOD
 

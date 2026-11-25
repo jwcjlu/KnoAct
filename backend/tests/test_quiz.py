@@ -1,4 +1,14 @@
-from app.services.quiz import evidence_key, grade_answers, grade_verdict, quiz_system_prompt
+from app.services.quiz import (
+    VERDICT_CONFIRMED,
+    VERDICT_EXPRESSION_WEAK,
+    VERDICT_LUCKY,
+    VERDICT_NOT_UNDERSTOOD,
+    VERDICT_UNKNOWN,
+    evidence_key,
+    grade_answers,
+    grade_verdict,
+    quiz_system_prompt,
+)
 
 
 def test_quiz_system_prompt_english():
@@ -120,7 +130,7 @@ def test_grade_verdict_confirmed_when_answer_and_evidence_correct():
         answer_correct=True,
         chosen_evidence="弯弯的月亮像一条小船",
         correct_evidence="弯弯的月亮像一条小船。",
-    ) == "confirmed"
+    ) == VERDICT_CONFIRMED
 
 
 def test_grade_verdict_lucky_when_answer_right_but_evidence_wrong():
@@ -128,7 +138,7 @@ def test_grade_verdict_lucky_when_answer_right_but_evidence_wrong():
         answer_correct=True,
         chosen_evidence="小鸟在枝头唱歌",
         correct_evidence="弯弯的月亮像一条小船。",
-    ) == "lucky"
+    ) == VERDICT_LUCKY
 
 
 def test_grade_verdict_expression_weak_when_answer_wrong_but_evidence_right():
@@ -137,7 +147,7 @@ def test_grade_verdict_expression_weak_when_answer_wrong_but_evidence_right():
         answer_correct=False,
         chosen_evidence="弯弯的月亮像一条小船。",
         correct_evidence="弯弯的月亮像一条小船。",
-    ) == "expression_weak"
+    ) == VERDICT_EXPRESSION_WEAK
 
 
 def test_grade_verdict_not_understood_when_both_wrong():
@@ -145,7 +155,7 @@ def test_grade_verdict_not_understood_when_both_wrong():
         answer_correct=False,
         chosen_evidence="小鸟在枝头唱歌",
         correct_evidence="弯弯的月亮像一条小船。",
-    ) == "not_understood"
+    ) == VERDICT_NOT_UNDERSTOOD
 
 
 def test_grade_verdict_unknown_when_no_evidence_provided():
@@ -153,7 +163,7 @@ def test_grade_verdict_unknown_when_no_evidence_provided():
         answer_correct=True,
         chosen_evidence="",
         correct_evidence="弯弯的月亮像一条小船。",
-    ) == "unknown"
+    ) == VERDICT_UNKNOWN
 
 
 def test_grade_verdict_unknown_when_question_has_no_evidence():
@@ -162,7 +172,7 @@ def test_grade_verdict_unknown_when_question_has_no_evidence():
         answer_correct=True,
         chosen_evidence="随便一句",
         correct_evidence="",
-    ) == "unknown"
+    ) == VERDICT_UNKNOWN
 
 
 def test_grade_verdict_evidence_match_ignores_whitespace_and_punctuation_spacing():
@@ -171,7 +181,7 @@ def test_grade_verdict_evidence_match_ignores_whitespace_and_punctuation_spacing
         answer_correct=True,
         chosen_evidence="弯弯的月亮\n像一条小船",
         correct_evidence="弯弯的月亮像一条小船。",
-    ) == "confirmed"
+    ) == VERDICT_CONFIRMED
 
 
 def test_grade_verdict_evidence_match_allows_partial_sentence():
@@ -180,4 +190,22 @@ def test_grade_verdict_evidence_match_allows_partial_sentence():
         answer_correct=True,
         chosen_evidence="像一条小船",
         correct_evidence="弯弯的月亮像一条小船。",
-    ) == "confirmed"
+    ) == VERDICT_CONFIRMED
+
+
+def test_grade_verdict_evidence_match_allows_chosen_longer_than_evidence():
+    # 孩子点的句子比 evidence 片段更长，也算找对了地方
+    assert grade_verdict(
+        answer_correct=True,
+        chosen_evidence="弯弯的月亮像一条小船，静静地停在夜空中。",
+        correct_evidence="弯弯的月亮像一条小船",
+    ) == VERDICT_CONFIRMED
+
+
+def test_grade_verdict_unknown_when_evidence_normalizes_to_empty():
+    # 只由空白与连字符组成的“出处”无法判定，应记未决而不是判错
+    assert grade_verdict(
+        answer_correct=True,
+        chosen_evidence=" - - ",
+        correct_evidence="弯弯的月亮像一条小船。",
+    ) == VERDICT_UNKNOWN
