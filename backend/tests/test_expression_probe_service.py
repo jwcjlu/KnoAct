@@ -53,5 +53,7 @@ def test_build_parent_hint_scrubs_praise_and_truncates():
         provider, title="比喻", text="……",
         turns=[{"q": "q", "a": "a"}])
     assert hint
+    assert hint.startswith("可能卡在")
+    assert "可能卡在可能卡在" not in hint
     assert "很好" not in hint and "讲得" not in hint
     assert len(hint) <= ep.MAX_HINT_LEN

@@ -76,10 +76,12 @@ def build_parent_hint(provider, *, title: str, text: str, turns: list[dict]) -> 
     if not raw:
         return ""
     line = raw.splitlines()[0].strip()
-    if not line.startswith("可能卡在"):
-        line = "可能卡在：" + line.lstrip("：:").strip()
     line = _FORBIDDEN_HINT.sub("", line)
     line = re.sub(r"\s+", " ", line).strip()
+    if "可能卡在" in line and not line.startswith("可能卡在"):
+        line = line[line.index("可能卡在") :]
+    if not line.startswith("可能卡在"):
+        line = "可能卡在：" + line.lstrip("：:").strip()
     if len(line) < 6:
         return ""
     return line[:MAX_HINT_LEN]
