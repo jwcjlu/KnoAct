@@ -3389,6 +3389,7 @@ function renderReportTab(){
           <div class="goal-item" style="display:block">
             <div class="g-top"><span class="g-name">${escapeAttr(n.title||'（未命名）')}</span></div>
             <div class="g-meta" style="white-space:pre-wrap;line-height:1.7">${escapeAttr(n.text)}</div>
+            ${n.parent_hint ? `<div class="g-meta" style="color:var(--gray2);margin-top:6px">${escapeAttr(n.parent_hint)}</div>` : ''}
             <div class="g-meta">${escapeAttr((n.created_at||'').slice(0,16).replace('T',' '))}</div>
           </div>`).join('')
           : '<p style="font-size:13px;color:var(--gray2)">还没有讲过</p>'}
