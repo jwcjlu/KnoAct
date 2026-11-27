@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal
 from app.models import (
-    Annotation, AnswerRecord, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson,
-    LessonAudio, Mistake, Note, PdfDocument, PdfPage, Question, Quiz, Text, Textbook, ToolCall,
+    Annotation, AnswerRecord, KnowledgeMastery, KnowledgePoint, KnowledgeReviewItem, LearningProgress,
+    Lesson, LessonAudio, Mistake, Note, PdfDocument, PdfPage, Question, Quiz, Text, Textbook, ToolCall,
     Turn, UserDocument, WordBank, WordMastery,
 )
 from app.routers.knowledge import router as knowledge_router
@@ -52,6 +52,10 @@ def _seed(storage_path=""):
         LessonAudio(document_id=doc.id, lesson_id=lid, unit_label="Unit 1", audio_path="uploads/audio/t.mp3"),
         AnswerRecord(user_id=uid, subject="语文", module="dictation", lesson_id=lid,
                      question="白鹭", student_answer="白露", correct_answer="白鹭", is_correct=False),
+        KnowledgeReviewItem(
+            user_id=uid, knowledge_point_id=kp.id, bucket_id=None, status="active",
+            interval_index=1, last_result="remember",
+        ),
     ])
     turn = Turn(user_id=uid, lesson_id=lid, capability="chat", mode="chat", question="白鹭是什么？")
     s.add(turn); s.flush()
@@ -76,6 +80,7 @@ def _assert_lesson_purged(s, ids):
         assert s.query(model).filter_by(lesson_id=lid).count() == 0, model.__name__
     assert s.query(WordMastery).count() == 0
     assert s.query(KnowledgeMastery).count() == 0
+    assert s.query(KnowledgeReviewItem).filter_by(knowledge_point_id=ids["kp"]).count() == 0
     _assert_mistakes_detached(s, ids["uid"])
     prog = s.query(LearningProgress).filter_by(user_id=ids["uid"]).one()
     assert prog.current_lesson_id is None
@@ -106,6 +111,7 @@ def test_reextract_lesson_detaches_word_and_point_references(setup_db, monkeypat
     assert [q.question for q in s.query(Question).filter_by(lesson_id=ids["lesson"])] == ["新题"]
     assert s.query(WordMastery).count() == 0
     assert s.query(KnowledgeMastery).count() == 0
+    assert s.query(KnowledgeReviewItem).filter_by(knowledge_point_id=ids["kp"]).count() == 0
     _assert_mistakes_detached(s, ids["uid"])
     note = s.query(Note).filter_by(lesson_id=ids["lesson"]).one()
     assert note.knowledge_point_id is None
@@ -175,6 +181,7 @@ def test_delete_knowledge_point_detaches_references(setup_db):
     s = SessionLocal()
     assert s.get(KnowledgePoint, ids["kp"]) is None
     assert s.query(KnowledgeMastery).count() == 0
+    assert s.query(KnowledgeReviewItem).filter_by(knowledge_point_id=ids["kp"]).count() == 0
     kp_mistake = s.query(Mistake).filter_by(source_type="reading").one()
     assert kp_mistake.knowledge_point_id is None
     assert s.query(Note).filter_by(lesson_id=ids["lesson"]).one().knowledge_point_id is None
