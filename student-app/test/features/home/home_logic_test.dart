@@ -44,9 +44,18 @@ void main() {
     expect(taskAction(task(1, '语文', 'math', 'not_started')), TaskAction.openMath);
     expect(taskAction(task(1, '语文', 'knowledge', 'not_started')), TaskAction.openKnowledge);
     expect(taskAction(task(1, '语文', 'practice', 'not_started')), TaskAction.openBankPractice);
+    expect(taskAction(task(1, '语文', 'kp_review', 'not_started')), TaskAction.openKpSrs);
+    expect(taskAction(task(1, '语文', 'kp_review', 'not_started')), isNot(TaskAction.comingSoon));
+    expect(taskAction(task(1, '语文', 'kp_review', 'approved')), TaskAction.done);
+    expect(taskAction(task(1, '语文', 'kp_review', 'submitted')), TaskAction.waiting);
     for (final type in ['review', 'custom']) {
       expect(taskAction(task(1, '语文', type, 'not_started')), TaskAction.comingSoon);
     }
+  });
+
+  test('kp_review 有独立的任务元信息', () {
+    expect(taskMeta('kp_review').tag, '遗忘曲线');
+    expect(taskMeta('kp_review').tag, isNot(taskMeta('custom').tag));
   });
 
   test('任务类型元信息与旧版一致', () {
