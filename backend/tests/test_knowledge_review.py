@@ -77,6 +77,16 @@ def test_try_enroll_requires_mastery_and_progress(db):
     assert try_enroll(db, user.id, kp.id) is None
 
 
+def test_try_enroll_skips_kp_without_lesson(db):
+    user = make_user(db)
+    bid = ensure_bucket(db, user.id).id
+    kp = KnowledgePoint(subject="语文", category="修辞", content="无课")
+    db.add(kp)
+    db.flush()
+    _mastery(db, user.id, kp.id, bid)
+    assert try_enroll(db, user.id, kp.id) is None
+
+
 def test_try_enroll_skips_ahead_of_progress(db):
     user = make_user(db)
     doc = make_document(db, subject="语文")
