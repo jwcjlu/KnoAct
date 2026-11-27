@@ -6,8 +6,9 @@
 from sqlalchemy.orm import Session
 
 from ..models import (
-    Annotation, AnswerRecord, ExpressionNote, KnowledgeMastery, KnowledgePoint, LearningProgress, Lesson,
-    LessonAudio, Mistake, Note, Question, Quiz, Text, Turn, WordBank, WordMastery,
+    Annotation, AnswerRecord, ExpressionNote, KnowledgeMastery, KnowledgePoint, KnowledgeReviewItem,
+    LearningProgress, Lesson, LessonAudio, Mistake, Note, Question, Quiz, Text, Turn, WordBank,
+    WordMastery,
 )
 
 
@@ -22,6 +23,10 @@ def detach_words(db: Session, word_bank_ids: list[int]) -> None:
 def detach_points(db: Session, point_ids: list[int]) -> None:
     if not point_ids:
         return
+    # status=removed 仍占 FK；删知识点前必须硬删队列行
+    db.query(KnowledgeReviewItem).filter(
+        KnowledgeReviewItem.knowledge_point_id.in_(point_ids)
+    ).delete(synchronize_session=False)
     db.query(KnowledgeMastery).filter(KnowledgeMastery.knowledge_point_id.in_(point_ids)).delete(synchronize_session=False)
     db.query(Mistake).filter(Mistake.knowledge_point_id.in_(point_ids)).update(
         {Mistake.knowledge_point_id: None}, synchronize_session=False)

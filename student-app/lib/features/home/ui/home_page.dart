@@ -12,6 +12,7 @@ import '../../center/center_controller.dart';
 import '../../dictation/dictation_controller.dart';
 import '../../drill/drill_controller.dart';
 import '../../knowledge_review/knowledge_controller.dart';
+import '../../kp_srs/kp_srs_controller.dart';
 import '../../math_exercise/math_controller.dart';
 import '../../reader/reader_controller.dart';
 import '../data/home_models.dart';
@@ -108,6 +109,11 @@ class _HomePageState extends ConsumerState<HomePage> {
             .read(drillControllerProvider.notifier)
             .init(taskId: t.id, title: t.title, content: t.content);
         context.push(taskRoute('/drill', returnTo: '/home'));
+      case TaskAction.openKpSrs:
+        ref
+            .read(kpSrsControllerProvider.notifier)
+            .init(taskId: t.id, content: t.content, title: t.title);
+        context.push(taskRoute('/kp-srs', returnTo: '/home'));
       case TaskAction.comingSoon:
         showMessage(context, '该练习即将在 App 上线，可先在网页版完成');
       case TaskAction.done:
@@ -370,6 +376,18 @@ class _HomePageState extends ConsumerState<HomePage> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                  ),
+                  // 知识点复习：独立入口，现场拉取到期项（不依赖每日任务）
+                  OutlinedButton.icon(
+                    key: const ValueKey('kp-srs-home-entry'),
+                    onPressed: () {
+                      ref
+                          .read(kpSrsControllerProvider.notifier)
+                          .init(taskId: null);
+                      context.push(taskRoute('/kp-srs', returnTo: '/home'));
+                    },
+                    icon: const Icon(Icons.psychology, size: 18),
+                    label: const Text('知识点复习'),
                   ),
                 ],
               ),

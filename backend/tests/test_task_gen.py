@@ -9,7 +9,10 @@ from app.services.task_gen import generate_tasks_for_user, _current_lesson
 
 
 def _setup(db):
+    from app.models import KnowledgeReviewItem
+    db.query(KnowledgeReviewItem).delete()
     db.query(WordMastery).delete()
+    db.query(KnowledgeMastery).delete()
     db.query(WordBank).delete()
     db.query(KnowledgePoint).delete()
     db.query(Text).delete()
@@ -829,4 +832,136 @@ def test_single_bank_task_keeps_backward_compatible_fields():
     assert len(payload["question_ids"]) == 1
     assert payload["bank_title"] == "唯一卷"
     assert t.title == "唯一卷 题库练习"
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# kp_review：知识点遗忘曲线复习任务
+# ---------------------------------------------------------------------------
+
+def _kp_review_item(db, uid, lesson_id, *, status="active", due=True, content="比喻"):
+    from app.models import KnowledgeReviewItem
+    from app.services.bucket_service import ensure_bucket
+    bid = ensure_bucket(db, uid).id
+    kp = KnowledgePoint(subject="语文", category="字词", content=content, lesson_id=lesson_id)
+    db.add(kp); db.flush()
+    now = datetime.utcnow()
+    it = KnowledgeReviewItem(
+        user_id=uid, knowledge_point_id=kp.id, bucket_id=bid, status=status,
+        interval_index=0, enroll_source="mastery",
+        next_review_at=now - timedelta(minutes=5) if due else now + timedelta(days=3),
+    )
+    db.add(it); db.commit()
+    return it
+
+
+def test_kp_review_task_created_when_due_items():
+    db = SessionLocal()
+    uid, l1 = _setup(db)
+    it = _kp_review_item(db, uid, l1)
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, date=date.today(), task_type="kp_review").one()
+    assert t.subject == "语文" and t.content_status == "published"
+    assert t.submit_status == "not_started" and t.points == 25
+    payload = json.loads(t.content)
+    assert [p["item_id"] for p in payload] == [it.id]
+    assert t.bucket_id is not None
+    # 幂等
+    generate_tasks_for_user(db, uid, date.today())
+    assert db.query(Task).filter_by(user_id=uid, date=date.today(),
+                                    task_type="kp_review").count() == 1
+    db.close()
+
+
+def test_kp_review_not_created_without_due_items():
+    db = SessionLocal()
+    uid, l1 = _setup(db)
+    _kp_review_item(db, uid, l1, due=False)
+    generate_tasks_for_user(db, uid, date.today())
+    assert db.query(Task).filter_by(user_id=uid, task_type="kp_review").count() == 0
+    db.close()
+
+
+def test_kp_review_created_even_if_dictation_already_exists():
+    db = SessionLocal()
+    uid, l1 = _setup(db)
+    generate_tasks_for_user(db, uid, date.today())
+    assert db.query(Task).filter_by(user_id=uid, date=date.today(),
+                                    task_type="dictation").count() == 1
+    assert db.query(Task).filter_by(user_id=uid, task_type="kp_review").count() == 0
+    _kp_review_item(db, uid, l1)
+    n_before = db.query(Task).filter_by(user_id=uid, date=date.today()).count()
+    generate_tasks_for_user(db, uid, date.today())
+    assert db.query(Task).filter_by(user_id=uid, date=date.today(),
+                                    task_type="kp_review").count() == 1
+    assert db.query(Task).filter_by(user_id=uid, date=date.today()).count() == n_before + 1
+    db.close()
+
+
+def test_kp_review_and_word_review_coexist():
+    db = SessionLocal()
+    uid, l1 = _setup(db)
+    wb = db.query(WordBank).filter_by(lesson_id=l1).first()
+    db.add(WordMastery(word_bank_id=wb.id, is_weak=True,
+                       next_review_at=datetime.utcnow() - timedelta(days=1), user_id=uid))
+    db.commit()
+    _kp_review_item(db, uid, l1)
+    generate_tasks_for_user(db, uid, date.today())
+    types = {r.task_type for r in db.query(Task).filter_by(user_id=uid, date=date.today()).all()}
+    assert {"review", "kp_review", "dictation"} <= types
+    db.close()
+
+
+def test_kp_review_settle_when_all_completed_or_paused():
+    from app.models import KnowledgeReviewItem
+    from app.services import knowledge_review as kr
+    db = SessionLocal()
+    uid, l1 = _setup(db)
+    a = _kp_review_item(db, uid, l1, content="比喻")
+    b = _kp_review_item(db, uid, l1, content="拟人")
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, task_type="kp_review").one()
+    assert t.submit_status == "not_started"
+
+    kr.complete_item(db, uid, a.id, "remember")
+    db.refresh(t)
+    assert t.submit_status == "not_started"      # b 尚未处理
+
+    kr.pause_item(db, uid, b.id)                  # 暂停 → 快照条目视为结清
+    db.refresh(t)
+    assert t.submit_status == "approved"
+    db.close()
+
+
+def test_kp_review_settle_with_paused_snapshot_item_only():
+    from app.services import knowledge_review as kr
+    db = SessionLocal()
+    uid, l1 = _setup(db)
+    a = _kp_review_item(db, uid, l1)
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, task_type="kp_review").one()
+    kr.pause_item(db, uid, a.id)
+    db.refresh(t)
+    assert t.submit_status == "approved"
+    # 已 approved 不再回退；重复结算无副作用
+    kr.maybe_settle_kp_review_task(db, uid, "语文")
+    db.refresh(t)
+    assert t.submit_status == "approved"
+    db.close()
+
+
+def test_kp_review_settle_when_snapshot_item_removed():
+    from app.services import knowledge_review as kr
+    db = SessionLocal()
+    uid, l1 = _setup(db)
+    a = _kp_review_item(db, uid, l1, content="比喻")
+    b = _kp_review_item(db, uid, l1, content="拟人")
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, task_type="kp_review").one()
+    kr.complete_item(db, uid, a.id, "fuzzy")
+    db.refresh(t)
+    assert t.submit_status == "not_started"
+    kr.remove_item(db, uid, b.id)
+    db.refresh(t)
+    assert t.submit_status == "approved"
     db.close()

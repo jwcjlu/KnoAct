@@ -43,11 +43,11 @@ function icon(name, size=18){
 
 // ===== 通用状态 =====
 const PARENT_TABS = [
-  ['教材','book'],['知识点','brain'],['题库管理','grid'],['题目审核台','list'],['目标','star'],['报告','chart'],
+  ['教材','book'],['知识点','brain'],['知识点复习','play'],['题库管理','grid'],['题目审核台','list'],['目标','star'],['报告','chart'],
   ['任务','pen'],['专项训练','sparkles'],['规则','gift'],['学习配置','grid'],['屏幕时间','clock'],['设置','menu'],
   ['孩子管理','star']
 ];
-const CHILD_TABS = ['目标','报告','任务','屏幕时间'];   // 依赖当前孩子（uid）的 Tab
+const CHILD_TABS = ['目标','报告','任务','知识点复习','屏幕时间'];   // 依赖当前孩子（uid）的 Tab
 const CHILD_KEY = 'knoact_parent_child_id';
 const ACCESS_TOKEN_KEY = 'knoact_access_token';
 const REFRESH_TOKEN_KEY = 'knoact_refresh_token';
@@ -152,6 +152,9 @@ let poolActiveTag = null;    // 当前筛选标签；null=全部
 let folderForm = null;       // null | {mode:'add'|'rename', id?}  (id=父目录 for add)
 
 // 屏幕时间
+let kpReviewItems = [];
+let kpReviewDueToday = 0;
+let kpReviewDueWeek = 0;
 let screenGroups = [];     // [{id,name,kind,daily_limit_seconds}]
 let screenRules = [];      // [{app_package,app_name,group_id}]
 let screenUsage = [];      // [{group_id,name,kind,duration_seconds,daily_limit_seconds,overtime}]
@@ -316,6 +319,7 @@ async function reloadChildData(){
   if(parentTab==='目标') await loadGoals();
   else if(parentTab==='报告') await Promise.all([loadReport(), loadMasteryReport(), loadExpressionNotes(), loadAnswerRecords()]);
   else if(parentTab==='任务') await loadParentTasks();
+  else if(parentTab==='知识点复习') await loadKpReviewQueue();
   else if(parentTab==='屏幕时间') await Promise.all([loadScreenGroups(), loadScreenUsage()]);
 }
 // 切换期间禁用下拉框，避免快速连续切换时旧请求覆盖新数据
@@ -324,6 +328,7 @@ async function switchChild(id){
   uid = Number(id) || null;
   try{ localStorage.setItem(CHILD_KEY, String(uid)); }catch(e){}
   goalRows = []; reportRows = []; masteryReport = null; expressionNotes = []; expressionUnread = 0; parentTasks = [];
+  kpReviewItems = []; kpReviewDueToday = 0; kpReviewDueWeek = 0;
   buckets = []; bucketId = null;
   // 进度面板按孩子取数，切换孩子后要重取（否则显示上一个孩子的进度）
   progressRows = [];
@@ -506,6 +511,7 @@ function setParentTab(t){
   if(t==='目标'){ loadGoals().then(()=>render()); return; }
   if(t==='报告'){ Promise.all([loadReport(), loadMasteryReport(), loadExpressionNotes(), loadAnswerRecords()]).then(()=>render()); return; }
   if(t==='任务'){ loadParentTasks().then(()=>render()); return; }
+  if(t==='知识点复习'){ loadKpReviewQueue().then(()=>render()); return; }
   if(t==='专项训练'){ loadDrillGroups().then(()=>render()); return; }
   if(t==='屏幕时间'){ Promise.all([loadScreenGroups(), loadScreenUsage()]).then(()=>render()); return; }
   if(t==='学习配置'){ loadConfig().then(()=>loadLearningPreferences()).then(()=>render()); return; }
@@ -2570,6 +2576,7 @@ function renderParent(){
   else if(parentTab==='目标') body = renderGoalsTab();
   else if(parentTab==='报告') body = renderReportTab();
   else if(parentTab==='任务') body = renderTaskTab();
+  else if(parentTab==='知识点复习') body = renderKpReviewTab();
   else if(parentTab==='专项训练') body = renderDrillTab();
   else if(parentTab==='规则') body = renderRulesTab();
   else if(parentTab==='学习配置') body = renderLearningConfigTab();
@@ -3299,6 +3306,8 @@ async function saveProgressLesson(documentId, lessonId){
   }});
   if(r && r.current_lesson_id){
     toast(`进度已设为第 ${r.current}/${r.total} 课`);
+    const enrolled = Number(r.review_enrolled_count) || 0;
+    if(enrolled > 0) toast(`已自动加入 ${enrolled} 个达标知识点到复习`);
     await loadProgressOverview();
   } else {
     toast('设置失败');
@@ -3532,6 +3541,105 @@ function renderRulesTab(){
 }
 
 // ---- 屏幕时间 ----
+const KP_REVIEW_SOURCE_LABEL = {mastery:'掌握达标', progress:'进度补齐'};
+
+function fmtKpReviewAt(iso){
+  if(!iso) return '—';
+  const d = new Date(iso);
+  if(Number.isNaN(d.getTime())) return '—';
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function loadKpReviewQueue(){
+  if(!uid){ kpReviewItems = []; kpReviewDueToday = 0; kpReviewDueWeek = 0; return; }
+  const u = uid;
+  try{
+    const r = await api(`/api/knowledge-review/queue?user_id=${u}`);
+    if(u !== uid) return;
+    kpReviewItems = Array.isArray(r?.items) ? r.items : [];
+    kpReviewDueToday = Number(r?.due_today) || 0;
+    kpReviewDueWeek = Number(r?.due_this_week) || 0;
+  }catch(_e){
+    if(u === uid){ kpReviewItems = []; kpReviewDueToday = 0; kpReviewDueWeek = 0; }
+  }
+}
+
+async function kpReviewAction(itemId, action){
+  if(!uid) return;
+  const path = action === 'remove' ? 'remove' : action;
+  try{
+    await api(`/api/knowledge-review/item/${itemId}/${path}`, {method:'POST'});
+    toast(action === 'pause' ? '已暂停复习' : action === 'resume' ? '已恢复复习' : '已从复习列表移出');
+    await loadKpReviewQueue();
+    render();
+  }catch(_e){
+    toast('操作失败，请稍后重试');
+  }
+}
+
+function renderKpReviewTab(){
+  const intro = `<p style="font-size:13px;color:var(--gray2);line-height:1.55;margin:0 0 14px">
+    复习列表随学习进度与掌握情况自动加入；往后调进度不会移出，需要请暂停或移出。</p>`;
+  const stats = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+    <div style="flex:1;min-width:140px;padding:12px 14px;border-radius:12px;background:var(--blue-soft2)">
+      <div style="font-size:12px;color:var(--gray2)">今日到期</div>
+      <div style="font-size:22px;font-weight:700;color:#3158e8;margin-top:4px">${kpReviewDueToday}</div>
+    </div>
+    <div style="flex:1;min-width:140px;padding:12px 14px;border-radius:12px;background:var(--green-soft2)">
+      <div style="font-size:12px;color:var(--gray2)">本周将到期</div>
+      <div style="font-size:22px;font-weight:700;color:var(--green);margin-top:4px">${kpReviewDueWeek}</div>
+    </div>
+  </div>`;
+  const rows = kpReviewItems.map(it => {
+    const content = escapeHtml((it.title || it.content || '').slice(0, 48));
+    const statusChip = it.status === 'paused'
+      ? `<span class="g-status" style="background:#fff8e6;color:#a67c00">已暂停</span>`
+      : `<span class="g-status" style="background:var(--green-soft2);color:var(--green)">进行中</span>`;
+    const src = KP_REVIEW_SOURCE_LABEL[it.enroll_source] || escapeAttr(it.enroll_source || '—');
+    let acts = '';
+    if(it.status === 'paused'){
+      acts = `<button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="kpReviewAction(${it.item_id},'resume')">恢复</button>`;
+    }else if(it.status === 'active'){
+      acts = `<button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="kpReviewAction(${it.item_id},'pause')">暂停</button>`;
+    }
+    acts += `<button class="btn-ghost" style="padding:4px 10px;font-size:12px;color:#c05b4a" onclick="kpReviewAction(${it.item_id},'remove')">移出</button>`;
+    return `<tr>
+      <td style="padding:8px 10px;max-width:220px" title="${escapeAttr(it.content||'')}">${content}</td>
+      <td style="padding:8px 10px">${escapeAttr(it.subject||'')}</td>
+      <td style="padding:8px 10px">${Number(it.interval_index) + 1}</td>
+      <td style="padding:8px 10px;white-space:nowrap">${fmtKpReviewAt(it.next_review_at)}</td>
+      <td style="padding:8px 10px">${src}</td>
+      <td style="padding:8px 10px">${statusChip}</td>
+      <td style="padding:8px 10px;display:flex;gap:6px;flex-wrap:wrap">${acts}</td>
+    </tr>`;
+  }).join('');
+  const table = kpReviewItems.length
+    ? `<table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="color:var(--gray2);text-align:left;border-bottom:1px solid var(--line)">
+          <th style="padding:8px 10px">知识点</th>
+          <th style="padding:8px 10px">学科</th>
+          <th style="padding:8px 10px">档位</th>
+          <th style="padding:8px 10px">下次到期</th>
+          <th style="padding:8px 10px">来源</th>
+          <th style="padding:8px 10px">状态</th>
+          <th style="padding:8px 10px">操作</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`
+    : `<div style="text-align:center;padding:40px 0;color:#8e9691">当前学年还没有知识点进入复习队列</div>`;
+  return `<div class="parent-grid">
+    <div class="parent-panel" style="grid-column:1/-1">
+      <div class="head">
+        <div class="ic green">${icon('play',20)}</div>
+        <div><h3>知识点复习</h3><div class="sub">遗忘曲线复习队列 · 暂停或移出不会删知识点本身</div></div>
+        <button class="btn-ghost" style="margin-left:auto" onclick="loadKpReviewQueue().then(()=>render())">刷新</button>
+      </div>
+      <div class="bd">${intro}${stats}${table}</div>
+    </div>
+  </div>`;
+}
+
 function fmtDuration(seconds){
   seconds = Math.max(0, Math.round(seconds||0));
   const m = Math.floor(seconds/60);

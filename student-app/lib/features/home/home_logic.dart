@@ -26,7 +26,7 @@ Map<String, ({int done, int total})> subjectProgress(List<StudyTask> tasks) => {
   return (todo: list.where((t) => !isDone(t)).toList(), done: list.where(isDone).toList());
 }
 
-enum TaskAction { done, waiting, openReading, openListening, openMath, openKnowledge, openDictation, openBankPractice, openDrill, comingSoon }
+enum TaskAction { done, waiting, openReading, openListening, openMath, openKnowledge, openDictation, openBankPractice, openDrill, openKpSrs, comingSoon }
 
 TaskAction taskAction(StudyTask t) {
   if (t.submitStatus == 'approved') return TaskAction.done;
@@ -38,6 +38,7 @@ TaskAction taskAction(StudyTask t) {
   if (t.taskType == 'dictation') return TaskAction.openDictation;
   if (t.taskType == 'practice') return TaskAction.openBankPractice;
   if (t.taskType == 'drill') return TaskAction.openDrill;
+  if (t.taskType == 'kp_review') return TaskAction.openKpSrs;
   return TaskAction.comingSoon;
 }
 
@@ -58,6 +59,7 @@ const _metas = {
   'dictation': TaskMeta('当前进度', '约 8 分钟', Icons.edit, _blue),
   'knowledge': TaskMeta('重点巩固', '约 10 分钟', Icons.psychology, _green),
   'review': TaskMeta('遗忘曲线', '约 10 分钟', Icons.psychology, _green),
+  'kp_review': TaskMeta('遗忘曲线', '约 8 分钟', Icons.psychology, _green),
   'reading': TaskMeta('阅读理解', '约 12 分钟', Icons.menu_book, _orange),
   'listening': TaskMeta('听力理解', '约 8 分钟', Icons.headphones, _blue),
   'math': TaskMeta('数学练习', '约 10 分钟', Icons.edit, _orange),
