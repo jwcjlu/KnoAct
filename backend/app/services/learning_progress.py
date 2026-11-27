@@ -56,6 +56,7 @@ def advance_lesson(db: Session, user_id: int, document_id: int | None,
     if document_id is not None:
         q = q.filter(Lesson.document_id == document_id)
     lessons = q.order_by(Lesson.id).all()
+    old_lesson_id = row.current_lesson_id
     if lessons:
         ids = [l.id for l in lessons]
         cur = row.current_lesson_id
@@ -64,6 +65,17 @@ def advance_lesson(db: Session, user_id: int, document_id: int | None,
             row.current_lesson_id = ids[idx + 1] if idx + 1 < len(ids) else ids[-1]
         else:
             row.current_lesson_id = ids[0]
+    from .knowledge_review import enroll_due_to_progress
+
+    enroll_due_to_progress(
+        db,
+        user_id,
+        document_id,
+        subject,
+        old_lesson_id=old_lesson_id,
+        new_lesson_id=row.current_lesson_id,
+        enrolled_by=None,
+    )
     return row
 
 

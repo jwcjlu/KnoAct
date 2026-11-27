@@ -67,7 +67,19 @@ def adjust(req: AdjustReq, user: User = Depends(require_learning_user),
         raise HTTPException(404, "课不存在")
     doc_id = req.document_id if req.document_id is not None else lesson.document_id
     prog = ensure_progress(db, req.user_id, doc_id, lesson.subject)
+    old_lesson_id = prog.current_lesson_id
     prog.current_lesson_id = lesson.id
+    from ..services.knowledge_review import enroll_due_to_progress
+
+    review_enrolled_count = enroll_due_to_progress(
+        db,
+        req.user_id,
+        doc_id,
+        lesson.subject,
+        old_lesson_id=old_lesson_id,
+        new_lesson_id=prog.current_lesson_id,
+        enrolled_by=user.id,
+    )
     db.commit()
     return {
         "user_id": req.user_id,
@@ -76,6 +88,7 @@ def adjust(req: AdjustReq, user: User = Depends(require_learning_user),
         "current_lesson_id": prog.current_lesson_id,
         "current": lesson_index(db, lesson)[0],
         "total": lesson_index(db, lesson)[1],
+        "review_enrolled_count": review_enrolled_count,
     }
 
 

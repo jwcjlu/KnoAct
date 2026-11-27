@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from app.models import KnowledgeMastery, KnowledgePoint, KnowledgeReviewItem, LearningProgress
 from app.services.bucket_service import ensure_bucket
-from app.services.knowledge_review import try_enroll
+from app.services.knowledge_review import enroll_due_to_progress, try_enroll
 from app.services.scheduler import INTERVALS
 from conftest import make_document, make_lesson, make_user
 
@@ -117,3 +117,64 @@ def test_try_enroll_returns_none_when_already_active(db):
     first = try_enroll(db, user.id, kp.id)
     assert first is not None
     assert try_enroll(db, user.id, kp.id) is None
+
+
+def test_progress_forward_enrolls_mastered_in_new_range(db):
+    user = make_user(db)
+    parent = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson_a = make_lesson(db, subject="语文", title="第1课", document=doc)
+    lesson_b = make_lesson(db, subject="语文", title="第2课", document=doc)
+    kp_b = _kp_on_lesson(db, lesson_b)
+    _progress(db, user.id, doc.id, "语文", lesson_b.id)
+    bid = ensure_bucket(db, user.id).id
+    _mastery(db, user.id, kp_b.id, bid)
+    n = enroll_due_to_progress(
+        db,
+        user.id,
+        doc.id,
+        "语文",
+        old_lesson_id=lesson_a.id,
+        new_lesson_id=lesson_b.id,
+        enrolled_by=parent.id,
+    )
+    assert n == 1
+    row = (
+        db.query(KnowledgeReviewItem)
+        .filter_by(user_id=user.id, knowledge_point_id=kp_b.id, bucket_id=bid)
+        .first()
+    )
+    assert row is not None
+    assert row.status == "active"
+    assert row.enroll_source == "progress_adjust"
+    assert row.enrolled_by == parent.id
+
+
+def test_progress_backward_does_not_remove(db):
+    user = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson_a = make_lesson(db, subject="语文", title="第1课", document=doc)
+    lesson_b = make_lesson(db, subject="语文", title="第2课", document=doc)
+    kp_a = _kp_on_lesson(db, lesson_a)
+    _progress(db, user.id, doc.id, "语文", lesson_a.id)
+    bid = ensure_bucket(db, user.id).id
+    _mastery(db, user.id, kp_a.id, bid)
+    row = try_enroll(db, user.id, kp_a.id, source="mastery")
+    assert row is not None
+    n = enroll_due_to_progress(
+        db,
+        user.id,
+        doc.id,
+        "语文",
+        old_lesson_id=lesson_b.id,
+        new_lesson_id=lesson_a.id,
+        enrolled_by=user.id,
+    )
+    assert n == 0
+    still = (
+        db.query(KnowledgeReviewItem)
+        .filter_by(user_id=user.id, knowledge_point_id=kp_a.id, bucket_id=bid)
+        .first()
+    )
+    assert still is not None
+    assert still.status == "active"

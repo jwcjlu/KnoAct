@@ -76,3 +76,51 @@ def try_enroll(
     row.updated_at = now
     db.flush()
     return row
+
+
+def enroll_due_to_progress(
+    db: Session,
+    user_id: int,
+    document_id: int | None,
+    subject: str,
+    *,
+    old_lesson_id: int | None,
+    new_lesson_id: int | None,
+    enrolled_by=None,
+) -> int:
+    """进度前推时，为新纳入进度范围的已掌握知识点补入复习队列（不后退撤队）。"""
+    if new_lesson_id is None:
+        return 0
+    q = db.query(Lesson).filter(Lesson.subject == subject)
+    if document_id is not None:
+        q = q.filter(Lesson.document_id == document_id)
+    lessons = q.order_by(Lesson.id).all()
+    ids = [l.id for l in lessons]
+    if new_lesson_id not in ids:
+        return 0
+    new_idx = ids.index(new_lesson_id)
+    old_idx = ids.index(old_lesson_id) if old_lesson_id in ids else -1
+    if new_idx < old_idx:
+        return 0
+    if old_lesson_id is None or old_lesson_id not in ids:
+        lesson_ids = ids[: new_idx + 1]
+    else:
+        lesson_ids = ids[old_idx + 1 : new_idx + 1]
+    if not lesson_ids:
+        return 0
+    kps = (
+        db.query(KnowledgePoint)
+        .filter(KnowledgePoint.lesson_id.in_(lesson_ids))
+        .all()
+    )
+    n = 0
+    for kp in kps:
+        if try_enroll(
+            db,
+            user_id,
+            kp.id,
+            enrolled_by=enrolled_by,
+            source="progress_adjust",
+        ):
+            n += 1
+    return n
