@@ -391,6 +391,19 @@ def complete_item(
     if kp is None:
         raise KnowledgeReviewError("item_not_found", 404)
 
+    # 同一 UTC 日已完成：apply_review_result 会是空操作，这里必须在任何副作用
+    # （AnswerRecord / Mistake / record_attempt）之前直接返回，保证完全幂等。
+    if item.last_result and item.updated_at and item.updated_at.date() == datetime.utcnow().date():
+        return {
+            "ok": True,
+            "result": item.last_result,
+            "is_correct": None,
+            "graded": False,
+            "already_completed": True,
+            "interval_index": item.interval_index,
+            "next_review_at": item.next_review_at.isoformat() if item.next_review_at else None,
+        }
+
     graded = False
     is_correct: bool | None = None
     q: Question | None = None

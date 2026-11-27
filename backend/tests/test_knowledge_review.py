@@ -457,6 +457,37 @@ def test_complete_correct_answer_overrides_client_fuzzy(db):
     assert item.interval_index == 2
 
 
+def test_complete_same_day_is_fully_idempotent(db):
+    user = make_user(db)
+    bid = ensure_bucket(db, user.id).id
+    kp = _kp_on_lesson(db, make_lesson(db), "比喻")
+    item = _item(db, user.id, kp, bid, interval_index=2)
+    q = _kp_question(db, kp, user.id)
+    first = kr.complete_item(db, user.id, item.id, "forgot", question_id=q.id,
+                             student_answer="不知道")
+    assert first["result"] == "forgot"
+    db.refresh(item)
+    idx, nxt = item.interval_index, item.next_review_at
+    km = db.query(KnowledgeMastery).filter_by(
+        user_id=user.id, knowledge_point_id=kp.id, bucket_id=bid).one()
+    assert json.loads(km.attempts) == [False]
+    mk0 = db.query(Mistake).filter_by(user_id=user.id, knowledge_point_id=kp.id).one()
+    mk_count = mk0.mistake_count
+
+    # 同日第二次（即便答案完全正确）：无任何副作用
+    second = kr.complete_item(db, user.id, item.id, "remember", question_id=q.id,
+                              student_answer="比喻就是把一事物比作另一事物")
+    assert second["ok"] is True and second["result"] == "forgot"
+    assert db.query(AnswerRecord).filter_by(user_id=user.id).count() == 1
+    mk = db.query(Mistake).filter_by(user_id=user.id, knowledge_point_id=kp.id).one()
+    assert mk.mistake_count == mk_count
+    db.refresh(km)
+    assert json.loads(km.attempts) == [False]
+    db.refresh(item)
+    assert item.interval_index == idx and item.next_review_at == nxt
+    assert item.last_result == "forgot"
+
+
 def test_complete_on_paused_returns_400(client, db):
     parent, child, parent_h, child_h = parent_child(db)
     bid = ensure_bucket(db, child.id).id
