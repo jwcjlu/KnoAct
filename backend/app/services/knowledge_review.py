@@ -400,11 +400,8 @@ def complete_item(
             raise KnowledgeReviewError("question_not_found", 404)
         is_correct = _grade_question(db, q, student_answer or "")
         graded = True
-        # 服务端判分为准：答错必为 forgot；答对时保留孩子的 fuzzy 自评，否则 remember
-        if not is_correct:
-            result = "forgot"
-        elif result != "fuzzy":
-            result = "remember"
+        # 服务端判分为准，覆盖客户端自评：答对 → remember，答错 → forgot
+        result = "remember" if is_correct else "forgot"
 
     apply_review_result(db, item, result)
 

@@ -443,6 +443,20 @@ def test_complete_correct_answer_remember_and_self_rate(db):
     assert db.query(Mistake).count() == 0
 
 
+def test_complete_correct_answer_overrides_client_fuzzy(db):
+    user = make_user(db)
+    bid = ensure_bucket(db, user.id).id
+    kp = _kp_on_lesson(db, make_lesson(db), "比喻")
+    item = _item(db, user.id, kp, bid, interval_index=1)
+    q = _kp_question(db, kp, user.id)
+    out = kr.complete_item(db, user.id, item.id, "fuzzy", question_id=q.id,
+                           student_answer="比喻就是把一事物比作另一事物")
+    assert out["is_correct"] is True and out["result"] == "remember"
+    db.refresh(item)
+    assert item.last_result == "remember"
+    assert item.interval_index == 2
+
+
 def test_complete_on_paused_returns_400(client, db):
     parent, child, parent_h, child_h = parent_child(db)
     bid = ensure_bucket(db, child.id).id
