@@ -272,6 +272,37 @@ void main() {
       expect(s.isDone, isTrue);
       expect(s.completed, 1);
     });
+
+    test('有点忘：不展开原文，直接进入下一项', () async {
+      final api = FakeApi()..postResult = {'ok': true, 'result': 'fuzzy', 'graded': false};
+      final c = await _container(api);
+      final ctl = c.read(kpSrsControllerProvider.notifier);
+      await ctl.init(
+        taskId: 8,
+        content: jsonEncode([_selfRateItem(1, '比喻'), _selfRateItem(2, '拟人')]),
+      );
+      await ctl.selfRate(kpResultFuzzy);
+      final s = c.read(kpSrsControllerProvider);
+      expect(api.posts.single['result'], 'fuzzy');
+      expect(s.index, 1);
+      expect(s.completed, 1);
+      expect(s.revealContent, isFalse);
+      expect(s.feedback, isNull);
+    });
+
+    test('complete 解析 already_completed 与 interval 字段', () {
+      final r = KpSrsCompleteResult.fromJson({
+        'ok': true,
+        'result': 'remember',
+        'graded': false,
+        'already_completed': true,
+        'interval_index': 2,
+        'next_review_at': '2026-12-01T00:00:00',
+      });
+      expect(r.alreadyCompleted, isTrue);
+      expect(r.intervalIndex, 2);
+      expect(r.nextReviewAt, '2026-12-01T00:00:00');
+    });
   });
 
   group('page', () {
@@ -319,6 +350,21 @@ void main() {
 
       expect(find.text('今天按计划复习了 2 个知识点'), findsOneWidget);
       expect(find.textContaining('已掌握'), findsNothing);
+    });
+
+    testWidgets('有点忘：不展开内容，自动切到下一项', (tester) async {
+      final api = FakeApi()..postResult = {'ok': true, 'result': 'fuzzy', 'graded': false};
+      final c = await _container(api);
+      await c
+          .read(kpSrsControllerProvider.notifier)
+          .init(taskId: 8, content: jsonEncode([_selfRateItem(1, '比喻'), _selfRateItem(2, '拟人')]));
+      await _pumpPage(tester, c);
+
+      await tester.tap(find.byKey(const ValueKey('kp-srs-fuzzy')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('kp-srs-content')), findsNothing);
+      expect(find.text('拟人'), findsWidgets);
+      expect(find.byKey(const ValueKey('kp-srs-remember')), findsOneWidget);
     });
 
     testWidgets('带题：输入答案并提交，答错展示反馈与原文', (tester) async {

@@ -9,7 +9,10 @@ from app.services.task_gen import generate_tasks_for_user, _current_lesson
 
 
 def _setup(db):
+    from app.models import KnowledgeReviewItem
+    db.query(KnowledgeReviewItem).delete()
     db.query(WordMastery).delete()
+    db.query(KnowledgeMastery).delete()
     db.query(WordBank).delete()
     db.query(KnowledgePoint).delete()
     db.query(Text).delete()
@@ -942,6 +945,23 @@ def test_kp_review_settle_with_paused_snapshot_item_only():
     assert t.submit_status == "approved"
     # 已 approved 不再回退；重复结算无副作用
     kr.maybe_settle_kp_review_task(db, uid, "语文")
+    db.refresh(t)
+    assert t.submit_status == "approved"
+    db.close()
+
+
+def test_kp_review_settle_when_snapshot_item_removed():
+    from app.services import knowledge_review as kr
+    db = SessionLocal()
+    uid, l1 = _setup(db)
+    a = _kp_review_item(db, uid, l1, content="比喻")
+    b = _kp_review_item(db, uid, l1, content="拟人")
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(user_id=uid, task_type="kp_review").one()
+    kr.complete_item(db, uid, a.id, "fuzzy")
+    db.refresh(t)
+    assert t.submit_status == "not_started"
+    kr.remove_item(db, uid, b.id)
     db.refresh(t)
     assert t.submit_status == "approved"
     db.close()

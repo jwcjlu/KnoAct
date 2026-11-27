@@ -545,3 +545,164 @@ def make_account_other(db):
     from conftest import make_account
     p = make_account(db, "other_parent", "parent")
     return make_account(db, "other_child", "child", parent=p)
+
+
+# ---------- 规格边界补强 ----------
+
+def test_pause_freezes_next_review_at(db):
+    user = make_user(db)
+    bid = ensure_bucket(db, user.id).id
+    kp = _kp_on_lesson(db, make_lesson(db), "比喻")
+    nxt = datetime.utcnow() + timedelta(days=5)
+    item = KnowledgeReviewItem(
+        user_id=user.id, knowledge_point_id=kp.id, bucket_id=bid,
+        status="active", interval_index=2, next_review_at=nxt,
+        enroll_source="mastery",
+    )
+    db.add(item)
+    db.commit()
+    kr.pause_item(db, user.id, item.id)
+    db.refresh(item)
+    assert item.status == "paused"
+    assert item.next_review_at == nxt
+
+
+def test_resume_past_due_appears_in_due(db):
+    user = make_user(db)
+    bid = ensure_bucket(db, user.id).id
+    kp = _kp_on_lesson(db, make_lesson(db), "拟人")
+    item = _item(db, user.id, kp, bid, due=True, status="paused")
+    db.commit()
+    assert kr.select_due_items(db, user.id) == []
+    kr.resume_item(db, user.id, item.id)
+    due = kr.select_due_items(db, user.id)
+    assert [i.id for i in due] == [item.id]
+
+
+def test_try_enroll_resurrects_removed(db):
+    user = make_user(db)
+    bid = ensure_bucket(db, user.id).id
+    doc = make_document(db, subject="语文")
+    lesson = make_lesson(db, subject="语文", title="第1课", document=doc)
+    kp = _kp_on_lesson(db, lesson, "排比")
+    _progress(db, user.id, doc.id, "语文", lesson.id)
+    _mastery(db, user.id, kp.id, bid)
+    dead = KnowledgeReviewItem(
+        user_id=user.id, knowledge_point_id=kp.id, bucket_id=bid,
+        status="removed", interval_index=3, next_review_at=datetime.utcnow() + timedelta(days=30),
+        last_result="remember", enroll_source="mastery",
+    )
+    db.add(dead)
+    db.flush()
+    row = try_enroll(db, user.id, kp.id, source="mastery")
+    assert row is not None and row.id == dead.id
+    assert row.status == "active" and row.interval_index == 0
+    assert row.last_result == "remember"  # 复活不清历史自评痕迹
+    assert row.next_review_at is not None
+
+
+def test_remember_caps_at_max_interval(db):
+    user = make_user(db)
+    bid = ensure_bucket(db, user.id).id
+    kp = _kp_on_lesson(db, make_lesson(db), "夸张")
+    item = _item(db, user.id, kp, bid, interval_index=len(INTERVALS) - 1)
+    before = item.next_review_at
+    apply_review_result(db, item, "remember")
+    db.flush()
+    assert item.interval_index == len(INTERVALS) - 1
+    assert item.next_review_at != before
+    # 档位已到顶：间隔仍为最长一档天数
+    delta = (item.next_review_at - datetime.utcnow()).total_seconds()
+    assert abs(delta - INTERVALS[-1] * 86400) < 5
+
+
+def test_complete_invalid_result_and_removed_400(client, db):
+    parent, child, parent_h, child_h = parent_child(db)
+    bid = ensure_bucket(db, child.id).id
+    kp = _kp_on_lesson(db, make_lesson(db), "通感")
+    item = _item(db, child.id, kp, bid)
+    db.commit()
+    r = client.post("/api/knowledge-review/complete", headers=child_h,
+                    json={"user_id": child.id, "item_id": item.id, "result": "maybe"})
+    assert r.status_code == 400
+    assert r.json()["detail"]["error"] == "invalid_result"
+
+    assert client.post(f"/api/knowledge-review/item/{item.id}/remove",
+                       headers=parent_h).json()["status"] == "removed"
+    r = client.post("/api/knowledge-review/complete", headers=child_h,
+                    json={"user_id": child.id, "item_id": item.id, "result": "remember"})
+    assert r.status_code == 400
+    assert r.json()["detail"]["error"] == "item_not_active"
+
+
+def test_due_ignores_other_bucket_items(db):
+    from app.models import SchoolYearBucket
+    user = make_user(db)
+    active = ensure_bucket(db, user.id)
+    archived = SchoolYearBucket(
+        user_id=user.id, grade=2, school_year="2024-2025",
+        status="archived", started_at=datetime.utcnow(),
+    )
+    db.add(archived)
+    db.flush()
+    lesson = make_lesson(db)
+    kp_old = _kp_on_lesson(db, lesson, "旧桶")
+    kp_new = _kp_on_lesson(db, lesson, "新桶")
+    _item(db, user.id, kp_old, archived.id, due=True)
+    cur = _item(db, user.id, kp_new, active.id, due=True)
+    due = kr.select_due_items(db, user.id)
+    assert [i.id for i in due] == [cur.id]
+
+
+def test_adjust_http_returns_review_enrolled_count(client, db):
+    from app.models import UserDocument
+    parent, child, parent_h, _ = parent_child(db)
+    bid = ensure_bucket(db, child.id).id
+    doc = make_document(db, subject="语文")
+    l1 = make_lesson(db, subject="语文", title="第1课", document=doc)
+    l2 = make_lesson(db, subject="语文", title="第2课", document=doc)
+    kp2 = _kp_on_lesson(db, l2, "拟人")
+    db.add(UserDocument(user_id=child.id, document_id=doc.id))
+    _progress(db, child.id, doc.id, "语文", l1.id)
+    _mastery(db, child.id, kp2.id, bid)
+    db.commit()
+    r = client.post("/api/progress/adjust", headers=parent_h, json={
+        "user_id": child.id, "lesson_id": l2.id, "document_id": doc.id, "subject": "语文",
+    })
+    assert r.status_code == 200
+    assert r.json()["review_enrolled_count"] == 1
+    row = db.query(KnowledgeReviewItem).filter_by(
+        user_id=child.id, knowledge_point_id=kp2.id).one()
+    assert row.status == "active" and row.enroll_source == "progress_adjust"
+    assert row.enrolled_by == parent.id
+
+
+def test_advance_lesson_enrolls_with_null_enrolled_by(db):
+    from app.services.learning_progress import advance_lesson
+    user = make_user(db)
+    bid = ensure_bucket(db, user.id).id
+    doc = make_document(db, subject="语文")
+    l1 = make_lesson(db, subject="语文", title="第1课", document=doc)
+    l2 = make_lesson(db, subject="语文", title="第2课", document=doc)
+    kp2 = _kp_on_lesson(db, l2, "夸张")
+    _progress(db, user.id, doc.id, "语文", l1.id)
+    _mastery(db, user.id, kp2.id, bid)
+    advance_lesson(db, user.id, doc.id, "语文")
+    db.flush()
+    row = db.query(KnowledgeReviewItem).filter_by(
+        user_id=user.id, knowledge_point_id=kp2.id).one()
+    assert row.enroll_source == "progress_adjust"
+    assert row.enrolled_by is None
+
+
+def test_due_http_subject_filter(client, db):
+    _, child, _, child_h = parent_child(db)
+    bid = ensure_bucket(db, child.id).id
+    cn = _item(db, child.id, _kp_on_lesson(db, make_lesson(db, subject="语文"), "比喻"), bid)
+    _item(db, child.id, _kp_on_lesson(db, make_lesson(db, subject="数学"), "乘法"), bid)
+    db.commit()
+    r = client.get("/api/knowledge-review/due",
+                   params={"user_id": child.id, "subject": "语文"}, headers=child_h)
+    assert r.status_code == 200
+    ids = [x["item_id"] for x in r.json()["items"]]
+    assert ids == [cn.id]
