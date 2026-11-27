@@ -339,6 +339,31 @@ class KnowledgeMastery(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class KnowledgeReviewItem(Base):
+    """知识点 SRS 复习队列项（与 KnowledgeMastery 解耦）。"""
+    __tablename__ = "knowledge_review_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "knowledge_point_id", "bucket_id",
+            name="uq_kp_review_user_kp_bucket",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    knowledge_point_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"))
+    bucket_id: Mapped[int] = mapped_column(
+        ForeignKey("school_year_buckets.id"), nullable=True)
+    enrolled_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    enroll_source: Mapped[str] = mapped_column(String(32), default="mastery")
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    interval_index: Mapped[int] = mapped_column(Integer, default=0)
+    next_review_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    last_result: Mapped[str] = mapped_column(String(16), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Turn(Base):
     """一次 agent turn：一个提问 → 一次多步工具循环 → 最终答案。"""
     __tablename__ = "turns"
