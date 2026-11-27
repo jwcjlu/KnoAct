@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from app.models import KnowledgeMastery, KnowledgePoint, KnowledgeReviewItem, LearningProgress
 from app.services.bucket_service import ensure_bucket
 from app.services.knowledge_review import enroll_due_to_progress, try_enroll
+from app.services.mastery import record_attempt
 from app.services.scheduler import INTERVALS
 from conftest import make_document, make_lesson, make_user
 
@@ -148,6 +149,43 @@ def test_progress_forward_enrolls_mastered_in_new_range(db):
     assert row.status == "active"
     assert row.enroll_source == "progress_adjust"
     assert row.enrolled_by == parent.id
+
+
+def test_record_attempt_auto_enrolls_when_mastered_in_scope(db):
+    user = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson = make_lesson(db, subject="语文", title="第1课", document=doc)
+    kp = _kp_on_lesson(db, lesson)
+    _progress(db, user.id, doc.id, "语文", lesson.id)
+    bid = ensure_bucket(db, user.id).id
+    for _ in range(3):
+        record_attempt(db, user.id, "knowledge", kp.id, True, bucket_id=bid)
+    row = (
+        db.query(KnowledgeReviewItem)
+        .filter_by(user_id=user.id, knowledge_point_id=kp.id, bucket_id=bid)
+        .first()
+    )
+    assert row is not None
+    assert row.status == "active"
+    assert row.enroll_source == "mastery"
+
+
+def test_record_attempt_does_not_enroll_ahead_of_progress(db):
+    user = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson_a = make_lesson(db, subject="语文", title="第1课", document=doc)
+    lesson_b = make_lesson(db, subject="语文", title="第2课", document=doc)
+    kp_b = _kp_on_lesson(db, lesson_b)
+    _progress(db, user.id, doc.id, "语文", lesson_a.id)
+    bid = ensure_bucket(db, user.id).id
+    for _ in range(3):
+        record_attempt(db, user.id, "knowledge", kp_b.id, True, bucket_id=bid)
+    row = (
+        db.query(KnowledgeReviewItem)
+        .filter_by(user_id=user.id, knowledge_point_id=kp_b.id, bucket_id=bid)
+        .first()
+    )
+    assert row is None
 
 
 def test_progress_backward_does_not_remove(db):

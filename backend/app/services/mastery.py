@@ -116,5 +116,8 @@ def record_attempt(db: Session, user_id: int, target_type: str,
             row.mistake_count += 1
             row.is_weak = True
             row.correct_count = 0
+    if target_type == "knowledge" and (mastered or mastery >= GATE):
+        from .knowledge_review import try_enroll
+        try_enroll(db, user_id, target_id, source="mastery")
     db.commit()
     return mastery
