@@ -40,7 +40,8 @@
 | 学年桶 | 一律 `resolve_bucket_id(db, user_id, …)` 的 **active 桶**；门槛/队列/due 同桶 |
 | 暂停语义 | 冻结：`next_review_at` 不变；paused 不进 due；恢复后若已过期则立即到期 |
 | 入队失败 | **逐条**处理，返回成功/失败列表（允许部分成功） |
-| 每日上限 | `child_config` key：`task_kp_review_count`，默认 **6** |
+| 每日上限 | `task_kp_review_count`，默认 **6**，**每科各自**截断；`/due` 与 `task_gen` 共用选集函数 |
+| 快照 vs 暂停 | 快照项被 pause/remove 后视为已了结，任务仍可结案（§2.6） |
 | 幂等「自然日」 | 与现网一致用 **UTC 日期**（`datetime.utcnow().date()`） |
 
 ## 成功标准
@@ -73,8 +74,8 @@
 
 约束：
 
-- `(user_id, knowledge_point_id, bucket_id)` 在 `status ∈ {active, paused}` 时至多一条。  
-- `removed` 后允许重新入队（新行或复活行均可；实现选一种并在计划里写死），档位从 0 起。
+- `(user_id, knowledge_point_id, bucket_id)` 普通唯一约束（兼容 MySQL）；**优先复活同一行**（`removed`→`active`），避免 partial unique。  
+- 重入队：档位从 0、`next_review_at=now+1day`。
 
 ### 1.2 学年桶解析
 
@@ -111,16 +112,17 @@
 ### 1.6 到期选集
 
 - 今日到期：`status=active` 且 `next_review_at <= now`。  
-- 每日上限：`task_kp_review_count`，默认 6；超出仍保持到期，次日优先，不丢队。  
-- 按 `next_review_at` 升序，必要时次级按 `interval_index` 升序（短间隔优先）。  
-- `status=paused` 的项**永不**进入 due / 任务快照。
+- **每科**上限 `task_kp_review_count`（默认 6）：先按 `KnowledgePoint.subject` 分组，组内按 `next_review_at` 升序（次级 `interval_index` 升序）截断；超出仍保持到期，次日优先，不丢队。  
+- `GET /due` 与 `task_gen` **共用同一选集函数**（同桶、同排序、同每科上限）；`due` 可带 `?subject=` 过滤，不传则返回各科截断后的并集。  
+- `status=paused` 的项**永不**进入 due / 新任务快照。
 
 ### 1.7 暂停 / 恢复
 
 | 操作 | 行为 |
 |------|------|
-| `pause` | `status=paused`；**不改** `next_review_at`（冻结时钟，不顺延） |
+| `pause` | `status=paused`；**不改** `next_review_at`（冻结时钟，不顺延）。允许对已进当日任务快照的项操作。 |
 | `resume` | `status=active`；若 `next_review_at <= now`，下一次 due/任务即出现；未到期则按原时间 |
+| 与当日任务 | 见 §2.6：快照内项被 pause/remove/删点后，**不再要求**对其 complete 才能结案 |
 
 ---
 
@@ -147,11 +149,11 @@
 {
   "ok": true,
   "enrolled": [{"item_id": 1, "knowledge_point_id": 10}],
-  "failed": [{"knowledge_point_id": 11, "reason": "not_mastered|already_queued|not_found"}]
+  "failed": [{"knowledge_point_id": 11, "reason": "not_mastered|already_queued|not_found|no_bucket"}]
 }
 ```
 
-全部失败时仍 HTTP 200（或 400，实现计划二选一写死；推荐 **200 + failed 列表**，便于家长端展示部分成功）。
+HTTP **200** + `enrolled`/`failed` 列表（含全部失败），便于家长端展示部分成功。
 
 ### 2.2 孩子 API
 
@@ -201,7 +203,7 @@
 {
   "item_id": 12,
   "knowledge_point_id": 55,
-  "title": "比喻的构成",
+  "title": "本体+比喻词+喻体…",
   "content": "本体+比喻词+喻体…",
   "lesson_title": "第3课…",
   "prompt": {
@@ -214,22 +216,31 @@
 }
 ```
 
-`self_rate` 时 `question_id` 为 null，可无 `question`。
+- `title`：`KnowledgePoint` 无独立标题字段 → **截断 `content` 前 40 字**（实现可微调长度）。  
+- `self_rate` 时 `question_id` 为 null，可无 `question`。
 
 ### 2.5 每日任务
 
 - 新 `task_type`：`kp_review`。  
 - **按学科拆分**一条 `Task(subject=…, task_type=kp_review)`，满足唯一约束。  
 - 生成时显式：`content_status="published"`，`submit_status="not_started"`，`bucket_id=bid`（**不要**落默认 `pending_review`，否则孩子 `list_tasks` 看不见）。  
-- 每科 due 截断到 `task_kp_review_count`（**每科各自上限**）。  
+- content 快照 = §1.6 选集中该科那一段（与 `/due?subject=` 一致）。  
 - **生成时快照**；当日该四元组已存在则不重复生成。  
 - 接入 `task_gen` 时：若现有逻辑是「同科当日已有**任意** Task 则整科 skip」，须为 `kp_review` **单独**判断幂等（只看同 type 是否已有），避免被听写等任务挡住。  
 - 该科无到期 → 不生成。
 
 ### 2.6 任务结案与双入口
 
-- 快照内全部 item 于今日 UTC 均已 complete → 该 `Task.submit_status=approved`（跳过家长确认）。  
-- 独立模块 complete 时，若存在同科当日未结案 `kp_review`，按上条同步结案。  
+结案条件（满足即 `submit_status=approved`，跳过家长确认）：
+
+对任务快照内**每一条** `item_id`，下列之一成立即可：
+
+1. 该 item 今日 UTC 已成功 `complete`，或  
+2. 该 item 当前 `status ≠ active`（家长已 pause/remove，或 KP 删除导致 removed）
+
+因此：快照生成后家长 pause/remove **不会**造成任务永久卡死；孩子也**不必**再对已非 active 的快照条调用 complete（若误调 → 400，可忽略）。
+
+- 独立模块 complete / pause 旁路：每次 complete 成功或检测到快照项变非 active 后，检查同科当日 `kp_review` 是否已满足上式并结案。  
 - 与 `_gen_knowledge` **允许同日重复曝光同一 KP**（v1 接受）。
 
 ---
@@ -284,7 +295,7 @@
 | 已在 active/paused | `failed.reason=already_queued` |
 | removed 后重入队 | 允许，档位从 0、明日开始 |
 | 非本人 complete | 403 |
-| 非 active（含 paused/removed）complete | 400 |
+| 非 active（含 paused/removed）complete | 400；当日任务结案按 §2.6 把该条视为已了结 |
 | 题无标准答案 | 按自评三档处理 |
 | 学年桶 | 一律 active 桶（§1.2）；无桶则入队失败 |
 | 暂停中 | 不进 due；`next_review_at` 不变 |
