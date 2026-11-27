@@ -35,7 +35,8 @@
 | `backend/app/models.py` | `KnowledgeReviewItem` | Modify |
 | `backend/app/services/knowledge_review.py` | 入队/进度/间隔/due/complete/结案 | Create |
 | `backend/app/services/mastery.py` | `record_attempt` 后 try_enroll | Modify |
-| `backend/app/routers/progress.py` | adjust/advance 挂钩补齐 | Modify |
+| `backend/app/services/learning_progress.py` | `advance_lesson` 内前推补齐 | Modify |
+| `backend/app/routers/progress.py` | `adjust` 挂钩补齐 + toast 字段 | Modify |
 | `backend/app/routers/knowledge_review.py` | queue/pause/resume/remove/due/complete | Create |
 | `backend/app/main.py` | include_router | Modify |
 | `backend/app/services/task_gen.py` | `_gen_kp_review` + 按 type 幂等 | Modify |
@@ -43,7 +44,8 @@
 | `backend/tests/test_knowledge_review.py` | 核心后端测试 | Create |
 | `parent-web/app.js` | 复习队列 Tab + 进度 toast | Modify |
 | `student-app/lib/features/kp_srs/**` | 仓库/控制器/页面 | Create |
-| `student-app/lib/features/home/home_logic.dart` | `kp_review` TaskMeta | Modify |
+| `student-app/lib/features/home/home_logic.dart` | `kp_review` TaskMeta + TaskAction | Modify |
+| `student-app/lib/features/home/ui/home_page.dart` | `_onTask` + 独立复习入口 | Modify |
 | `student-app/lib/core/router.dart` | 路由 | Modify |
 | `student-app/test/features/kp_srs/**` | smoke | Create |
 
@@ -231,7 +233,8 @@ git commit -m "feat(knowledge-review): try_enroll gated by mastery and progress"
 
 **Files:**
 - Modify: `backend/app/services/knowledge_review.py`
-- Modify: `backend/app/routers/progress.py`
+- Modify: `backend/app/services/learning_progress.py`（`advance_lesson`）
+- Modify: `backend/app/routers/progress.py`（`adjust`）
 - Test: `backend/tests/test_knowledge_review.py`
 
 - [ ] **Step 1: 写失败测试**
@@ -256,22 +259,24 @@ def test_progress_backward_does_not_remove(...):
 - 查这些课的 KP，对每个 `try_enroll(..., source="progress_adjust", enrolled_by=...)`  
 - 返回成功入队条数  
 
-- [ ] **Step 3: 改 `progress.adjust`**
+- [ ] **Step 3: 挂钩必须进 `advance_lesson` 本体（避免漏调用点）**
 
-调整前记下 `old_lesson_id = prog.current_lesson_id`，写新课后：
+`routers/learning.py` 等也会直接调 `advance_lesson`，只改 `progress.py` 不够。
+
+改 `backend/app/services/learning_progress.py` 的 `advance_lesson`：推进前记下 `old_lesson_id`，写新课后调用：
 
 ```python
-from ..services.knowledge_review import enroll_due_to_progress
-n = enroll_due_to_progress(
-    db, req.user_id, prog.document_id, lesson.subject,
-    old_lesson_id=old_lesson_id, new_lesson_id=lesson.id,
-    enrolled_by=user.id,
+from .knowledge_review import enroll_due_to_progress
+enroll_due_to_progress(
+    db, user_id, document_id, subject,
+    old_lesson_id=old_lesson_id, new_lesson_id=row.current_lesson_id,
+    enrolled_by=None,
 )
-db.commit()
-return {..., "review_enrolled_count": n}
 ```
 
-`advance`：在 `advance_lesson` 前后取 old/new，passed 时同样调用（`enrolled_by=None` 可）。
+`progress.adjust`（不走 `advance_lesson`）：调整前记 `old_lesson_id`，写新课后同样调用，`enrolled_by=user.id`，响应带 `review_enrolled_count`。
+
+`progress.advance` 路由：保持调 `advance_lesson` 即可（入队已在服务内），可选把补齐条数带回响应。
 
 - [ ] **Step 4: 测试 + 提交**
 
@@ -426,6 +431,7 @@ def _gen_kp_review(db, user_id, subject, day, bucket_id):
         detail=f"遗忘曲线 · {len(payload)} 个到期知识点",
         content=json.dumps(payload, ensure_ascii=False),
         points=25, content_status="published",
+        submit_status="not_started",
     )
 ```
 
@@ -456,7 +462,7 @@ for subject in subjects:
 
 找当日该科 `kp_review` 且未 approved；解析 content 里每个 `item_id`：若均「今日已 complete（看 item.updated_at+last_result）或 status≠active」→ `submit_status=approved`。
 
-- [ ] **Step 4: 测试** — 有 due 生成任务且 published；已有 dictation 时仍能生成 kp_review；pause 快照项后 settle 成功。
+- [ ] **Step 4: 测试** — 有 due 生成任务且 published；已有 dictation 时仍能生成 kp_review；**同日 `kp_review` 与生词 `review` 并存**；pause 快照项后 settle 成功。
 
 - [ ] **Step 5: 提交**
 
@@ -536,20 +542,26 @@ if (t.taskType == 'kp_review') return TaskAction.openKpSrs;
 'kp_review': TaskMeta('知识点复习', '约 10 分钟', Icons.replay, _green),
 ```
 
-在 `home_page.dart` `_onTask` 增加：
+在 `home_page.dart` `_onTask`：**对齐 `openKnowledge` / `openDictation` 模式**——先 `controller.init` 传入任务快照 `t.content`（及 `taskId`），再 `push` 路由。禁止只带 `taskId` 却去实时拉 `/due`（会破坏 §2.5/§2.6 快照结案）。
+
+示例（名称以实际 controller 为准）：
 
 ```dart
 case TaskAction.openKpSrs:
-  context.push(taskRoute('/kp-srs', returnTo: '/home') + '&taskId=${t.id}');
+  ref.read(kpSrsControllerProvider.notifier).init(
+    taskId: t.id,
+    contentJson: t.content, // 任务快照，必须用
+  );
+  context.push(taskRoute('/kp-srs', returnTo: '/home'));
 ```
 
-（参数拼接方式与现网 `taskRoute` 风格对齐。）
+独立入口（Step 6）才 `init(taskId: null)` 后拉 `/due`。
 
 更新 `home_logic_test`：`taskType: 'kp_review'` → `TaskAction.openKpSrs`（**不是** `comingSoon`）。
 
 - [ ] **Step 6: 独立「复习」入口**
 
-挂在**学习首页**任务列表上方或旁的按钮「知识点复习」，`context.push('/kp-srs')`（无 taskId，页内拉 `/due`）。不要复用旧 `knowledge_review` 页；不要只做任务入口。
+挂在**学习首页**任务列表上方或旁的按钮「知识点复习」：`controller.init(taskId: null)` 后 `context.push('/kp-srs')`，页内拉 `/due`。不要复用旧 `knowledge_review` 页；不要只做任务入口。
 
 - [ ] **Step 7: Flutter 测试**
 
@@ -558,7 +570,7 @@ Run: `flutter test test/features/kp_srs/ test/features/home/home_logic_test.dart
 - [ ] **Step 8: 提交**
 
 ```bash
-git commit --trailer "Co-authored-by: Cursor <cursoragent@cursor.com>" -m "feat(student-app): kp_srs review session for due knowledge points"
+git commit -m "feat(student-app): kp_srs review session for due knowledge points"
 ```
 
 ---
