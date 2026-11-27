@@ -31,9 +31,14 @@
 | 孩子做什么 | 轻量混合：有题先作答；答错/「忘了」再展开讲解；无题则三档自评 |
 | 触达 | 每日任务 + 独立复习模块（同一套 complete 逻辑） |
 | 间隔动作 | 记得升档；有点忘同档再测；忘了回第 0 档（1 天） |
-| 出题 | 已有关联题 → AI → 仅自评 |
-| 客户端 | `parent-web` + Flutter `student-app` |
+| 出题 | 尽力复用已有题 → `generate_knowledge_questions` → 仅自评（见 §2.3；**不**假设 `Question.knowledge_point_id` FK） |
+| 客户端 | `parent-web` + Flutter `student-app`（新 feature，勿与现有 `knowledge` 基础知识页混名） |
 | 架构 | **独立复习队列表**，与 `KnowledgeMastery` 解耦 |
+| 每日任务 | **按学科拆分** `kp_review`，对齐 `(user_id, subject, date, task_type)` |
+| 任务结案 | 会话内到期条全部 complete → 任务直接完结（v1 **不经家长确认**） |
+| 暂停语义 | 冻结：`next_review_at` 不变；paused 不进 due；恢复后若已过期则立即到期 |
+| 入队失败 | **逐条**处理，返回成功/失败列表（允许部分成功） |
+| 每日上限 | `child_config` key：`task_kp_review_count`，默认 **6** |
 
 ## 成功标准
 
@@ -97,8 +102,16 @@
 ### 1.5 到期选集
 
 - 今日到期：`status=active` 且 `next_review_at <= now`。  
-- 每日上限：默认 5～8（`child_config` 可配）；超出仍保持到期，次日优先，不丢队。  
-- 按 `next_review_at` 升序，必要时次级按 `interval_index` 升序（短间隔优先）。
+- 每日上限：`task_kp_review_count`，默认 6；超出仍保持到期，次日优先，不丢队。  
+- 按 `next_review_at` 升序，必要时次级按 `interval_index` 升序（短间隔优先）。  
+- `status=paused` 的项**永不**进入 due / 任务快照。
+
+### 1.6 暂停 / 恢复
+
+| 操作 | 行为 |
+|------|------|
+| `pause` | `status=paused`；**不改** `next_review_at`（冻结时钟，不顺延） |
+| `resume` | `status=active`；若 `next_review_at <= now`，下一次 due/任务即出现；未到期则按原时间 |
 
 ---
 
@@ -113,11 +126,23 @@
 | `GET` | `/api/knowledge-review/eligible?user_id=` | 可入队：达标且非 active/paused |
 | `GET` | `/api/knowledge-review/queue?user_id=` | 队列列表（含档位、下次到期、最近结果） |
 | `POST` | `/api/knowledge-review/enroll` | `{user_id, knowledge_point_ids[]}` |
-| `POST` | `/api/knowledge-review/item/{id}/pause` | 暂停 |
-| `POST` | `/api/knowledge-review/item/{id}/resume` | 恢复 |
+| `POST` | `/api/knowledge-review/item/{id}/pause` | 暂停（§1.6） |
+| `POST` | `/api/knowledge-review/item/{id}/resume` | 恢复（§1.6） |
 | `POST` | `/api/knowledge-review/item/{id}/remove` | 软删 `removed` |
 
-鉴权：家长可操作绑定孩子；入队失败返回 400 + 原因（未掌握 / 已在队）。
+鉴权：家长可操作绑定孩子。
+
+`enroll` **逐条**处理（非整批原子）：响应形如：
+
+```json
+{
+  "ok": true,
+  "enrolled": [{"item_id": 1, "knowledge_point_id": 10}],
+  "failed": [{"knowledge_point_id": 11, "reason": "not_mastered|already_queued|not_found"}]
+}
+```
+
+全部失败时仍 HTTP 200（或 400，实现计划二选一写死；推荐 **200 + failed 列表**，便于家长端展示部分成功）。
 
 ### 2.2 孩子 API
 
@@ -141,25 +166,39 @@
 
 行为：
 
-- 写 `AnswerRecord`（`source_type=knowledge_review`，`source_id=item_id` 或 `knowledge_point_id`）。  
+- 写 `AnswerRecord`（`source_type=knowledge_review`，`source_id=knowledge_point_id`）。  
 - `forgot` 可写入 `Mistake`（带 `knowledge_point_id`）。  
-- **客观题**才调用 `record_attempt` 更新 mastery；**纯自评不改 mastery**（防刷分）。  
-- 同一 `item_id` 在短窗口内重复 complete：**幂等**，不二次升档（以 `updated_at` 当日已结算或结果指纹判断，实现计划写死一种）。
+- **可判分题**（见下）才调用 `record_attempt` 更新 mastery；**纯自评不改 mastery**（防刷分）。  
+- 「可判分题」= 服务端能判定对错：选择题，或带标准答案/`keywords`、可走现有 `grade_knowledge_answer` / `grade_answer` 的短答。无答案则当自评。  
+- 同一 `item_id` 在**自然日**内重复 complete：**幂等**，不二次升档（以该 item 的 `updated_at` 日期 == 今日且 `last_result` 已有为准）。
 
 ### 2.3 题目载荷降级链
 
-对每个到期 KP，在 `due`（及任务 content）中附 `prompt`：
+现状：`Question` **没有** `knowledge_point_id` 列；课内基础知识题把 KP id 放在任务 content / `extra`，题库题可能把知识点名写在 `tags` JSON。v1 **不新增 FK 迁移**。
 
-1. `source=bank`：已有关联题（课内 Question / 题库挂该 `knowledge_point_id`）。  
-2. `source=ai`：即时出一题；失败则降级。  
-3. `source=self_rate`：仅知识点内容 + 三档按钮。
+对每个到期 KP，在 `due`（及任务 content）中附 `prompt`，按序：
+
+1. `source=reuse`：尽力查找已有可判分题——  
+   - `questions.extra` / `tags` JSON 中显式含该 `knowledge_point_id`，或  
+   - `tags.knowledge_points` 等字段与 `KnowledgePoint.content` 精确/高相似匹配；  
+   找不到则跳过本档（**禁止**为匹配去改表结构）。  
+2. `source=generated`：调用已有 `generate_knowledge_questions`（与 `_gen_knowledge` 同路径）对该点出 1 题；失败则降级。  
+3. `source=self_rate`：仅 `KnowledgePoint.content`（展开讲解同源）+ 三档按钮；可附课名（经 `lesson_id`）。
 
 ### 2.4 每日任务
 
-- 新 `task_type`：`kp_review`（与生词 `review` 并列）。  
-- `task_gen` 生成器：取 due 截断到每日上限，**生成时快照**写入 `Task.content`；当日已有未完成同类型任务则不重复生成。  
-- 标题示例：「知识点复习」；detail 含条数。  
-- 无到期 → 不生成该任务。
+- 新 `task_type`：`kp_review`（与生词 `review`、基础知识 `knowledge` 并列）。  
+- **按学科拆分**：对每个有 due 项的 `KnowledgePoint.subject`，生成一条 `Task(subject=该学科, task_type=kp_review, …)`，满足 `UniqueConstraint(user_id, subject, date, task_type)`。  
+- 每科 content = 该科 due 列表截断到 `task_kp_review_count`（上限按**科**计，还是**全局**计：v1 定为**每科各自上限**，简单对齐现有按科循环）。  
+- **生成时快照**；当日该 `(user_id, subject, date, kp_review)` 已存在则不重复生成（不因队列变化改写未完成任务）。  
+- 标题：「知识点复习」；detail 含条数。  
+- 该科无到期 → 不生成。
+
+### 2.5 任务结案与双入口
+
+- 孩子在任务会话或独立模块中，对该任务快照（或当日该科 due）内每条都成功 `complete` 后：对应 `Task.submit_status` 置为 **`approved`**（v1 **跳过家长确认**；巩固复习不挡进度）。  
+- 独立模块只 complete 队列项、若存在未完成的同科当日 `kp_review` 任务，则在「快照内全部 item 均已于今日 complete」时同步结案该任务。  
+- 与 `_gen_knowledge`（仍读 `KnowledgeMastery.next_review_at`）**允许同日重复曝光同一 KP**（v1 接受）；去重列为后续。
 
 ---
 
@@ -179,7 +218,8 @@
 双入口同一会话逻辑：
 
 - 首页 `kp_review` 任务 → 用任务快照开练。  
-- 独立「复习」入口 → `GET /due`；与任务重叠时以 `item_id` + complete 幂等避免双计。
+- 独立「复习」入口 → `GET /due`；与任务重叠时以 `item_id` + 当日 complete 幂等避免双计。  
+- Flutter：**新建** feature（建议名 `kp_srs` / `knowledge_srs`），**不要**复用现有 `features/knowledge_review`（那是 `task_type=knowledge` 基础知识简答页）。
 
 单条流程：
 
@@ -208,13 +248,14 @@
 
 | 情况 | 行为 |
 |------|------|
-| 入队未达标 | 整批或逐条拒绝，不写不合格项 |
-| 已在 active/paused | 返回已在队列，不重复插入 |
-| removed 后重入队 | 允许，档位从 0 |
+| 入队未达标 | 该 id 进 `failed`，其它合格 id 照常入队（§2.1） |
+| 已在 active/paused | `failed.reason=already_queued` |
+| removed 后重入队 | 允许，档位从 0、明日开始 |
 | 非本人 complete | 403 |
-| 非 active complete | 400 |
-| 客观题无标准答案 | 按自评三档处理 |
+| 非 active（含 paused/removed）complete | 400 |
+| 题无标准答案 | 按自评三档处理 |
 | 学年桶 | 按 `bucket_id` 隔离 |
+| 暂停中 | 不进 due；`next_review_at` 不变 |
 
 ### 4.2 测试要点
 
@@ -260,5 +301,5 @@
 | 路由 | 新建 `backend/app/routers/knowledge_review.py` |
 | 任务 | `backend/app/services/task_gen.py` |
 | 家长端 | `parent-web/app.js` (+ 样式) |
-| 学生端 | `student-app/lib/features/` 下新 feature 或扩展 `knowledge_review` |
+| 学生端 | `student-app/lib/features/kp_srs/`（新 feature；勿扩展旧 `knowledge_review`） |
 | 测试 | `backend/tests/test_knowledge_review.py` + Flutter smoke |
