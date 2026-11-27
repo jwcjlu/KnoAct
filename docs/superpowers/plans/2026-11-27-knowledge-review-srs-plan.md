@@ -294,15 +294,16 @@ git commit -m "feat(knowledge-review): enroll on progress forward adjust"
 
 - [ ] **Step 1: 测试** — 进度内 KP，连续答对使 `mastered`，调用 `record_attempt` 后队列出现一行。超进度则无。
 
-- [ ] **Step 2: 在 `record_attempt` 末尾**（commit 前或后，保持与现网一致；建议 commit 前 flush 后）：
+- [ ] **Step 2: 在 `record_attempt` 现有 `db.commit()` 之前插入**（约 L119 前；`get_db` 不自动 commit，挂在 commit 后且只 flush 会丢入队）：
 
 ```python
 if target_type == "knowledge" and (mastered or mastery >= 0.9):
     from .knowledge_review import try_enroll
     try_enroll(db, user_id, target_id, source="mastery")
+# 然后才是现有的 db.commit(); return mastery
 ```
 
-注意：避免循环 import；函数内 import。纯自评 complete **不会**走这里改 mastery（见 Task 6）。
+函数内 import，避免循环。纯自评 complete **不会**走这里改 mastery（见 Task 6）。
 
 - [ ] **Step 3: 提交**
 
@@ -390,8 +391,9 @@ git commit -m "feat(knowledge-review): three-grade SRS interval updates"
 - 校验 access、status==active  
 - 若 `question_id`：读库判分 → 覆盖 result  
 - `apply_review_result`；写 `AnswerRecord`；forgot → `Mistake`  
-- 可判分时 `record_attempt`  
-- 调 `maybe_settle_kp_review_task`（Task 7 实现实体）
+- 可判分时：`record_attempt(db, user_id, "knowledge", kp_id, is_correct, bucket_id=item.bucket_id)`（**必须带桶**，禁止默认 `None`）  
+- 调 `maybe_settle_kp_review_task`：Task 6 先提供 **no-op stub**，Task 7 换成实体，避免 Task 6 单测在 Task 7 前挂掉  
+- `GET /due` 支持可选 `?subject=`
 
 鉴权对齐现网：孩子学习用户 + `ensure_user_access`；家长队列用 `require_role("parent","admin")`。
 
@@ -488,7 +490,7 @@ git commit -m "feat(task_gen): add kp_review daily tasks with settle rules"
 - 统计：今日到期数、本周将到期数（queue 接口附带 `due_today` / `due_this_week`，或前端按 `next_review_at` 算）
 - 表格：内容截断、学科、档位、下次到期、来源、pause/resume/remove
 
-- [ ] **Step 3: 改 `adjustProgress`（或现有进度提交函数）**
+- [ ] **Step 3: 改现有 `saveProgressLesson`**（`parent-web/app.js` 约 L3295，调 `/api/progress/adjust`）
 
 读响应 `review_enrolled_count`，若 `>0` toast「已自动加入 M 个达标知识点到复习」。
 
