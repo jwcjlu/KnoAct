@@ -364,52 +364,35 @@ git commit -m "feat(knowledge-review): three-grade SRS interval updates"
 - Modify: `backend/app/main.py`
 - Test: `backend/tests/test_knowledge_review.py`
 
+命名约定：`serialize_due_item(db, user_id, item) -> dict` = §2.4 整条 JSON；其内部调用 `_build_prompt(db, user_id, kp) -> prompt dict`。`task_gen` 与 `/due` **只**调用 `serialize_due_item` / `select_due_items`。
+
 - [ ] **Step 1: 实现 `select_due_items(db, user_id, subject=None) -> list[KnowledgeReviewItem]`**
 
 - active + `next_review_at <= now` + 同 bucket  
 - join KP，按 subject 分组，每组取 `get_child_config_int(..., "task_kp_review_count", 6)` 条  
 - 排序：`next_review_at`, `interval_index`
 
-- [ ] **Step 2: `build_prompt_payload(db, user_id, item) -> dict`**
+- [ ] **Step 2: 实现 `_build_prompt` + `serialize_due_item`**
 
-1. reuse：扫 `Question` 的 `extra`/`tags` 含该 kp id（json 解析），有答案则用  
-2. generated：`generate_knowledge_questions` 出 1 题，`db.add(Question(..., extra=json.dumps({knowledge_point_id, keywords, content})))`，flush 得 id；载荷**不含**标准答案字段给客户端权威  
+1. reuse：扫 `Question` 的 `extra`/`tags` 含该 kp id，有答案则用  
+2. generated：`generate_knowledge_questions` 出 1 题并落库（`extra` 含 `knowledge_point_id`+`keywords`）；载荷不下发标准答案作权威  
 3. self_rate：仅 content  
 
-返回 §2.4 JSON 形状。
+- [ ] **Step 3: 家长队列路由先挂上** — `GET /queue`（可附 `due_today`/`due_this_week`）、pause/resume/remove；`main.py` include。settle 可先 no-op stub。
 
-- [ ] **Step 3: `complete_item(...)`**
+- [ ] **Step 4: `complete_item` + `GET /due` + `POST /complete`**
 
 - 校验 access、status==active  
 - 若 `question_id`：读库判分 → 覆盖 result  
-- `apply_review_result`  
-- 写 `AnswerRecord`；forgot → `Mistake`  
-- 可判分时 `record_attempt`（注意：可能再次 try_enroll，应 no-op）  
-- `maybe_settle_kp_review_task(...)`（Task 7 可先 stub）
+- `apply_review_result`；写 `AnswerRecord`；forgot → `Mistake`  
+- 可判分时 `record_attempt`  
+- 调 `maybe_settle_kp_review_task`（Task 7 实现实体）
 
-- [ ] **Step 4: 路由**
+鉴权对齐现网：孩子学习用户 + `ensure_user_access`；家长队列用 `require_role("parent","admin")`。
 
-```python
-router = APIRouter(prefix="/api/knowledge-review", tags=["knowledge-review"])
+- [ ] **Step 5: 测试 due 上限、complete 覆盖自评、pause 后 complete 400、queue 列表**
 
-@router.get("/queue")
-@router.post("/item/{item_id}/pause")
-@router.post("/item/{item_id}/resume")
-@router.post("/item/{item_id}/remove")
-@router.get("/due")
-@router.post("/complete")
-```
-
-鉴权：`require_learning_user` + `ensure_user_access`；家长操作孩子队列用 `require_role("parent","admin")` 或现有家长模式。对齐 `progress.overview` 的家长鉴权。
-
-pause：只改 status，不动 `next_review_at`。remove：`status=removed`。resume：`active`。  
-pause/remove 后调用 `maybe_settle_kp_review_task`。
-
-- [ ] **Step 5: `main.py` include_router**
-
-- [ ] **Step 6: 测试 due 上限、complete 覆盖自评、pause 后 complete 400**
-
-- [ ] **Step 7: 提交**
+- [ ] **Step 6: 提交**
 
 ```bash
 git commit -m "feat(knowledge-review): due/complete APIs with prompt fallback"
@@ -428,6 +411,7 @@ git commit -m "feat(knowledge-review): due/complete APIs with prompt fallback"
 
 ```python
 def _gen_kp_review(db, user_id, subject, day, bucket_id):
+    # serialize_due_item 与 Task 6 /due 共用
     from .knowledge_review import select_due_items, serialize_due_item
     exists = db.query(Task).filter_by(
         user_id=user_id, subject=subject, date=day, task_type="kp_review").first()
@@ -492,62 +476,89 @@ git commit -m "feat(task_gen): add kp_review daily tasks with settle rules"
 
 - [ ] **Step 2: `loadKpReviewQueue` → `GET /api/knowledge-review/queue?user_id=`**
 
-渲染表格：内容截断、学科、档位、下次到期、来源、操作按钮 pause/resume/remove。
+页面必须包含：
+
+- 短说明：「复习列表随学习进度与掌握情况自动加入；往后调进度不会移出，需要请暂停或移出。」
+- 统计：今日到期数、本周将到期数（queue 接口附带 `due_today` / `due_this_week`，或前端按 `next_review_at` 算）
+- 表格：内容截断、学科、档位、下次到期、来源、pause/resume/remove
 
 - [ ] **Step 3: 改 `adjustProgress`（或现有进度提交函数）**
 
 读响应 `review_enrolled_count`，若 `>0` toast「已自动加入 M 个达标知识点到复习」。
 
-- [ ] **Step 4: 手动浏览器冒烟**（有孩子、有进度、有 mastery 数据时）
+- [ ] **Step 4: 手动浏览器冒烟**
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git commit -m "feat(parent-web): KP review queue panel and progress enroll toast"
+git commit --trailer "Co-authored-by: Cursor <cursoragent@cursor.com>" -m "feat(parent-web): KP review queue panel and progress enroll toast"
 ```
 
 ---
 
-### Task 9: Flutter `kp_srs` feature
+### Task 9: Flutter `kp_srs` feature（双入口）
 
 **Files:**
 - Create: `student-app/lib/features/kp_srs/data/kp_srs_repository.dart`
 - Create: `student-app/lib/features/kp_srs/kp_srs_controller.dart`
 - Create: `student-app/lib/features/kp_srs/ui/kp_srs_page.dart`
 - Modify: `student-app/lib/core/router.dart`
-- Modify: `student-app/lib/features/home/home_logic.dart`（`kp_review` meta + 点击跳转）
-- Modify: `student-app/lib/features/home/ui/home_page.dart`（任务入口）
+- Modify: `student-app/lib/features/home/home_logic.dart`（`TaskMeta` + **`TaskAction` / `taskAction()`**）
+- Modify: `student-app/lib/features/home/ui/home_page.dart`（`_onTask` switch + 独立入口）
 - Test: `student-app/test/features/kp_srs/kp_srs_test.dart`
+- Test: `student-app/test/features/home/home_logic_test.dart`
 
-- [ ] **Step 1: Repository** — `fetchDue` / `complete`；任务入口可直接用 `Task.content` 解码为 items。
+- [ ] **Step 1: Repository** — `fetchDue` / `complete`；任务入口用 `Task.content` 解码 items。
 
-- [ ] **Step 2: Controller** — 当前 index、提交中、forgot 展开态、完成态。
+- [ ] **Step 2: Controller** — index、提交中、forgot 展开、完成态。
 
 - [ ] **Step 3: UI**
 
-- self_rate：三按钮「记得 / 有点忘 / 忘了」  
-- 有题：作答 + 提交  
-- forgot：展开 `content`  
+- self_rate：三按钮「记得 / 有点忘 / 忘了」
+- 有题：作答 + 提交
+- forgot：展开 `content`
 - 结束页：「今天按计划复习了 N 个知识点」（禁止「已掌握」）
+- 空 due：「今天没有要复习的知识点」
 
-- [ ] **Step 4: 路由** `/kp-srs`（query: `taskId` 可选）；独立入口无 taskId 则拉 `/due`。
+- [ ] **Step 4: 路由** `/kp-srs`（`taskId` 可选）。有 `taskId` → 任务快照；无 → `GET /due`。
 
-- [ ] **Step 5: `home_logic` 增加**
+- [ ] **Step 5: 接好任务入口（必须，否则 comingSoon）**
+
+在 `home_logic.dart` 给 `TaskAction` 增加 `openKpSrs`，并在 `taskAction()` 中：
+
+```dart
+if (t.taskType == 'kp_review') return TaskAction.openKpSrs;
+```
+
+以及：
 
 ```dart
 'kp_review': TaskMeta('知识点复习', '约 10 分钟', Icons.replay, _green),
 ```
 
-首页点击 `kp_review` → 进 `kp_srs`。
+在 `home_page.dart` `_onTask` 增加：
 
-- [ ] **Step 6: Flutter 测试** — 解析 content、空列表文案、三档回调调 repository（mock）。
+```dart
+case TaskAction.openKpSrs:
+  context.push(taskRoute('/kp-srs', returnTo: '/home') + '&taskId=${t.id}');
+```
 
-Run: `flutter test test/features/kp_srs/`（Flutter 路径见 AGENTS.md：`E:\dev\flutter`）
+（参数拼接方式与现网 `taskRoute` 风格对齐。）
 
-- [ ] **Step 7: 提交**
+更新 `home_logic_test`：`taskType: 'kp_review'` → `TaskAction.openKpSrs`（**不是** `comingSoon`）。
+
+- [ ] **Step 6: 独立「复习」入口**
+
+挂在**学习首页**任务列表上方或旁的按钮「知识点复习」，`context.push('/kp-srs')`（无 taskId，页内拉 `/due`）。不要复用旧 `knowledge_review` 页；不要只做任务入口。
+
+- [ ] **Step 7: Flutter 测试**
+
+Run: `flutter test test/features/kp_srs/ test/features/home/home_logic_test.dart`
+
+- [ ] **Step 8: 提交**
 
 ```bash
-git commit -m "feat(student-app): kp_srs review session for due knowledge points"
+git commit --trailer "Co-authored-by: Cursor <cursoragent@cursor.com>" -m "feat(student-app): kp_srs review session for due knowledge points"
 ```
 
 ---
@@ -555,23 +566,22 @@ git commit -m "feat(student-app): kp_srs review session for due knowledge points
 ### Task 10: 清理与回归
 
 **Files:**
-- Modify: `backend/app/services/cleanup.py`（删课时：相关 `knowledge_review_items` 标 removed 或随 KP 级联策略；KP 有 FK 时优先 SET NULL 不合适——保持 FK，cleanup 里 delete/remove 队列行）
+- Modify: `backend/app/services/cleanup.py`
 - 全量相关测试
 
-- [ ] **Step 1: cleanup 对齐** — 删 lesson/kp 时不留悬挂 active 项。
+- [ ] **Step 1: cleanup** — 在 `detach_points` / 删除 `KnowledgePoint` **之前**，对该批 `knowledge_point_id` **硬删** `knowledge_review_items`（仅 `status=removed` 挡不住 FK）。删 lesson 时同样先清队列行。
 
 - [ ] **Step 2: 回归**
 
 ```bash
 cd backend && python -m pytest tests/test_knowledge_review.py tests/test_task_gen.py tests/test_scheduler.py -v
-# Flutter
-flutter test test/features/kp_srs/ test/features/home/
+flutter test test/features/kp_srs/ test/features/home/home_logic_test.dart
 ```
 
 - [ ] **Step 3: 提交**
 
 ```bash
-git commit -m "chore: cleanup hooks and regression for knowledge-review SRS"
+git commit --trailer "Co-authored-by: Cursor <cursoragent@cursor.com>" -m "chore: cleanup hooks and regression for knowledge-review SRS"
 ```
 
 ---
