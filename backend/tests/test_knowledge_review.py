@@ -3,7 +3,11 @@ from datetime import datetime, timedelta
 
 from app.models import KnowledgeMastery, KnowledgePoint, KnowledgeReviewItem, LearningProgress
 from app.services.bucket_service import ensure_bucket
-from app.services.knowledge_review import enroll_due_to_progress, try_enroll
+from app.services.knowledge_review import (
+    apply_review_result,
+    enroll_due_to_progress,
+    try_enroll,
+)
 from app.services.mastery import record_attempt
 from app.services.scheduler import INTERVALS
 from conftest import make_document, make_lesson, make_user
@@ -186,6 +190,88 @@ def test_record_attempt_does_not_enroll_ahead_of_progress(db):
         .first()
     )
     assert row is None
+
+
+def _review_item(db, user_id, knowledge_point_id, bucket_id, *, interval_index=0):
+    now = datetime.utcnow()
+    row = KnowledgeReviewItem(
+        user_id=user_id,
+        knowledge_point_id=knowledge_point_id,
+        bucket_id=bucket_id,
+        status="active",
+        interval_index=interval_index,
+        next_review_at=now,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def test_remember_increases_interval(db):
+    user = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson = make_lesson(db, subject="语文", title="第1课", document=doc)
+    kp = _kp_on_lesson(db, lesson)
+    bid = ensure_bucket(db, user.id).id
+    item = _review_item(db, user.id, kp.id, bid, interval_index=0)
+    before = datetime.utcnow()
+    apply_review_result(db, item, "remember")
+    after = datetime.utcnow()
+    assert item.interval_index == 1
+    assert item.last_result == "remember"
+    lo = before + timedelta(days=INTERVALS[1])
+    hi = after + timedelta(days=INTERVALS[1]) + timedelta(seconds=2)
+    assert lo <= item.next_review_at <= hi
+
+
+def test_fuzzy_keeps_index(db):
+    user = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson = make_lesson(db, subject="语文", title="第1课", document=doc)
+    kp = _kp_on_lesson(db, lesson)
+    bid = ensure_bucket(db, user.id).id
+    i = 2
+    item = _review_item(db, user.id, kp.id, bid, interval_index=i)
+    before = datetime.utcnow()
+    apply_review_result(db, item, "fuzzy")
+    after = datetime.utcnow()
+    assert item.interval_index == i
+    assert item.last_result == "fuzzy"
+    lo = before + timedelta(days=INTERVALS[i])
+    hi = after + timedelta(days=INTERVALS[i]) + timedelta(seconds=2)
+    assert lo <= item.next_review_at <= hi
+
+
+def test_forgot_resets_to_zero(db):
+    user = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson = make_lesson(db, subject="语文", title="第1课", document=doc)
+    kp = _kp_on_lesson(db, lesson)
+    bid = ensure_bucket(db, user.id).id
+    item = _review_item(db, user.id, kp.id, bid, interval_index=3)
+    before = datetime.utcnow()
+    apply_review_result(db, item, "forgot")
+    after = datetime.utcnow()
+    assert item.interval_index == 0
+    assert item.last_result == "forgot"
+    lo = before + timedelta(days=INTERVALS[0])
+    hi = after + timedelta(days=INTERVALS[0]) + timedelta(seconds=2)
+    assert lo <= item.next_review_at <= hi
+
+
+def test_idempotent_same_utc_day(db):
+    user = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson = make_lesson(db, subject="语文", title="第1课", document=doc)
+    kp = _kp_on_lesson(db, lesson)
+    bid = ensure_bucket(db, user.id).id
+    item = _review_item(db, user.id, kp.id, bid, interval_index=0)
+    apply_review_result(db, item, "remember")
+    assert item.interval_index == 1
+    first_next = item.next_review_at
+    apply_review_result(db, item, "remember")
+    assert item.interval_index == 1
+    assert item.next_review_at == first_next
 
 
 def test_progress_backward_does_not_remove(db):

@@ -124,3 +124,26 @@ def enroll_due_to_progress(
         ):
             n += 1
     return n
+
+
+def apply_review_result(db: Session, item: KnowledgeReviewItem, result: str) -> KnowledgeReviewItem:
+    """根据三档自评更新 SRS 间隔（remember / fuzzy / forgot）。"""
+    from .scheduler import INTERVALS
+
+    now = datetime.utcnow()
+    if item.last_result and item.updated_at and item.updated_at.date() == now.date():
+        return item
+    i = item.interval_index or 0
+    if result == "remember":
+        i = min(i + 1, len(INTERVALS) - 1)
+        item.next_review_at = now + timedelta(days=INTERVALS[i])
+    elif result == "fuzzy":
+        item.next_review_at = now + timedelta(days=INTERVALS[i])
+    else:
+        i = 0
+        item.next_review_at = now + timedelta(days=INTERVALS[0])
+    item.interval_index = i
+    item.last_result = result
+    item.updated_at = now
+    db.flush()
+    return item
