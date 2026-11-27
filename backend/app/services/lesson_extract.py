@@ -133,9 +133,55 @@ def _extract_text_fallback(pdf_path: str, start_page: int, end_page: int, db=Non
     return body[:500]
 
 
-def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_page: int, db: Session) -> dict:
+_GRADE_FOCUS = {
+    "1-2": "拼音巩固、笔画笔顺与偏旁、简单字义；少抽句式病句；几乎不抽说明方法/习作六要素。",
+    "3-4": "近义词反义词、关联词入门、把字句/被字句、修辞识别、段意概括；查字典与病句修改入门。",
+    "5-6": "语境中辨析多音字/近义词/关联词、病句修改、句式转换、概括与体会感情、人物描写与说明方法、成语与古诗积累。",
+}
+
+
+def grade_band(grade: int | None) -> str:
+    """教材年级 → 提取侧重档：1-2 / 3-4 / 5-6；缺省或越界按 3-4。"""
+    if grade in (1, 2):
+        return "1-2"
+    if grade in (3, 4):
+        return "3-4"
+    if grade in (5, 6):
+        return "5-6"
+    return "3-4"
+
+
+def build_chinese_kp_prompt(*, pages: str, page_block: str, grade: int | None) -> str:
+    """语文课内只抽知识点+课文；词表由册末回填，不在此要求。"""
+    band = grade_band(grade)
+    focus = _GRADE_FOCUS[band]
+    return (
+        f"你正在为一本「语文」教材（约{band}年级）的第 {pages} 拆课。"
+        f"下面是这一课的原文（可能含目录残留、页码、插图文字，请忽略无关内容）。\n"
+        f"年级侧重（{band}）：{focus}\n"
+        f"请严格基于原文提取本课「基础知识」知识点（每行一个），只收页上真实出现或练习到的点，"
+        f"归入这些范畴：拼音与汉字；词语（词性/近反义/成语/关联词/归类等）；"
+        f"句子（句式转换/扩缩句/病句/修辞/标点/排序等）；阅读基础（段意/顺序/感情/说明方法/人物描写/古诗文等）；"
+        f"积累与运用（日积月累/文学常识/口语交际/习作基础——仅当本课页就是该模块时才写）。\n"
+        f"禁止：整表抄写会认的字/会写的字/词语清单；普通精读课不要硬塞园地模块。\n"
+        f"可写关系句（如「形近字辨析：辩/辨/辫」），不要把字词表当知识点堆砌。\n"
+        f"另提取课文正文（原文照抄，最多 300 字）。\n"
+        f"用两段输出，分别以「知识点：」「课文：」开头；无基础点则「知识点：」下留空。\n\n"
+        f"原文：\n{page_block}"
+    )
+
+
+def extract_lesson_content(
+    pdf_path: str,
+    subject: str,
+    start_page: int,
+    end_page: int,
+    db: Session,
+    grade: int | None = None,
+) -> dict:
     """提取一课的结构化内容。返回 {words: [{word, extra}], points: [str], text: str}。
 
+    语文：课内只抽知识点+课文，words 恒 []（词由册末回填）。英语/数学仍按学科规则。
     AI 可用时让模型按学科规则返回结构化文本；否则走兜底。
     """
     rules = SUBJECT_RULES[subject]
@@ -147,18 +193,8 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
 
     if has_real:
         pages = f"第 {start_page}–{end_page} 页"
-        if rules["has_word_bank"] and subject == "语文":
-            prompt = (
-                f"你正在为一本「{subject}」教材的第 {pages} 拆课。下面是这一课的原文（可能含目录残留、页码、插图文字，请忽略无关内容）。\n"
-                f"请严格基于原文提取：\n"
-                f"1) 识字表（每行：字|{rules['word_extra']}）\n"
-                f"2) 写字表（每行：字|{rules['word_extra']}）\n"
-                f"3) 词语表（每行：词|释义）\n"
-                f"4) 本课知识点（每行一个）\n"
-                f"5) 课文正文（原文照抄，最多 300 字）\n"
-                f"用五段输出，分别以「识字：」「写字：」「词语：」「知识点：」「课文：」开头；某表原文没有则只写标题空段。\n\n"
-                f"原文：\n{page_block}"
-            )
+        if subject == "语文":
+            prompt = build_chinese_kp_prompt(pages=pages, page_block=page_block, grade=grade)
         elif rules["has_word_bank"]:
             prompt = (
                 f"你正在为一本「{subject}」教材的第 {pages} 拆课。下面是这一课的原文（可能含目录残留、页码、插图文字，请忽略无关内容）。\n"
@@ -181,18 +217,16 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
         try:
             raw = provider.generate(prompt=prompt, system="你是教材拆解助手，只输出提取结果，不要解释。")
             parsed = _parse_ai_output(raw, subject)
+            if subject == "语文":
+                parsed["words"] = []
             if parsed["words"] or parsed["points"] or parsed["text"]:
                 return parsed
         except Exception:
             pass  # AI 失败回退兜底
 
     words: list[dict] = []
-    if rules["has_word_bank"]:
-        if subject == "语文":
-            block = _lesson_texts(pdf_path, start_page, end_page, db)
-            words = _extract_chinese_words_fallback(block)
-        else:
-            words = _extract_words_fallback(pdf_path, start_page, end_page, subject, db)
+    if rules["has_word_bank"] and subject != "语文":
+        words = _extract_words_fallback(pdf_path, start_page, end_page, subject, db)
     text = _extract_text_fallback(pdf_path, start_page, end_page, db)
     return {"words": words, "points": [], "text": text}
 

@@ -255,7 +255,11 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
                 lesson = db.get(Lesson, t["id"])
                 if lesson is None:
                     continue
-                content = extract_lesson_content(storage_path, t["subject"], t["start_page"], t["end_page"], db)
+                doc = db.get(PdfDocument, document_id)
+                grade = doc.grade if doc is not None else None
+                content = extract_lesson_content(
+                    storage_path, t["subject"], t["start_page"], t["end_page"], db, grade=grade,
+                )
                 lesson_id = t["id"]
                 point_ids = [r[0] for r in db.query(KnowledgePoint.id).filter_by(lesson_id=lesson_id).all()]
                 detach_points(db, point_ids)
