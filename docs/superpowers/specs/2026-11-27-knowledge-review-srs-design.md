@@ -2,32 +2,35 @@
 
 日期：2026-11-27  
 状态：设计已定稿，待实现  
-范围：后端新表 + `/api/knowledge-review/*` + `task_gen` 扩展；`parent-web` 入队管理；Flutter `student-app` 复习会话与每日任务入口。  
-非范围：生词 SRS 合并、旧版 `frontend/`、复习方案容器、严格探究证据门槛、SM-2/Anki。
+范围：后端新表 + `/api/knowledge-review/*` + 自动入队挂钩（mastery / 进度）+ `task_gen`；`parent-web` 队列管理（复用已有进度面板）；Flutter `student-app` 复习会话与每日任务。  
+非范围：生词 SRS 合并、旧版 `frontend/`、复习方案容器、严格探究证据门槛、SM-2/Anki、重做进度 UI。
 
 ## 背景与目标
 
-学习需要间隔复习。仓库已有半套遗忘曲线：`INTERVALS = [1,2,4,7,15,30,60]`、`WordMastery` / `KnowledgeMastery.next_review_at`、每日生词「到期复习」、听写混入到期词。缺口是：
+学习需要间隔复习。仓库已有半套遗忘曲线与家长「学习进度」调节（`LearningProgress` + `/api/progress/adjust`）。缺口是：
 
-1. **没有独立的知识点复习队列**——家长无法主动「加入要复习的知识点」。  
-2. 现有 `/api/review/questions` 按学科随意抽点 + AI 出题，**不读调度状态**。  
-3. `_gen_review` 只服务生词；知识点掌握后缺少有频率的巩固入口。
+1. **没有按进度驱动的知识点复习队列**——达标点不会自动进入有频率的巩固。  
+2. 现有 `/api/review/questions` 按学科随意抽点 + AI 出题，**不读调度与进度**。  
+3. `_gen_review` 只服务生词；知识点掌握后缺少遗忘曲线巩固入口。
 
-目标：家长把**已想通（v1 用 mastery 达标近似）**的知识点加入复习队列，按遗忘曲线到期；孩子在每日任务 + 独立复习模块中用「轻量自测 → 忘了再展开」完成复习，并正确推进间隔。
+目标：在**学习进度范围内**，已达标（v1：mastery）的知识点**自动入队**；家长调进度向前时批量补齐；按遗忘曲线到期；孩子用「轻量自测 → 忘了再展开」复习。家长用现有面板调进度，复习页只管暂停/移出。
 
 对齐学习第一性原理：
 
 - 本模块属**原料层自动化之后的巩固**（想通 → 再间隔检索），**不得宣称**复习完 = 新理解。  
 - v1 门槛用 `KnowledgeMastery.mastered` / `mastery>=0.9`；严格 guide/trap 证据链列为后续。  
-- 家长端给**决策**（在队 / 到期 / 下次），不用掌握度百分比当考核。
+- 家长端给**决策**（进度调到哪、队里有什么、下次到期），不用掌握度百分比当考核。
 
 ## 已锁定决策
 
 | 项 | 决定 |
 |----|------|
 | 复习对象 | 仅知识点（`KnowledgePoint`），不含生词 |
-| 谁入队 | 家长（`parent-web`） |
-| 入队门槛 | v1：`mastered==True` 或 `mastery>=0.9`；未达标不可入队 |
+| 入队方式 | **自动入队**（达标且进度内）；家长调进度**向前**时批量补齐；**不**以家长手选为主路径 |
+| 进度范围 | 同教材内，KP 所属课在课序上 `≤` 当前 `LearningProgress.current_lesson_id`（课序 = 该书 `Lesson.id` 升序，与现 `lesson_index` 一致） |
+| 进度调回 | **不**自动移出/暂停已在队项；仅家长手动 pause/remove |
+| 学习进度 UI | **复用**现有家长「学习进度」面板 / `/api/progress/adjust`（及 `advance` 推进） |
+| 入队门槛 | v1：`mastered==True` 或 `mastery>=0.9`；未达标不入队；超前于进度不入队 |
 | 孩子做什么 | 轻量混合：有题先作答；答错/「忘了」再展开讲解；无题则三档自评 |
 | 触达 | 每日任务 + 独立复习模块（同一套 complete 逻辑） |
 | 间隔动作 | 记得升档；有点忘同档再测；忘了回第 0 档（1 天） |
@@ -39,18 +42,18 @@
 | 任务可见性 | 生成时 `content_status=published`（孩子端 `list_tasks` 只见 published） |
 | 学年桶 | 一律 `resolve_bucket_id(db, user_id, …)` 的 **active 桶**；门槛/队列/due 同桶 |
 | 暂停语义 | 冻结：`next_review_at` 不变；paused 不进 due；恢复后若已过期则立即到期 |
-| 入队失败 | **逐条**处理，返回成功/失败列表（允许部分成功） |
 | 每日上限 | `task_kp_review_count`，默认 **6**，**每科各自**截断；`/due` 与 `task_gen` 共用选集函数 |
 | 快照 vs 暂停 | 快照项被 pause/remove 后视为已了结，任务仍可结案（§2.6） |
 | 幂等「自然日」 | 与现网一致用 **UTC 日期**（`datetime.utcnow().date()`） |
 
 ## 成功标准
 
-1. 家长能对达标知识点入队 / 暂停 / 恢复 / 移出，并看到档位与下次到期。  
-2. 到期项出现在当日 `kp_review` 任务与复习模块 `/due`。  
-3. `complete` 按三档（及客观题对错覆盖）正确更新 `interval_index` / `next_review_at`。  
-4. 完成文案不宣称「已掌握 / 已理解」。  
-5. 生词 `review` 任务与本模块并存、互不吞并。
+1. 达标且进度内的点自动入队；家长进度前推后，新范围内已达标点被补入队。  
+2. 家长能暂停 / 恢复 / 移出队列项，并用现有面板调整学习进度。  
+3. 到期项出现在当日 `kp_review` 任务与复习模块 `/due`。  
+4. `complete` 按三档（及客观题对错覆盖）正确更新 `interval_index` / `next_review_at`。  
+5. 完成文案不宣称「已掌握 / 已理解」。  
+6. 生词 `review` 任务与本模块并存、互不吞并。
 
 ---
 
@@ -64,7 +67,8 @@
 | `user_id` | 孩子 |
 | `knowledge_point_id` | FK → knowledge_points |
 | `bucket_id` | 学年桶；入队时**必写** `resolve_bucket_id` 得到的 active 桶 |
-| `enrolled_by` | 家长 user id |
+| `enrolled_by` | 可空；进度前推补齐时写家长 id；答题达标自动入队可为 `null`（系统） |
+| `enroll_source` | `mastery` \| `progress_adjust`（可选，便于审计；也可用 `enrolled_by` 空/非空区分） |
 | `enrolled_at` | 入队时间 |
 | `status` | `active` \| `paused` \| `removed` |
 | `interval_index` | 0-based，对应 `INTERVALS` |
@@ -79,23 +83,48 @@
 
 ### 1.2 学年桶解析
 
-- `eligible` / `enroll` / `queue` / `due` / `complete` / `task_gen` **一律**先 `bid = resolve_bucket_id(db, user_id, None)`（与现网 mastery 一致）。  
+- 自动入队 / `queue` / `due` / `complete` / `task_gen` **一律**先 `bid = resolve_bucket_id(db, user_id, None)`。  
 - 门槛查 `KnowledgeMastery` 时带同一 `bucket_id`；队列读写过滤同一 `bucket_id`。  
-- 无 active 桶时入队失败（`failed.reason=no_bucket`），不写跨桶数据。
+- 无 active 桶时跳过自动入队（不写跨桶数据）。
 
-### 1.3 与 `KnowledgeMastery` 的分工
+### 1.3 与 `KnowledgeMastery` / 进度的分工
 
 | 职责 | 归属 |
 |------|------|
-| 是否「够格入队」 | 同桶 `KnowledgeMastery`（v1：`mastered` 或 `mastery>=0.9`） |
+| 是否「够格」 | 同桶 `KnowledgeMastery`（v1：`mastered` 或 `mastery>=0.9`） |
+| 是否「该学过了」 | `LearningProgress`：KP 的 `lesson` 与进度同 `document_id`，且课序 ≤ 当前课 |
 | 是否在复习计划中、多久复习一次 | `knowledge_review_items` |
 | 听写/生词到期 | 继续 `WordMastery` + 现有 `_gen_review` |
 
-本模块**不**用 `KnowledgeMastery.next_review_at` 驱动到期，避免两套调度打架。
+本模块**不**用 `KnowledgeMastery.next_review_at` 驱动到期。
 
-### 1.4 入队初始值
+**进度范围内**判定（`in_progress_scope(user_id, kp)`）：
 
-- 校验门槛通过后：`status=active`，`interval_index=0`，`next_review_at = now + 1 day`（明日开始，避免刚加入当天挤占），`bucket_id=bid`。
+1. KP 无 `lesson_id` → **不入队**（无法锚定教材进度）。  
+2. 取该课的 `document_id` + `subject`，读 `get_progress(user_id, document_id, subject)`。  
+3. 无进度或 `current_lesson_id` 空 → 视为未开课，**不入队**。  
+4. 该书该科按 `Lesson.id` 升序；KP 课的下标 ≤ 当前课下标 → 在范围内。
+
+### 1.4 自动入队规则
+
+共享内部函数 `try_enroll(user_id, knowledge_point_id, *, enrolled_by=None, source=...)`：
+
+- 条件全满足才写入/复活：同桶达标 + `in_progress_scope` + 当前非 active/paused。  
+- 成功时：`status=active`，`interval_index=0`，`next_review_at = now + 1 day`，`bucket_id=bid`。  
+- 已在 active/paused → no-op。  
+- `removed` → 复活并从 0 档重来。
+
+**触发 A — 达标瞬间**（挂在 `record_attempt` 之后，仅 `target_type=knowledge`）：
+
+- 若本次后刚达标（或已达标），调用 `try_enroll(..., source=mastery)`。  
+- 超进度 / 未达标 → 静默跳过。
+
+**触发 B — 进度前推**（挂在 `POST /api/progress/adjust` 与 `advance_lesson` 成功写库之后）：
+
+- 比较调整前后的当前课下标；仅当**新下标 ≥ 旧下标**（前推或不动）时执行补齐。  
+- 扫描该 `document_id` 上课序 ∈ (旧下标, 新下标]（若旧为空则 ≤ 新下标）的全部 KP，对已达标者 `try_enroll(..., enrolled_by=操作家长, source=progress_adjust)`。  
+- **往后调**（新下标 < 旧下标）：**不**调用补齐，也**不**自动 pause/remove。  
+- `adjust` 响应可附 `review_enrolled_count`（新增入队条数），供家长端 toast。
 
 ### 1.5 三档 → 间隔
 
@@ -130,30 +159,25 @@
 
 旧 `/api/review/questions`、`/api/review/submit` **不作为**本模块主路径（可后续废弃或转调）。新前缀：`/api/knowledge-review`。
 
-### 2.1 家长 API
+### 2.1 家长 API 与进度挂钩
 
 | 方法 | 路径 | 作用 |
 |------|------|------|
-| `GET` | `/api/knowledge-review/eligible?user_id=` | 可入队：达标且非 active/paused |
-| `GET` | `/api/knowledge-review/queue?user_id=` | 队列列表（含档位、下次到期、最近结果） |
-| `POST` | `/api/knowledge-review/enroll` | `{user_id, knowledge_point_ids[]}` |
+| `GET` | `/api/knowledge-review/queue?user_id=` | 队列列表（含档位、下次到期、最近结果、来源） |
 | `POST` | `/api/knowledge-review/item/{id}/pause` | 暂停（§1.7） |
 | `POST` | `/api/knowledge-review/item/{id}/resume` | 恢复（§1.7） |
 | `POST` | `/api/knowledge-review/item/{id}/remove` | 软删 `removed` |
 
-鉴权：家长可操作绑定孩子。
+进度调节（**已有，扩展行为**）：
 
-`enroll` **逐条**处理（非整批原子）：响应形如：
+| 方法 | 路径 | 本模块增量 |
+|------|------|------------|
+| `POST` | `/api/progress/adjust` | 前推后调用 §1.4 触发 B；响应增加 `review_enrolled_count` |
+| `POST` | `/api/progress/advance` | 推进成功后同样触发 B（`enrolled_by` 可为 null） |
+| `GET` | `/api/progress/overview` | 不变；家长仍用此面板调进度 |
 
-```json
-{
-  "ok": true,
-  "enrolled": [{"item_id": 1, "knowledge_point_id": 10}],
-  "failed": [{"knowledge_point_id": 11, "reason": "not_mastered|already_queued|not_found|no_bucket"}]
-}
-```
-
-HTTP **200** + `enrolled`/`failed` 列表（含全部失败），便于家长端展示部分成功。
+内部服务：`try_enroll` / `enroll_due_to_progress(...)` **不**作为家长主 UI 的手选入队入口。  
+可选保留 `POST /api/knowledge-review/enroll` 仅供运维/测试；**v1 家长端不暴露「可加入」多选**。
 
 ### 2.2 孩子 API
 
@@ -249,12 +273,14 @@ HTTP **200** + `enrolled`/`failed` 列表（含全部失败），便于家长端
 
 ### 3.1 `parent-web`
 
-「知识点复习」页（或挂在孩子学习安排下）：
+1. **学习进度**（已有）：教材进度面板继续用；调到更前的课后，若有自动入队，toast 如「已自动加入 M 个达标知识点到复习」。  
+2. **知识点复习**页：  
+   - **在队清单**：标题、学科/课、档位、下次到期、最近结果、入队来源；暂停 / 恢复 / 移出。  
+   - 今日到期数、本周将到期数。  
+   - 短说明：「复习列表随学习进度与掌握情况自动加入；往后调进度不会移出，需要请暂停或移出。」  
+   - **无**「可加入」多选手动入队区。
 
-1. **在队清单**：标题、学科/课、档位、下次到期、最近结果；暂停 / 恢复 / 移出；今日到期数、本周将到期数。  
-2. **可加入**：仅达标且不在 active/paused；多选加入。未达标不出现或灰显说明。
-
-禁止：用掌握度百分比逼加量；未达标强行入队。
+禁止：用掌握度百分比逼加量；未达标/超进度强行入队。
 
 ### 3.2 Flutter `student-app`
 
@@ -291,9 +317,11 @@ HTTP **200** + `enrolled`/`failed` 列表（含全部失败），便于家长端
 
 | 情况 | 行为 |
 |------|------|
-| 入队未达标 | 该 id 进 `failed`，其它合格 id 照常入队（§2.1） |
-| 已在 active/paused | `failed.reason=already_queued` |
-| removed 后重入队 | 允许，档位从 0、明日开始 |
+| 达标但超进度 | 自动入队跳过；等进度前推后再补 |
+| 进度往后调 | 队列不变 |
+| 已在 active/paused | 自动入队 no-op |
+| removed 后再满足条件 | 可复活入队，档位从 0、明日开始 |
+| KP 无 lesson_id | 永不自动入队 |
 | 非本人 complete | 403 |
 | 非 active（含 paused/removed）complete | 400；当日任务结案按 §2.6 把该条视为已了结 |
 | 题无标准答案 | 按自评三档处理 |
@@ -303,18 +331,21 @@ HTTP **200** + `enrolled`/`failed` 列表（含全部失败），便于家长端
 
 ### 4.2 测试要点
 
-- enroll 门槛通过/失败  
+- 达标 + 进度内 → 自动入队；超进度 → 不入  
+- 进度前推 → 批量补齐已达标点；往后调 → 队列不变  
 - 三档调度与客观题覆盖自评  
-- due + 每日上限  
+- due + 每日上限；`/due` 与 task_gen 选集一致  
 - `kp_review` 与生词 `review` 并存  
-- complete 幂等  
+- complete 幂等；快照项 pause 后仍可结案  
 - Flutter：空态、有题/无题路径 smoke  
 
 ### 4.3 v1 不做
 
 - 生词并进本模块  
 - guide/trap 严格门槛  
-- 家长「复习方案」容器  
+- 家长「复习方案」容器 / 手选入队主路径  
+- 重做学习进度 UI（复用现有）  
+- 进度调回时自动 pause 超出范围的项  
 - 旧 `frontend/`  
 - 积分/时长当复习效果  
 - 未想通强制入队  
@@ -331,7 +362,7 @@ HTTP **200** + `enrolled`/`failed` 列表（含全部失败），便于家长端
 6. 通道：语言作答 + 自评（v1）；低年级后续可扩动作/图形。  
 7. 年龄：全年级可用；冲突型 trap 不在本模块。  
 8. 测不准：纯自评不改 mastery；客观题才更新 attempt。  
-9. 影响：主要「愿不愿按计划复习」+ 巩固节奏；不把完成当学会了。
+9. 影响：主要「愿不愿按计划复习」+ 巩固节奏；进度调节影响**学到哪 / 复习池多大**，不把完成当学会了。
 
 ---
 
@@ -341,9 +372,11 @@ HTTP **200** + `enrolled`/`failed` 列表（含全部失败），便于家长端
 |------|------|
 | 模型 | `backend/app/models.py` |
 | 调度复用 | `backend/app/services/scheduler.py` |
-| 服务 | 新建 `backend/app/services/knowledge_review.py`（enroll/due/complete） |
+| 服务 | 新建 `backend/app/services/knowledge_review.py`（try_enroll / progress 补齐 / due / complete） |
+| 挂钩 | `mastery.record_attempt`；`routers/progress.py` 的 `adjust` / `advance` |
+| 进度复用 | `backend/app/services/learning_progress.py`（课序判定） |
 | 路由 | 新建 `backend/app/routers/knowledge_review.py` |
 | 任务 | `backend/app/services/task_gen.py` |
-| 家长端 | `parent-web/app.js` (+ 样式) |
+| 家长端 | `parent-web/app.js`（复习队列页 + 进度 toast；不新建进度面板） |
 | 学生端 | `student-app/lib/features/kp_srs/`（新 feature；勿扩展旧 `knowledge_review`） |
 | 测试 | `backend/tests/test_knowledge_review.py` + Flutter smoke |
