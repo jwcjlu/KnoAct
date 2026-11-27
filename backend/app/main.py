@@ -61,6 +61,13 @@ def _ensure_db_tables() -> None:
             db.rollback()
             _log.warning("questions.passage_id 迁移失败: %s", exc)
         try:
+            from .migrate_word_kind import migrate as _migrate_word_kind
+
+            _migrate_word_kind(db)
+        except Exception as exc:
+            db.rollback()
+            _log.warning("word_banks.kind 迁移失败: %s", exc)
+        try:
             from .migrate_grade_buckets import migrate as _migrate_grade_buckets
 
             _migrate_grade_buckets(db)

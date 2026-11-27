@@ -550,12 +550,26 @@ async function loadLearningPreferences(){
     const r = await api(`/api/learning/preferences?user_id=${uid}`);
     if(r && typeof r === 'object'){
       for(const k in r){
-        configMap[k] = String(r[k]);
+        if(k === 'dictation_kinds_语文'){
+          let kinds = r[k];
+          if(typeof kinds === 'string'){
+            try{ kinds = JSON.parse(kinds); }catch(_e){ kinds = null; }
+          }
+          configMap[k] = Array.isArray(kinds) ? kinds : ['recognize','write','phrase'];
+        }else{
+          configMap[k] = String(r[k]);
+        }
       }
     }
     if(!configMap.dictation_input_mode) configMap.dictation_input_mode = 'paper_photo';
+    if(!Array.isArray(configMap.dictation_kinds_语文)){
+      configMap.dictation_kinds_语文 = ['recognize','write','phrase'];
+    }
   }catch(e){
     configMap.dictation_input_mode = configMap.dictation_input_mode || 'paper_photo';
+    if(!Array.isArray(configMap.dictation_kinds_语文)){
+      configMap.dictation_kinds_语文 = ['recognize','write','phrase'];
+    }
   }
 }
 async function loadConfig(){
@@ -2932,7 +2946,15 @@ function seekToMark(sec){
 }
 
 let docLessons = [];
-let lessonEdit = null; // {id, title, subject, words:[{id,word,extra}], points:[{id,content,category}]}
+let lessonEdit = null; // {id, title, subject, words:[{id,word,extra,kind}], points:[{id,content,category}]}
+const CN_WORD_KINDS = [
+  {kind:'recognize', label:'识字'},
+  {kind:'write', label:'写字'},
+  {kind:'phrase', label:'词语'},
+];
+function defaultWordKind(subject){
+  return subject === '英语' ? 'word' : 'phrase';
+}
 
 function snapshotLessonEdit(){
   const root = document.getElementById('lesEdit');
@@ -2958,15 +2980,27 @@ function startLessonEdit(id){
     id: l.id,
     subject: l.subject,
     title: l.title || '',
-    words: (l.words||[]).map(w=>({id:w.id, word:w.word||'', extra:w.extra||''})),
+    words: (l.words||[]).map(w=>({
+      id:w.id, word:w.word||'', extra:w.extra||'',
+      kind: w.kind || defaultWordKind(l.subject),
+    })),
     points: (l.points||[]).map(p=>({id:p.id, content:p.content||'', category:p.category||'本课'})),
   };
   render();
 }
 function cancelLessonEdit(){ lessonEdit = null; render(); }
-function addLessonWord(){
+function addLessonWord(kind){
   snapshotLessonEdit();
-  lessonEdit.words.push({id:null, word:'', extra:''});
+  const k = kind || defaultWordKind(lessonEdit.subject);
+  lessonEdit.words.push({id:null, word:'', extra:'', kind:k});
+  render();
+}
+function setLessonWordKind(i, newKind){
+  snapshotLessonEdit();
+  const w = lessonEdit.words[i];
+  if(!w || w.kind === newKind) return;
+  w.kind = newKind;
+  w.id = null;
   render();
 }
 function removeLessonWord(i){
@@ -2990,7 +3024,12 @@ async function saveLessonEdit(){
   const title = (lessonEdit.title||'').trim();
   if(!title){ toast('课名不能为空'); return; }
   const words = lessonEdit.words
-    .map(w=>({id:w.id, word:(w.word||'').trim(), extra:(w.extra||'').trim()}))
+    .map(w=>({
+      id:w.id,
+      word:(w.word||'').trim(),
+      extra:(w.extra||'').trim(),
+      kind: w.kind || defaultWordKind(lessonEdit.subject),
+    }))
     .filter(w=>w.word);
   const points = lessonEdit.points
     .map(p=>({id:p.id, content:(p.content||'').trim(), category:p.category||'本课'}))
@@ -3065,6 +3104,25 @@ function isWordListTitle(title){
   const t = String(title||'').trim().toLowerCase();
   return t === 'word list' || t === '单词列表';
 }
+function renderLessonWordsView(words, subject){
+  const list = words||[];
+  if(!list.length) return '<span style="font-size:12px;color:var(--gray3)">（待提取）</span>';
+  if(subject === '英语'){
+    return `<div class="ex-chips">${list.map(w=>`<span class="kw-chip">${escapeAttr(w.word)}</span>`).join('')}</div>`;
+  }
+  const byKind = {};
+  for(const w of list){
+    const k = w.kind || 'phrase';
+    if(!byKind[k]) byKind[k] = [];
+    byKind[k].push(w);
+  }
+  return CN_WORD_KINDS.map(col=>{
+    const items = byKind[col.kind] || [];
+    if(!items.length) return '';
+    return `<div style="margin-bottom:8px"><div style="font-size:11px;font-weight:700;color:var(--gray2);margin-bottom:4px">${col.label}</div>
+      <div class="ex-chips">${items.map(w=>`<span class="kw-chip">${escapeAttr(w.word)}</span>`).join('')}</div></div>`;
+  }).join('') || '<span style="font-size:12px;color:var(--gray3)">（待提取）</span>';
+}
 function renderWordList(words){
   const groups = [];
   for(const w of words||[]){
@@ -3095,17 +3153,41 @@ function renderLessonConfirm(){
       <div class="extract">
         ${isWordListTitle(l.title)
           ? `<div class="ex-row"><span class="ex-lbl">单词</span><div class="ex-chips" style="display:block">${renderWordList(l.words)}</div></div>`
-          : `<div class="ex-row"><span class="ex-lbl">生词表</span><div class="ex-chips">${l.words.map(w=>`<span class="kw-chip">${escapeAttr(w.word)}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>
+          : `<div class="ex-row"><span class="ex-lbl">生词表</span><div style="flex:1;display:block">${renderLessonWordsView(l.words, l.subject)}</div></div>
              <div class="ex-row"><span class="ex-lbl">知识点</span><div class="ex-chips">${l.points.map(p=>`<span class="kw-chip" style="background:var(--purple-soft);color:var(--purple)">${escapeAttr(p.content)}</span>`).join('')||'<span style="font-size:12px;color:var(--gray3)">（待提取）</span>'}</div></div>`}
       </div>`;
+  const lessonWordLine = (w, i, subject) => {
+    const kindSel = subject === '语文' ? `
+        <select style="flex:0 0 auto;font-size:12px;max-width:76px;border:1px solid var(--line3);border-radius:8px;padding:6px 4px" onchange="setLessonWordKind(${i}, this.value)" title="栏别">
+          ${CN_WORD_KINDS.map(col=>`<option value="${col.kind}" ${w.kind===col.kind?'selected':''}>${col.label}</option>`).join('')}
+        </select>` : '';
+    return `
+      <div class="les-line">
+        ${kindSel}
+        <input class="w" id="lesWord${i}" value="${escapeAttr(w.word)}" placeholder="生词">
+        <input class="x" id="lesExtra${i}" value="${escapeAttr(w.extra)}" placeholder="${extraPh(subject)}">
+        <button type="button" class="del" onclick="removeLessonWord(${i})">删除</button>
+      </div>`;
+  };
+  const renderWordEditCols = e => {
+    if(e.subject === '语文'){
+      return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+        ${CN_WORD_KINDS.map(col=>{
+          const lines = e.words.map((w,i)=> w.kind === col.kind ? lessonWordLine(w, i, e.subject) : '').filter(Boolean).join('');
+          return `<div class="les-word-col">
+            <div style="font-size:12px;font-weight:700;color:var(--gray2);margin-bottom:6px">${col.label}</div>
+            ${lines || `<div style="font-size:12px;color:var(--gray3);margin-bottom:6px">暂无</div>`}
+            <button type="button" class="kw-chip-add les-add" onclick="addLessonWord('${col.kind}')">添加</button>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+    const lines = e.words.map((w,i)=> lessonWordLine(w, i, e.subject)).join('');
+    return `${lines || '<div style="font-size:12px;color:var(--gray3);margin-bottom:6px">还没有生词</div>'}
+      <button type="button" class="kw-chip-add les-add" onclick="addLessonWord('word')">添加生词</button>`;
+  };
   const editBlock = l => {
     const e = lessonEdit;
-    const words = e.words.map((w,i)=>`
-      <div class="les-line">
-        <input class="w" id="lesWord${i}" value="${escapeAttr(w.word)}" placeholder="生词">
-        <input class="x" id="lesExtra${i}" value="${escapeAttr(w.extra)}" placeholder="${extraPh(e.subject)}">
-        <button type="button" class="del" onclick="removeLessonWord(${i})">删除</button>
-      </div>`).join('');
     const points = e.points.map((p,i)=>`
       <div class="les-line">
         <input id="lesPoint${i}" value="${escapeAttr(p.content)}" placeholder="知识点">
@@ -3119,8 +3201,7 @@ function renderLessonConfirm(){
       <div class="les-edit" id="lesEdit" data-id="${e.id}">
         <input class="ttl-input" id="lesTitle" value="${escapeAttr(e.title)}" placeholder="课名">
         <div class="ex-row"><span class="ex-lbl">生词表</span><div style="flex:1">
-          ${words || '<div style="font-size:12px;color:var(--gray3);margin-bottom:6px">还没有生词</div>'}
-          <button type="button" class="kw-chip-add les-add" onclick="addLessonWord()">添加生词</button>
+          ${renderWordEditCols(e)}
         </div></div>
         <div class="ex-row"><span class="ex-lbl">知识点</span><div style="flex:1">
           ${points || '<div style="font-size:12px;color:var(--gray3);margin-bottom:6px">还没有知识点</div>'}
@@ -3389,6 +3470,7 @@ function renderReportTab(){
           <div class="goal-item" style="display:block">
             <div class="g-top"><span class="g-name">${escapeAttr(n.title||'（未命名）')}</span></div>
             <div class="g-meta" style="white-space:pre-wrap;line-height:1.7">${escapeAttr(n.text)}</div>
+            ${n.parent_hint ? `<div class="g-meta" style="color:var(--gray2);margin-top:6px">${escapeAttr(n.parent_hint)}</div>` : ''}
             <div class="g-meta">${escapeAttr((n.created_at||'').slice(0,16).replace('T',' '))}</div>
           </div>`).join('')
           : '<p style="font-size:13px;color:var(--gray2)">还没有讲过</p>'}
@@ -3877,6 +3959,15 @@ function renderLearningConfigTab(){
             <div class="lc-hint">仅对当前孩子生效；孩子端不可自行修改</div>
           </div>
           ${num('task_dictation_count_语文','7','语文每日听写量','每天听写几个语文生词')}
+          ${(()=>{
+            const dk = Array.isArray(configMap.dictation_kinds_语文) ? configMap.dictation_kinds_语文 : ['recognize','write','phrase'];
+            const box = (kind, label) => `<label style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;font-size:13px;font-weight:600"><input type="checkbox" class="dictation-kind-cn" data-kind="${kind}" ${dk.includes(kind)?'checked':''} /> ${label}</label>`;
+            return `<div class="lc-row">
+              <div class="lc-label">语文听写类型</div>
+              <div>${box('recognize','识字')}${box('write','写字')}${box('phrase','词语')}</div>
+              <div class="lc-hint">勾选的类型才会进入每日听写与复习生词池</div>
+            </div>`;
+          })()}
           ${num('task_dictation_count_英语','7','英语每日听写量','每天听写几个英语单词')}
           ${num('task_math_calc_count','2','数学每日计算题数','每天几道屏上计算题（0–10）','0','10')}
           ${num('task_math_word_count','2','数学每日应用题数','每天几道纸上应用题，一题一照（0–10）','0','10')}
@@ -3902,6 +3993,7 @@ async function saveLearningConfig(){
   const inputs = document.querySelectorAll('[data-key]');
   const childKeys = new Set([
     'dictation_input_mode',
+    'dictation_kinds_语文',
     'task_dictation_count_语文',
     'task_dictation_count_英语',
     'task_dictation_due_cap',
@@ -3927,6 +4019,10 @@ async function saveLearningConfig(){
     } else {
       await api('/api/config', {method:'POST', body:{key, value}});
     }
+  }
+  const kindBoxes = document.querySelectorAll('input.dictation-kind-cn');
+  if(kindBoxes.length){
+    childBody.dictation_kinds_语文 = [...kindBoxes].filter(el=>el.checked).map(el=>el.dataset.kind);
   }
   if(uid){
     if(dictMode) childBody.dictation_input_mode = dictMode;

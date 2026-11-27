@@ -8,17 +8,30 @@ import re
 from sqlalchemy.orm import Session
 
 from .ai import get_provider
+from .word_kinds import (
+    KIND_PHRASE,
+    KIND_RECOGNIZE,
+    KIND_WORD,
+    KIND_WRITE,
+    normalize_kind,
+)
 from .pdf_split import (
     SUBJECT_RULES,
     WORD_LIST_OCR_PROMPT,
+    _CN_TABLE_TITLES,
+    _detect_chinese_word_tables,
     _detect_word_list,
     _is_scanned,
     _ocr_page,
     _page_continues_word_list,
     _page_text,
+    is_cn_table_title,
     is_word_list_title,
     split_gloss_line,
 )
+
+_LESSON_NO_LINE = re.compile(r"^\s*(\d{1,2})\s*$")
+_HAN_TOKEN = re.compile(r"[\u4e00-\u9fff]+")
 
 
 def _lesson_texts(pdf_path: str, start_page: int, end_page: int, db=None) -> str:
@@ -52,8 +65,61 @@ def _extract_words_fallback(pdf_path: str, start_page: int, end_page: int, subje
         # 简单词条：形如 "词 拼音 释义" 或 "word /pron/ n. 释义"
         first = line.split()[0].strip("，。：:、, ")
         if 1 < len(first) <= 12 and not re.search(r"[一-鿿]{8,}", line):
-            words.append({"word": first, "extra": line[len(first):].strip()})
+            words.append({"word": first, "extra": line[len(first):].strip(), "kind": KIND_WORD})
         if len(words) >= 30:
+            break
+    return words
+
+
+_CN_SECTION_RES = (
+    (re.compile(r"^识字"), KIND_RECOGNIZE),
+    (re.compile(r"^写字"), KIND_WRITE),
+    (re.compile(r"^词语"), KIND_PHRASE),
+)
+
+
+def _parse_word_line(s: str) -> tuple[str, str] | None:
+    if "|" in s:
+        w, _, extra = s.partition("|")
+        return w.strip(), extra.strip()
+    parts = s.split()
+    if not parts:
+        return None
+    return parts[0].strip("，。：:、,"), " ".join(parts[1:])
+
+
+def _cn_section_kind(line: str) -> str | None:
+    s = line.strip()
+    for pat, kind in _CN_SECTION_RES:
+        if pat.match(s):
+            return kind
+    return None
+
+
+def _extract_chinese_words_fallback(block: str) -> list[dict]:
+    """从页面文本按识字/写字/词语标题切段，缺段则该 kind 为空。"""
+    words: list[dict] = []
+    section_kind: str | None = None
+    for line in block.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        ck = _cn_section_kind(s)
+        if ck is not None:
+            section_kind = ck
+            continue
+        if section_kind is None:
+            continue
+        if re.fullmatch(r"[\d\s.]+", s):
+            continue
+        parsed = _parse_word_line(s)
+        if not parsed:
+            continue
+        w, extra = parsed
+        if not w or len(w) > 12:
+            continue
+        words.append({"word": w, "extra": extra, "kind": section_kind})
+        if len(words) >= 90:
             break
     return words
 
@@ -67,9 +133,55 @@ def _extract_text_fallback(pdf_path: str, start_page: int, end_page: int, db=Non
     return body[:500]
 
 
-def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_page: int, db: Session) -> dict:
+_GRADE_FOCUS = {
+    "1-2": "拼音巩固、笔画笔顺与偏旁、简单字义；少抽句式病句；几乎不抽说明方法/习作六要素。",
+    "3-4": "近义词反义词、关联词入门、把字句/被字句、修辞识别、段意概括；查字典与病句修改入门。",
+    "5-6": "语境中辨析多音字/近义词/关联词、病句修改、句式转换、概括与体会感情、人物描写与说明方法、成语与古诗积累。",
+}
+
+
+def grade_band(grade: int | None) -> str:
+    """教材年级 → 提取侧重档：1-2 / 3-4 / 5-6；缺省或越界按 3-4。"""
+    if grade in (1, 2):
+        return "1-2"
+    if grade in (3, 4):
+        return "3-4"
+    if grade in (5, 6):
+        return "5-6"
+    return "3-4"
+
+
+def build_chinese_kp_prompt(*, pages: str, page_block: str, grade: int | None) -> str:
+    """语文课内只抽知识点+课文；词表由册末回填，不在此要求。"""
+    band = grade_band(grade)
+    focus = _GRADE_FOCUS[band]
+    return (
+        f"你正在为一本「语文」教材（约{band}年级）的第 {pages} 拆课。"
+        f"下面是这一课的原文（可能含目录残留、页码、插图文字，请忽略无关内容）。\n"
+        f"年级侧重（{band}）：{focus}\n"
+        f"请严格基于原文提取本课「基础知识」知识点（每行一个），只收页上真实出现或练习到的点，"
+        f"归入这些范畴：拼音与汉字；词语（词性/近反义/成语/关联词/归类等）；"
+        f"句子（句式转换/扩缩句/病句/修辞/标点/排序等）；阅读基础（段意/顺序/感情/说明方法/人物描写/古诗文等）；"
+        f"积累与运用（日积月累/文学常识/口语交际/习作基础——仅当本课页就是该模块时才写）。\n"
+        f"禁止：整表抄写会认的字/会写的字/词语清单；普通精读课不要硬塞园地模块。\n"
+        f"可写关系句（如「形近字辨析：辩/辨/辫」），不要把字词表当知识点堆砌。\n"
+        f"另提取课文正文（原文照抄，最多 300 字）。\n"
+        f"用两段输出，分别以「知识点：」「课文：」开头；无基础点则「知识点：」下留空。\n\n"
+        f"原文：\n{page_block}"
+    )
+
+
+def extract_lesson_content(
+    pdf_path: str,
+    subject: str,
+    start_page: int,
+    end_page: int,
+    db: Session,
+    grade: int | None = None,
+) -> dict:
     """提取一课的结构化内容。返回 {words: [{word, extra}], points: [str], text: str}。
 
+    语文：课内只抽知识点+课文，words 恒 []（词由册末回填）。英语/数学仍按学科规则。
     AI 可用时让模型按学科规则返回结构化文本；否则走兜底。
     """
     rules = SUBJECT_RULES[subject]
@@ -81,7 +193,9 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
 
     if has_real:
         pages = f"第 {start_page}–{end_page} 页"
-        if rules["has_word_bank"]:
+        if subject == "语文":
+            prompt = build_chinese_kp_prompt(pages=pages, page_block=page_block, grade=grade)
+        elif rules["has_word_bank"]:
             prompt = (
                 f"你正在为一本「{subject}」教材的第 {pages} 拆课。下面是这一课的原文（可能含目录残留、页码、插图文字，请忽略无关内容）。\n"
                 f"请严格基于原文提取：\n"
@@ -103,14 +217,74 @@ def extract_lesson_content(pdf_path: str, subject: str, start_page: int, end_pag
         try:
             raw = provider.generate(prompt=prompt, system="你是教材拆解助手，只输出提取结果，不要解释。")
             parsed = _parse_ai_output(raw, subject)
+            if subject == "语文":
+                parsed["words"] = []
             if parsed["words"] or parsed["points"] or parsed["text"]:
                 return parsed
         except Exception:
             pass  # AI 失败回退兜底
 
-    words = _extract_words_fallback(pdf_path, start_page, end_page, subject, db) if rules["has_word_bank"] else []
+    words: list[dict] = []
+    if rules["has_word_bank"] and subject != "语文":
+        words = _extract_words_fallback(pdf_path, start_page, end_page, subject, db)
     text = _extract_text_fallback(pdf_path, start_page, end_page, db)
     return {"words": words, "points": [], "text": text}
+
+
+def _table_tokens_from_line(s: str, kind: str) -> list[str]:
+    """按 kind 从一行抽出词/字 token。"""
+    out: list[str] = []
+    for tok in _HAN_TOKEN.findall(s):
+        if kind == KIND_PHRASE:
+            if len(tok) >= 2:
+                out.append(tok)
+        elif len(tok) == 1:
+            out.append(tok)
+        else:
+            out.extend(list(tok))
+    return out
+
+
+def parse_chinese_table_text(raw: str, kind: str) -> dict[int, list[dict]]:
+    """册末表文本 → {lesson_no: [{word, extra, kind}, ...]}。同课同词去重保序。"""
+    kind = normalize_kind(kind)
+    by: dict[int, list[dict]] = {}
+    seen: dict[int, set[str]] = {}
+    cur: int | None = None
+    for line in (raw or "").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s in _CN_TABLE_TITLES or any(s.startswith(t) for t in _CN_TABLE_TITLES):
+            continue
+        m = _LESSON_NO_LINE.match(s)
+        if m:
+            cur = int(m.group(1))
+            by.setdefault(cur, [])
+            seen.setdefault(cur, set())
+            continue
+        m2 = re.match(r"^(\d{1,2})\s+(.+)$", s)
+        if m2:
+            cur = int(m2.group(1))
+            by.setdefault(cur, [])
+            seen.setdefault(cur, set())
+            s = m2.group(2)
+        elif cur is None:
+            continue
+        for w in _table_tokens_from_line(s, kind):
+            if w in seen[cur]:
+                continue
+            seen[cur].add(w)
+            by[cur].append({"word": w, "extra": "", "kind": kind})
+    return {n: rows for n, rows in by.items() if rows}
+
+
+def extract_chinese_table_units(
+    pdf_path: str, db, kind: str, start_page: int, end_page: int,
+) -> dict[int, list[dict]]:
+    """读取册末表页码区间文本并解析为课号桶。"""
+    block = _lesson_texts(pdf_path, start_page, end_page, db)
+    return parse_chinese_table_text(block, kind)
 
 
 def parse_word_list_text(raw: str) -> dict[int, list[dict]]:
@@ -141,7 +315,9 @@ def parse_word_list_text(raw: str) -> dict[int, list[dict]]:
         if key in seen:
             continue
         seen.add(key)
-        units[unit].append({"word": word, "extra": f"*{gloss}" if star else gloss})
+        units[unit].append({
+            "word": word, "extra": f"*{gloss}" if star else gloss, "kind": KIND_WORD,
+        })
     return {n: rows for n, rows in units.items() if rows}
 
 
@@ -179,40 +355,109 @@ def _norm_word(word: str) -> str:
     return re.sub(r"\s+", " ", (word or "").strip()).casefold()
 
 
+def _kind_key(kind: str, subject: str) -> str:
+    """英语旧数据曾默认 phrase；匹配时与 word 视为同键。"""
+    k = normalize_kind(kind) if kind else ""
+    if subject != "语文" and k == KIND_PHRASE:
+        return KIND_WORD
+    return k
+
+
 def _replace_lesson_words(db: Session, lesson, items: list[dict]) -> None:
-    """按词面把新词条写回一课，已有听写记录跟到同名词上。"""
-    from ..models import Mistake, WordBank, WordMastery
+    """按 (词面, kind) 写回一课；同键掌握度留在原 word_bank_id 上。"""
+    from ..models import WordBank
     from .cleanup import detach_words
 
     old = db.query(WordBank).filter_by(lesson_id=lesson.id).all()
-    old_by_norm: dict[str, list] = {}
+    subject = lesson.subject or "英语"
+    old_by_key: dict[tuple[str, str], list[WordBank]] = {}
     for w in old:
-        old_by_norm.setdefault(_norm_word(w.word), []).append(w)
-    new_rows = []
-    for item in items:
-        row = WordBank(lesson_id=lesson.id, subject=lesson.subject or "英语",
-                       word=item["word"], extra=item["extra"])
-        db.add(row)
-        new_rows.append(row)
-    db.flush()
+        key = (_norm_word(w.word), _kind_key(w.kind or "", subject))
+        old_by_key.setdefault(key, []).append(w)
     used_old: set[int] = set()
-    for item, row in zip(items, new_rows):
-        bucket = old_by_norm.get(_norm_word(item["word"])) or []
-        if not bucket:
-            continue
-        prev = bucket.pop(0)
-        used_old.add(prev.id)
-        db.query(WordMastery).filter_by(word_bank_id=prev.id).update(
-            {WordMastery.word_bank_id: row.id}, synchronize_session=False)
-        db.query(Mistake).filter_by(word_bank_id=prev.id).update(
-            {Mistake.word_bank_id: row.id}, synchronize_session=False)
-    for prev in old:
-        if prev.id not in used_old:
-            db.expunge(prev)
+    for item in items:
+        kind = normalize_kind(item["kind"])
+        key = (_norm_word(item["word"]), _kind_key(kind, subject))
+        bucket = old_by_key.get(key) or []
+        if bucket:
+            row = bucket.pop(0)
+            row.word = item["word"]
+            row.extra = item.get("extra") or ""
+            row.kind = kind
+            row.subject = subject
+            used_old.add(row.id)
+        else:
+            row = WordBank(
+                lesson_id=lesson.id, subject=subject,
+                word=item["word"], extra=item.get("extra") or "", kind=kind,
+            )
+            db.add(row)
     drop = [w.id for w in old if w.id not in used_old]
     detach_words(db, drop)
-    if old:
-        db.query(WordBank).filter(WordBank.id.in_([w.id for w in old])).delete(synchronize_session=False)
+    if drop:
+        db.query(WordBank).filter(WordBank.id.in_(drop)).delete(synchronize_session=False)
+
+
+def _replace_lesson_words_kind(db: Session, lesson, kind: str, items: list[dict]) -> None:
+    """只替换该课该 kind；其它 kind 不动。items 为空则 no-op（由调用方保证有表才调用）。"""
+    from ..models import WordBank
+    from .cleanup import detach_words
+
+    kind = normalize_kind(kind)
+    subject = lesson.subject or "语文"
+    old = db.query(WordBank).filter_by(lesson_id=lesson.id, kind=kind).all()
+    old_by_key: dict[str, list] = {}
+    for w in old:
+        old_by_key.setdefault(_norm_word(w.word), []).append(w)
+    used: set[int] = set()
+    for item in items:
+        key = _norm_word(item["word"])
+        bucket = old_by_key.get(key) or []
+        if bucket:
+            row = bucket.pop(0)
+            row.word = item["word"]
+            row.extra = item.get("extra") or ""
+            row.kind = kind
+            used.add(row.id)
+        else:
+            db.add(WordBank(
+                lesson_id=lesson.id, subject=subject,
+                word=item["word"], extra=item.get("extra") or "", kind=kind,
+            ))
+    drop = [w.id for w in old if w.id not in used]
+    detach_words(db, drop)
+    if drop:
+        db.query(WordBank).filter(WordBank.id.in_(drop)).delete(synchronize_session=False)
+
+
+def apply_chinese_word_tables(db: Session, document_id: int, pdf_path: str) -> dict:
+    from ..models import Lesson
+
+    texts = _page_text(pdf_path) or []
+    tables = _detect_chinese_word_tables(pdf_path, "语文", texts, len(texts), db)
+    if not tables:
+        return {"tables": 0, "lessons": 0, "words": 0}
+    lessons = (
+        db.query(Lesson)
+        .filter_by(document_id=document_id, subject="语文")
+        .order_by(Lesson.start_page, Lesson.id)
+        .all()
+    )
+    lessons = [l for l in lessons if not is_cn_table_title(l.title) and not is_word_list_title(l.title)]
+    updated = words_n = 0
+    for tbl in tables:
+        by = extract_chinese_table_units(
+            pdf_path, db, tbl["kind"], tbl["start_page"], tbl["end_page"],
+        )
+        for idx, lesson in enumerate(lessons, start=1):
+            items = by.get(idx)
+            if not items:
+                continue
+            _replace_lesson_words_kind(db, lesson, tbl["kind"], items)
+            updated += 1
+            words_n += len(items)
+    db.commit()
+    return {"tables": len(tables), "lessons": updated, "words": words_n}
 
 
 def _ensure_word_list_lesson(db: Session, document_id: int, pdf_path: str, by_unit: dict, content_lessons: list) -> None:
@@ -245,7 +490,9 @@ def _ensure_word_list_lesson(db: Session, document_id: int, pdf_path: str, by_un
     items = []
     for n in sorted(by_unit):
         for w in by_unit[n]:
-            items.append({"word": w["word"], "extra": f"Unit {n} · {w['extra']}"})
+            items.append({
+                "word": w["word"], "extra": f"Unit {n} · {w['extra']}", "kind": KIND_WORD,
+            })
     _replace_lesson_words(db, lesson, items)
 
 
@@ -266,9 +513,10 @@ def apply_word_list(db: Session, document_id: int, pdf_path: str) -> dict:
     lessons = [l for l in lessons if not is_word_list_title(l.title)]
     updated = words_n = 0
     for idx, lesson in enumerate(lessons, start=1):
-        items = by_unit.get(idx)
-        if not items:
+        raw = by_unit.get(idx)
+        if not raw:
             continue
+        items = [{**w, "kind": w.get("kind", KIND_WORD)} for w in raw]
         _replace_lesson_words(db, lesson, items)
         updated += 1
         words_n += len(items)
@@ -278,13 +526,22 @@ def apply_word_list(db: Session, document_id: int, pdf_path: str) -> dict:
 
 
 def _parse_ai_output(raw: str, subject: str) -> dict:
-    """解析 AI 输出的「生词：…知识点：…课文：…」三段文本。"""
+    """解析 AI 拆课输出：语文识字/写字/词语三分；英语生词带 kind=word。"""
     words, points, text = [], [], ""
-    section = None
+    section: str | None = None
+    cn = subject == "语文"
     for line in raw.splitlines():
         s = line.strip()
+        if cn:
+            ck = _cn_section_kind(s)
+            if ck is not None:
+                section = f"cn_{ck}"
+                continue
         if s.startswith("生词"):
-            section = "words"
+            if cn:
+                section = None
+            else:
+                section = "words"
             continue
         if s.startswith("知识点"):
             section = "points"
@@ -294,15 +551,18 @@ def _parse_ai_output(raw: str, subject: str) -> dict:
             continue
         if not s:
             continue
-        if section == "words":
-            # 形如 "词|拼音 释义" 或 "word /pron/ n. 释义"
-            if "|" in s:
-                w, _, extra = s.partition("|")
-                words.append({"word": w.strip(), "extra": extra.strip()})
+        if (section in ("words",) and not cn) or (
+            section and section.startswith("cn_")
+        ):
+            parsed = _parse_word_line(s)
+            if not parsed:
+                continue
+            w, extra = parsed
+            if section.startswith("cn_"):
+                kind = section[3:]
             else:
-                parts = s.split()
-                if parts:
-                    words.append({"word": parts[0].strip("，。：:、,"), "extra": " ".join(parts[1:])})
+                kind = KIND_WORD
+            words.append({"word": w, "extra": extra, "kind": kind})
         elif section == "points":
             points.append(s.lstrip("-*· ").strip())
         elif section == "text":

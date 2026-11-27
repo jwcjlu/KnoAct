@@ -59,6 +59,85 @@ def test_list_document_lessons_includes_words(setup_db):
     assert lessons[0]["title"] == "第 1 课"
     assert lessons[0]["audit_status"] == "approved"
     assert lessons[0]["words"][0]["word"] == "水波"
+    assert "kind" in lessons[0]["words"][0]
+
+
+def test_update_lesson_content_chinese_requires_kind(setup_db):
+    from app.models import PdfDocument, Lesson
+    s = SessionLocal()
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="x")
+    s.add(doc); s.flush()
+    lesson = Lesson(document_id=doc.id, subject="语文", title="第 1 课", start_page=1, end_page=2,
+                    extract_status="done", audit_status="approved")
+    s.add(lesson); s.commit(); lid = lesson.id; s.close()
+    h = _parent_headers()
+    resp = _client().put(f"/api/pdf/lessons/{lid}/content", headers=h, json={
+        "title": "第 1 课",
+        "words": [{"word": "箩", "extra": ""}],
+        "points": [],
+    })
+    assert resp.json().get("error")
+
+
+def test_update_lesson_content_kind_change_drops_mastery(setup_db):
+    from app.models import PdfDocument, Lesson, WordBank, WordMastery, User
+    s = SessionLocal()
+    user = User(name="孩", role="child")
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="x")
+    s.add_all([user, doc]); s.flush()
+    lesson = Lesson(document_id=doc.id, subject="语文", title="课", start_page=1, end_page=2,
+                    extract_status="done", audit_status="approved")
+    s.add(lesson); s.flush()
+    row = WordBank(lesson_id=lesson.id, subject="语文", word="箩", extra="", kind="recognize")
+    s.add(row); s.flush()
+    mastery = WordMastery(word_bank_id=row.id, user_id=user.id, correct_count=3, mastery=0.9)
+    s.add(mastery); s.commit()
+    lid, wid, mid, uid = lesson.id, row.id, mastery.id, user.id
+    s.close()
+
+    h = _parent_headers()
+    resp = _client().put(f"/api/pdf/lessons/{lid}/content", headers=h, json={
+        "title": "课",
+        "words": [{"id": wid, "word": "箩", "extra": "luó", "kind": "write"}],
+        "points": [],
+    })
+    assert resp.json().get("ok") is True
+    s = SessionLocal()
+    words = s.query(WordBank).filter_by(lesson_id=lid).all()
+    assert len(words) == 1
+    assert words[0].kind == "write"
+    assert s.get(WordMastery, mid) is None
+    assert s.query(WordMastery).filter_by(word_bank_id=words[0].id, user_id=uid).count() == 0
+    s.close()
+
+
+def test_update_lesson_content_same_kind_keeps_mastery(setup_db):
+    from app.models import PdfDocument, Lesson, WordBank, WordMastery, User
+    s = SessionLocal()
+    user = User(name="孩2", role="child")
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path="x")
+    s.add_all([user, doc]); s.flush()
+    lesson = Lesson(document_id=doc.id, subject="语文", title="课", start_page=1, end_page=2,
+                    extract_status="done", audit_status="approved")
+    s.add(lesson); s.flush()
+    row = WordBank(lesson_id=lesson.id, subject="语文", word="枚", extra="", kind="phrase")
+    s.add(row); s.flush()
+    mastery = WordMastery(word_bank_id=row.id, user_id=user.id, correct_count=1)
+    s.add(mastery); s.commit()
+    lid, wid, mid = lesson.id, row.id, mastery.id
+    s.close()
+
+    h = _parent_headers()
+    resp = _client().put(f"/api/pdf/lessons/{lid}/content", headers=h, json={
+        "title": "课",
+        "words": [{"id": wid, "word": "一枚", "extra": "yī méi", "kind": "phrase"}],
+        "points": [],
+    })
+    assert resp.json().get("ok") is True
+    s = SessionLocal()
+    assert s.get(WordBank, wid).word == "一枚"
+    assert s.get(WordMastery, mid).word_bank_id == wid
+    s.close()
 
 
 def test_audit_lesson_approve(setup_db):
@@ -189,6 +268,35 @@ def test_extract_done_english_syncs_word_list(setup_db, tmp_path, monkeypatch):
     resp = _client().post(f"/api/pdf/documents/{did}/extract", headers=h)
     assert resp.status_code == 200
     assert resp.json().get("word_list") is True
+    assert called["id"] == did
+    prog = _client().get(f"/api/pdf/documents/{did}/extract/progress", headers=h).json()
+    assert prog["finished"] is True
+
+
+def test_extract_done_chinese_syncs_word_tables(setup_db, tmp_path, monkeypatch):
+    """语文课都已提取过时，再点提取会按册末字词表回填生词，而不是直接说没有可提取课程。"""
+    from app.models import PdfDocument, Lesson
+    pdf = tmp_path / "cn.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    s = SessionLocal()
+    doc = PdfDocument(filename="语文.pdf", subject="语文", storage_path=str(pdf))
+    s.add(doc); s.flush()
+    s.add(Lesson(document_id=doc.id, subject="语文", title="第 1 课",
+                 start_page=1, end_page=10, extract_status="done", audit_status="approved"))
+    s.commit()
+    did = doc.id
+    s.close()
+    called = {}
+
+    def fake_apply(db, document_id, pdf_path):
+        called["id"] = document_id
+        return {"tables": 1, "lessons": 1, "words": 3}
+
+    monkeypatch.setattr("app.routers.pdf.apply_chinese_word_tables", fake_apply)
+    h = _parent_headers()
+    resp = _client().post(f"/api/pdf/documents/{did}/extract", headers=h)
+    assert resp.status_code == 200
+    assert resp.json().get("chinese_word_tables") is True
     assert called["id"] == did
     prog = _client().get(f"/api/pdf/documents/{did}/extract/progress", headers=h).json()
     assert prog["finished"] is True

@@ -11,8 +11,8 @@ from ..models import (
 
 
 def _content_lesson_ids(db: Session, subject: str, document_ids: list[int], up_to_lesson_id: int) -> list[int]:
-    """已学范围内的课。书末「单词列表」只供查阅，不进听写/知识点池，避免和各课生词重复。"""
-    from .pdf_split import is_word_list_title
+    """已学范围内的课。书末「单词列表」、语文识字/写字/词语表汇总课只供查阅，不进听写/知识点池。"""
+    from .pdf_split import is_cn_table_title, is_word_list_title
     if not document_ids:
         return []
     rows = db.query(Lesson.id, Lesson.title).filter(
@@ -21,7 +21,10 @@ def _content_lesson_ids(db: Session, subject: str, document_ids: list[int], up_t
         Lesson.audit_status == "approved",
         Lesson.id <= up_to_lesson_id,
     ).all()
-    return [i for i, title in rows if not is_word_list_title(title)]
+    return [
+        i for i, title in rows
+        if not is_word_list_title(title) and not is_cn_table_title(title)
+    ]
 
 
 def _current_lesson(db: Session, subject: str, user_id: int):
@@ -88,6 +91,12 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
     words = (db.query(WordBank)
              .filter(WordBank.lesson_id.in_(lesson_ids))
              .order_by(WordBank.id).all())
+    if subject == "语文":
+        from .child_config import get_dictation_kinds_cn
+        allowed = set(get_dictation_kinds_cn(db, user_id))
+        words = [w for w in words if w.kind in allowed]
+    else:
+        words = [w for w in words if (w.kind or "word") == "word"]
     if not words:
         return None
 
@@ -158,7 +167,10 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
     return Task(
         task_type="dictation", subject=subject, title=f"{lesson.title} 生词听写",
         detail=f"今日听写 · {len(picked)} 个（复习 {n_review} + 新课 {n_new} + 轮转 {n_rot}）",
-        content=json.dumps([{"id": w.id, "word": w.word, "extra": w.extra} for w in picked], ensure_ascii=False),
+        content=json.dumps([
+            {"id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind}
+            for w in picked
+        ], ensure_ascii=False),
         points=20,
     )
 
@@ -283,13 +295,24 @@ def _gen_review(db, lesson, user_id, count):
         WordMastery.next_review_at.isnot(None), WordMastery.next_review_at <= now).all()]
     if not weak_ids:
         return None
-    words = db.query(WordBank).filter(WordBank.id.in_(weak_ids), WordBank.lesson_id == lesson.id).limit(count).all()
+    words = db.query(WordBank).filter(WordBank.id.in_(weak_ids), WordBank.lesson_id == lesson.id).all()
+    subject = lesson.subject
+    if subject == "语文":
+        from .child_config import get_dictation_kinds_cn
+        allowed = set(get_dictation_kinds_cn(db, user_id))
+        words = [w for w in words if w.kind in allowed]
+    else:
+        words = [w for w in words if (w.kind or "word") == "word"]
+    words = words[:count]
     if not words:
         return None
     return Task(
         task_type="review", subject=lesson.subject, title="到期复习",
         detail=f"遗忘曲线 · {len(words)} 个到期生词",
-        content=json.dumps([{"id": w.id, "word": w.word, "extra": w.extra} for w in words], ensure_ascii=False),
+        content=json.dumps([
+            {"id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind}
+            for w in words
+        ], ensure_ascii=False),
         points=25,
     )
 
