@@ -329,7 +329,44 @@ def serialize_due_item(db: Session, user_id: int, item: KnowledgeReviewItem) -> 
 
 
 def maybe_settle_kp_review_task(db: Session, user_id: int, subject: str) -> None:
-    """占位：后续任务接入每日 KP 复习任务的自动结算。"""
+    """结算当天 kp_review 任务：快照里每个条目「今日已完成」或「不再 active」即算结清；
+    全部结清则自动 approved。"""
+    from datetime import date
+
+    from ..models import Task
+
+    task = (
+        db.query(Task)
+        .filter(
+            Task.user_id == user_id,
+            Task.subject == subject,
+            Task.date == date.today(),
+            Task.task_type == "kp_review",
+            Task.submit_status != "approved",
+        )
+        .first()
+    )
+    if task is None:
+        return None
+    try:
+        payload = json.loads(task.content or "[]")
+    except (TypeError, ValueError):
+        return None
+    item_ids = [
+        p["item_id"] for p in payload if isinstance(p, dict) and p.get("item_id") is not None
+    ]
+    if not item_ids:
+        return None
+    today_utc = datetime.utcnow().date()
+    for iid in item_ids:
+        item = db.get(KnowledgeReviewItem, iid)
+        if item is None or item.status != "active":
+            continue  # 暂停/移除/已删：视为结清
+        if item.last_result and item.updated_at and item.updated_at.date() == today_utc:
+            continue
+        return None
+    task.submit_status = "approved"
+    db.commit()
     return None
 
 

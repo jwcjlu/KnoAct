@@ -317,6 +317,25 @@ def _gen_review(db, lesson, user_id, count):
     )
 
 
+def _gen_kp_review(db, user_id, subject, day, bucket_id):
+    """知识点遗忘曲线复习任务（快照到期 KnowledgeReviewItem）。幂等：当天已有则跳过。"""
+    from .knowledge_review import select_due_items, serialize_due_item
+    exists = db.query(Task).filter_by(
+        user_id=user_id, subject=subject, date=day, task_type="kp_review").first()
+    if exists:
+        return None
+    items = select_due_items(db, user_id, subject=subject)
+    if not items:
+        return None
+    payload = [serialize_due_item(db, user_id, it) for it in items]
+    return Task(
+        task_type="kp_review", subject=subject, title="知识点复习",
+        detail=f"遗忘曲线 · {len(payload)} 个到期知识点",
+        content=json.dumps(payload, ensure_ascii=False),
+        points=25, content_status="published", submit_status="not_started",
+    )
+
+
 def _gen_listening(db, lesson, user_id=None, bucket_id=None):
     words = [w.word for w in db.query(WordBank).filter_by(lesson_id=lesson.id).all()]
     kps = [p.content for p in db.query(KnowledgePoint).filter_by(lesson_id=lesson.id).all()]
@@ -617,7 +636,20 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
         db.query(Question).filter_by(date=day, user_id=user_id).delete(synchronize_session=False)
     subjects = ["语文", "英语", "数学"]
     for subject in subjects:
-        exists = db.query(Task).filter_by(user_id=user_id, subject=subject, date=day).first()
+        # kp_review 独立于常规任务：已有听写等任务时仍要尝试补生成
+        kp_gen = _gen_kp_review(db, user_id, subject, day, bucket.id)
+        if kp_gen is not None:
+            kp_gen.user_id = user_id
+            kp_gen.date = day
+            kp_gen.bucket_id = bucket.id
+            db.add(kp_gen)
+            db.flush()
+        exists = (
+            db.query(Task)
+            .filter(Task.user_id == user_id, Task.subject == subject, Task.date == day,
+                    Task.task_type != "kp_review")
+            .first()
+        )
         if exists:
             continue
         lesson = _current_lesson(db, subject, user_id)
