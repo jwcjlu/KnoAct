@@ -111,3 +111,42 @@ def test_run_extract_passes_document_grade(setup_db, monkeypatch):
         "id": lesson_id, "title": "第1课", "start_page": 1, "end_page": 2, "subject": "语文",
     }])
     assert captured.get("grade") == 5
+
+
+def test_run_extract_skips_cn_table_lesson_kp(setup_db, monkeypatch):
+    """册末识字表不走课内知识点抽取，只标 done，等册末回填写词。"""
+    import app.routers.pdf as pdf
+    from app.database import SessionLocal
+    from app.models import KnowledgePoint, Lesson
+    from conftest import make_document, make_lesson
+
+    s = SessionLocal()
+    doc = make_document(s, subject="语文", storage_path="unused.pdf")
+    table = make_lesson(
+        s, subject="语文", title="识字表", document=doc,
+        start_page=120, end_page=128, extract_status="pending",
+    )
+    s.commit()
+    doc_id, table_id = doc.id, table.id
+    s.close()
+
+    called = {"n": 0}
+
+    def boom(*a, **k):
+        called["n"] += 1
+        raise AssertionError("册末表课不应调用 extract_lesson_content")
+
+    monkeypatch.setattr(pdf, "extract_lesson_content", boom)
+    monkeypatch.setattr(pdf, "_sync_chinese_word_tables", lambda *a, **k: None)
+    pdf._EXTRACT_PROGRESS[doc_id] = {
+        "total": 1, "done": 0, "current": "", "finished": False, "error": "",
+    }
+    pdf._run_extract(doc_id, "unused.pdf", [{
+        "id": table_id, "title": "识字表", "start_page": 120, "end_page": 128, "subject": "语文",
+    }])
+    assert called["n"] == 0
+    s = SessionLocal()
+    row = s.get(Lesson, table_id)
+    assert row.extract_status == "done"
+    assert s.query(KnowledgePoint).filter_by(lesson_id=table_id).count() == 0
+    s.close()

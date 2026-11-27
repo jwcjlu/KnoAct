@@ -2,6 +2,7 @@ from app.models import KnowledgePoint, WordBank
 from app.services.pdf_split import (
     is_cn_table_title,
     _page_is_cn_word_table,
+    _page_continues_cn_table,
     _cn_table_kind_from_text,
     _detect_chinese_word_tables,
 )
@@ -9,6 +10,7 @@ from app.services import lesson_extract as le
 from app.services.lesson_extract import (
     apply_chinese_word_tables,
     extract_chinese_table_units,
+    is_cn_backfill_lesson,
     parse_chinese_table_text,
 )
 from app.services.word_kinds import KIND_PHRASE, KIND_RECOGNIZE
@@ -34,10 +36,38 @@ def test_is_cn_table_title():
     assert not is_cn_table_title("桂花雨")
 
 
+def test_is_cn_backfill_lesson_skips_modules():
+    assert is_cn_backfill_lesson("桂花雨")
+    assert is_cn_backfill_lesson("梅兰芳蓄须明志")
+    assert not is_cn_backfill_lesson("语文园地")
+    assert not is_cn_backfill_lesson("语文园地四")
+    assert not is_cn_backfill_lesson("口语交际")
+    assert not is_cn_backfill_lesson("日积月累")
+    assert not is_cn_backfill_lesson("识字表")
+
+
+def test_parse_skips_watermark_and_garden_section():
+    raw = (
+        "识字表\n1\n杭 营\n"
+        "仅供个人学习使用，未经授权不得另做他用\n"
+        "语文园地\n湘 孝\n"
+        "2\n亩 吩\n"
+    )
+    by = parse_chinese_table_text(raw, kind="recognize")
+    assert [w["word"] for w in by[1]] == ["杭", "营"]
+    assert [w["word"] for w in by[2]] == ["亩", "吩"]
+    assert "湘" not in [w["word"] for rows in by.values() for w in rows]
+    assert "仅" not in [w["word"] for rows in by.values() for w in rows]
+
+
 def test_page_kind_from_heading():
     assert _cn_table_kind_from_text("词语表\n1\n桂花 故乡") == "phrase"
     assert _cn_table_kind_from_text("写字表\n兰 桂") == "write"
     assert _cn_table_kind_from_text("识字表（会认的字）\n杭") == "recognize"
+    # 人教 PDF 页眉常插 EN SPACE：识\u2002 字\u2002 表
+    assert _cn_table_kind_from_text("115\n识\u2002 字\u2002 表\n1\n杭") == "recognize"
+    assert _cn_table_kind_from_text("写\u2002 字\u2002 表\n1\n篮") == "write"
+    assert _cn_table_kind_from_text("词\u2002 语\u2002 表\n1 桂花") == "phrase"
     assert _page_is_cn_word_table("词语表\n1 桂花 故乡")
     assert not _page_is_cn_word_table("第 1 课 桂花雨\n课文正文……")
 
@@ -51,6 +81,21 @@ def test_detect_chinese_word_tables_multi_page():
     assert result == [
         {"kind": "recognize", "title": "识字表", "start_page": 6, "end_page": 7},
         {"kind": "write", "title": "写字表", "start_page": 8, "end_page": 8},
+    ]
+
+
+def test_detect_spaced_table_titles_split_segments():
+    """页眉带空格的三表要各成一段，不能把写字/词语吞进识字表。"""
+    texts = ["课文"] * 6
+    texts[2] = "115\n识\u2002 字\u2002 表\n1\n杭 营"
+    texts[3] = "117\n语文园地\n湘"  # 表内「园地」小节，仍属识字表
+    texts[4] = "118\n写\u2002 字\u2002 表\n1\n篮 糕"
+    texts[5] = "120\n词\u2002 语\u2002 表\n1 桂花 故乡"
+    result = _detect_chinese_word_tables("x.pdf", "语文", texts, len(texts), db=None)
+    assert result == [
+        {"kind": "recognize", "title": "识字表", "start_page": 3, "end_page": 4},
+        {"kind": "write", "title": "写字表", "start_page": 5, "end_page": 5},
+        {"kind": "phrase", "title": "词语表", "start_page": 6, "end_page": 6},
     ]
 
 
@@ -117,7 +162,8 @@ def test_replace_kind_only_leaves_other_kinds_and_points(db, monkeypatch):
     assert db.query(KnowledgePoint).filter_by(lesson_id=l1.id).count() == 1
 
 
-def test_missing_lesson_no_does_not_clear_kind(db, monkeypatch):
+def test_missing_lesson_no_clears_kind_when_table_present(db, monkeypatch):
+    """有册末表时，表中缺该课号 → 清空该 kind（避免旧错位残留）。"""
     doc = make_document(db, subject="语文", filename="语文.pdf", storage_path="x.pdf")
     l3 = make_lesson(db, subject="语文", title="第三课", document=doc, start_page=12, end_page=14)
     db.add(WordBank(lesson_id=l3.id, subject="语文", word="留", extra="", kind=KIND_PHRASE))
@@ -129,4 +175,68 @@ def test_missing_lesson_no_does_not_clear_kind(db, monkeypatch):
         4: [{"word": "地道", "extra": "", "kind": KIND_PHRASE}],
     })
     apply_chinese_word_tables(db, doc.id, "x.pdf")
-    assert db.query(WordBank).filter_by(lesson_id=l3.id, word="留").count() == 1
+    assert db.query(WordBank).filter_by(lesson_id=l3.id, word="留").count() == 0
+
+
+def test_apply_clears_module_lesson_stale_words(db, monkeypatch):
+    """语文园地等模块课上的错位回填字应被清掉。"""
+    doc = make_document(db, subject="语文", filename="语文.pdf", storage_path="x.pdf")
+    l1 = make_lesson(db, subject="语文", title="桂花雨", document=doc, start_page=7, end_page=9)
+    garden = make_lesson(db, subject="语文", title="语文园地", document=doc, start_page=16, end_page=18)
+    db.add(WordBank(lesson_id=garden.id, subject="语文", word="错位字", extra="", kind=KIND_RECOGNIZE))
+    db.commit()
+    monkeypatch.setattr(le, "_detect_chinese_word_tables", lambda *a, **k: [
+        {"kind": KIND_RECOGNIZE, "title": "识字表", "start_page": 90, "end_page": 91},
+    ])
+    monkeypatch.setattr(le, "extract_chinese_table_units", lambda *a, **k: {
+        1: [{"word": "杭", "extra": "", "kind": KIND_RECOGNIZE}],
+    })
+    apply_chinese_word_tables(db, doc.id, "x.pdf")
+    assert db.query(WordBank).filter_by(lesson_id=garden.id).count() == 0
+    assert db.query(WordBank).filter_by(lesson_id=l1.id, word="杭").count() == 1
+
+
+def test_page_continues_cn_table_allows_garden_subsection():
+    """识字表内「语文园地」是课号小节，应续页；后记则停。"""
+    assert _page_continues_cn_table("2\n兰 桂 曼") is True
+    assert _page_continues_cn_table("117\n语文园地\n湘 孝") is True
+    assert _page_continues_cn_table("后记\n2017年投入使用") is False
+
+
+def test_detect_chinese_word_tables_stops_before_afterword():
+    texts = ["课文"] * 5
+    texts[3] = "识字表\n1\n杭 营"
+    texts[4] = "后记\n2017年投入使用的义务教育教科书"
+    result = _detect_chinese_word_tables("x.pdf", "语文", texts, len(texts), db=None)
+    assert result == [
+        {"kind": "recognize", "title": "识字表", "start_page": 4, "end_page": 4},
+    ]
+
+
+def test_apply_fills_summary_lesson_and_clears_bad_points(db, monkeypatch):
+    """识字表汇总课：写入表内全部字，清掉误抽的知识点。"""
+    doc = make_document(db, subject="语文", filename="语文.pdf", storage_path="x.pdf")
+    l1 = make_lesson(db, subject="语文", title="桂花雨", document=doc, start_page=7, end_page=9)
+    summary = make_lesson(
+        db, subject="语文", title="识字表", document=doc, start_page=90, end_page=95,
+    )
+    db.add(KnowledgePoint(
+        lesson_id=summary.id, subject="语文", category="本课",
+        content="语文园地日积月累：兄友弟恭",
+    ))
+    db.commit()
+    monkeypatch.setattr(le, "_detect_chinese_word_tables", lambda *a, **k: [
+        {"kind": KIND_RECOGNIZE, "title": "识字表", "start_page": 90, "end_page": 91},
+    ])
+    monkeypatch.setattr(le, "extract_chinese_table_units", lambda *a, **k: {
+        1: [{"word": "杭", "extra": "", "kind": KIND_RECOGNIZE},
+            {"word": "营", "extra": "", "kind": KIND_RECOGNIZE}],
+        2: [{"word": "杭", "extra": "", "kind": KIND_RECOGNIZE}],  # 跨课重复字
+    })
+    apply_chinese_word_tables(db, doc.id, "x.pdf")
+    words = [w.word for w in db.query(WordBank).filter_by(lesson_id=summary.id)]
+    assert set(words) == {"杭", "营"}
+    assert db.query(KnowledgePoint).filter_by(lesson_id=summary.id).count() == 0
+    assert db.query(WordBank).filter_by(lesson_id=l1.id, word="杭").count() == 1
+    assert summary.extract_status == "done"
+    assert summary.end_page == 91

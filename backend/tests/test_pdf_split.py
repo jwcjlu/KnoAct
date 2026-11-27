@@ -8,6 +8,7 @@ from app.services.pdf_split import (
     _clean_math_topic,
     _dedupe_math_hits,
     _detect_word_list,
+    _cn_module_title,
 )
 
 
@@ -162,3 +163,66 @@ def test_detect_lessons_cuts_word_list_off_last_unit(monkeypatch):
 def test_detect_word_list_non_english():
     texts = ["Unit 1", "Word List"] * 2
     assert _detect_word_list("x.pdf", "数学", texts, len(texts), db=object()) is None
+
+
+def test_cn_module_title_from_page():
+    assert _cn_module_title("语文园地四\n日积月累\n兄友弟恭") == "语文园地四"
+    assert _cn_module_title("口语交际\n转述") == "口语交际"
+    assert _cn_module_title("第 15 课 梅兰芳蓄须明志\n正文") is None
+
+
+def test_detect_lessons_chinese_garden_splits_previous(monkeypatch):
+    """正文课与语文园地之间切开，园地不并进上一课页码。"""
+    import app.services.pdf_split as split
+
+    texts = [
+        "第 1 课 圆明园的毁灭\n正文",
+        "续",
+        "第 2 课 梅兰芳蓄须明志\n正文",
+        "续",
+        "语文园地四\n日积月累\n兄友弟恭",
+        "园地续",
+        "第 3 课 青山不老\n正文",
+    ]
+    monkeypatch.setattr(split, "_page_text", lambda p: texts)
+    monkeypatch.setattr(split, "_detect_chinese_word_tables", lambda *a, **k: [])
+    monkeypatch.setattr(split, "_detect_word_list", lambda *a, **k: None)
+    lessons = split.detect_lessons_from_pdf("x.pdf", "语文")
+    assert [l["title"] for l in lessons] == [
+        "第 1 课 圆明园的毁灭",
+        "第 2 课 梅兰芳蓄须明志",
+        "语文园地四",
+        "第 3 课 青山不老",
+    ]
+    assert lessons[1]["end_page"] == 4
+    assert lessons[2]["start_page"] == 5
+    assert lessons[2]["end_page"] == 6
+
+
+def test_merge_modules_does_not_block_toc_fallback(monkeypatch):
+    """无「第N课」锚点时，园地页不得抢先占 hits 挡住目录回退。"""
+    import app.services.pdf_split as split
+
+    texts = [
+        "目录\n",
+        "1  桂花雨..........2\n◎ 语文园地..........11\n",
+        "桂花雨正文",  # print p2 → 校准用
+        "续",
+        "语文园地\n日积月累",
+        "正文尾",
+    ]
+    # 伪造：无第N课锚点；目录在 p2；正文标题页在 p3
+    texts[0] = "封面"
+    texts[1] = "目录\n1　桂花雨....................2\n◎　语文园地....................4\n"
+    texts[2] = "桂花雨\n中秋节前后"
+    texts[3] = "续页"
+    texts[4] = "语文园地\n交流平台"
+    texts[5] = "日积月累\n观书有感"
+    monkeypatch.setattr(split, "_page_text", lambda p: texts)
+    monkeypatch.setattr(split, "_detect_chinese_word_tables", lambda *a, **k: [])
+    monkeypatch.setattr(split, "_detect_word_list", lambda *a, **k: None)
+    monkeypatch.setattr(split, "_calibrate_page_offset", lambda texts, toc: 1)  # print+1=phys
+    lessons = split.detect_lessons_from_pdf("x.pdf", "语文")
+    titles = [l["title"] for l in lessons]
+    assert "桂花雨" in titles
+    assert any("语文园地" in t for t in titles)

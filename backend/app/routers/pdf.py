@@ -14,7 +14,12 @@ from ..database import get_db, SessionLocal
 from ..models import User
 from ..models import PdfDocument, PdfPage, Lesson, LessonAudio, WordBank, KnowledgePoint, Text, Question, Textbook, UserDocument
 from ..services.cleanup import detach_points, detach_words, purge_lesson_content, purge_lessons
-from ..services.pdf_split import render_pages, detect_lessons_from_pdf
+from ..services.pdf_split import (
+    render_pages,
+    detect_lessons_from_pdf,
+    is_cn_table_title,
+    is_word_list_title,
+)
 from ..services.lesson_extract import (
     apply_chinese_word_tables,
     apply_word_list,
@@ -254,6 +259,17 @@ def _run_extract(document_id: int, storage_path: str, tasks: list[dict]):
             try:
                 lesson = db.get(Lesson, t["id"])
                 if lesson is None:
+                    continue
+                # 册末字词表 / 单词列表：不抽知识点与课文；词由后续 sync 写入
+                if is_cn_table_title(t["title"]) or is_word_list_title(t["title"]):
+                    lesson_id = t["id"]
+                    point_ids = [r[0] for r in db.query(KnowledgePoint.id).filter_by(lesson_id=lesson_id).all()]
+                    detach_points(db, point_ids)
+                    db.query(KnowledgePoint).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                    db.query(Text).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                    db.query(Question).filter_by(lesson_id=lesson_id).delete(synchronize_session=False)
+                    lesson.extract_status = "done"
+                    db.commit()
                     continue
                 doc = db.get(PdfDocument, document_id)
                 grade = doc.grade if doc is not None else None

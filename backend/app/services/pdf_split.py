@@ -390,16 +390,23 @@ def detect_lessons_from_pdf(pdf_path: str, subject: str, db=None) -> list[dict]:
             if not is_toc:
                 continue
             for line in text.split("\n"):
-                m = toc_re.match(line.strip())
-                if not m:
+                s = line.strip()
+                m = toc_re.match(s)
+                if m:
+                    start_page = int(m.group(3))
+                    title = m.group(2).strip()
+                    if len(title) >= 2:
+                        toc_entries.append((start_page, title))
                     continue
-                start_page = int(m.group(3))
-                title = m.group(2).strip()
-                if len(title) < 2:
-                    continue
-                toc_entries.append((start_page, title))
-            # 只解析前两个目录页即可
-            if len(toc_entries) >= 15:
+                mm = _CN_TOC_MODULE_RE.match(s)
+                if mm:
+                    toc_entries.append((int(mm.group(2)), mm.group(1)))
+            # 人教目录常跨 2 页；用「已扫目录页数」收束，避免第 1 页因园地条目凑满 15 条就丢掉后半册
+            toc_pages = sum(
+                1 for t in texts[: i + 1]
+                if "目录" in t or (t.count(".") > 8 and "单元" in t)
+            )
+            if toc_pages >= 2 and len(toc_entries) >= 10:
                 break
         # 目录里的页码是「印刷页码」，而 _page_text 用的是「物理页序号」（含封面/版权/导读等前置页）。
         # 两者差一个固定偏移，需校准：用第一课的标题在目录页之后的物理页里定位正文真实起始页，反推偏移。
@@ -414,6 +421,10 @@ def detect_lessons_from_pdf(pdf_path: str, subject: str, db=None) -> list[dict]:
                 continue
             seen_pages.add(phys)
             hits.append((phys, title))
+
+    # 语文：目录/锚点就绪后再并入园地等模块页，避免无锚点时园地抢占 hits 挡住目录回退
+    if subject == "语文" and hits:
+        hits = _merge_cn_module_hits(hits, texts)
 
     if not hits and _is_scanned(texts) and db is not None:
         hits = _detect_lessons_scanned(pdf_path, subject, texts, db)
@@ -514,6 +525,17 @@ def _detect_lessons_scanned(pdf_path: str, subject: str, texts: list[str], db) -
 _CN_TABLE_TITLES = ("识字表", "写字表", "词语表")
 _CN_TABLE_KIND = {"识字表": "recognize", "写字表": "write", "词语表": "phrase"}
 _CN_TABLE_SUMMARY_TITLES = {"识字表汇总", "写字表汇总", "词语表汇总"}
+# 册末表续页遇后记必须停；「语文园地」常是表内课号小节，不能当停点
+_CN_TABLE_STOP_RE = re.compile(r"(后\s*记|附录)")
+_CN_MODULE_TITLE_RE = re.compile(
+    r"^(语文园地[一二三四五六七八九十\d]*|口语交际|习作|日积月累|快乐读书吧)"
+)
+_CN_TOC_MODULE_RE = re.compile(
+    r"^\s*[◎●•]?\s*(语文园地[一二三四五六七八九十\d]*|口语交际|习作|快乐读书吧)"
+    r"\s*[.．…\s]*[.．…]{2,}\s*(\d{1,3})\s*$"
+)
+# 人教 PDF 页眉常在「识字表」中间插 EN SPACE / 窄空格
+_CN_HEADING_SPACE = re.compile(r"[\s\u2000-\u200d\ufeff]+")
 
 
 def is_cn_table_title(title: str) -> bool:
@@ -521,10 +543,44 @@ def is_cn_table_title(title: str) -> bool:
     return t in _CN_TABLE_TITLES or t in _CN_TABLE_SUMMARY_TITLES
 
 
+def _merge_cn_module_hits(hits: list[tuple[int, str]], texts: list[str]) -> list[tuple[int, str]]:
+    """把正文页里的语文园地等模块并入 hits，切开上一课页码。"""
+    if not texts:
+        return hits
+    by_page = {p: t for p, t in hits}
+    for i, text in enumerate(texts):
+        title = _cn_module_title(text)
+        if not title:
+            continue
+        page = i + 1
+        if page not in by_page:
+            by_page[page] = title
+    return [(p, by_page[p]) for p in sorted(by_page)]
+
+
+def _cn_module_title(text: str) -> str | None:
+    """页首是否是语文园地/口语交际等模块标题。"""
+    for line in (text or "").splitlines()[:6]:
+        s = line.strip()
+        if not s:
+            continue
+        m = _CN_MODULE_TITLE_RE.match(s)
+        if m:
+            return m.group(1)
+        break
+    return None
+
+
+def _compact_cn_heading(text: str) -> str:
+    """去掉页眉里的特殊空格，便于匹配「识字表」等标题。"""
+    return _CN_HEADING_SPACE.sub("", text or "")
+
+
 def _cn_table_kind_from_text(text: str) -> str | None:
     head = "\n".join((text or "").strip().splitlines()[:5])
+    compact = _compact_cn_heading(head)
     for name, kind in _CN_TABLE_KIND.items():
-        if name in head:
+        if name in head or name in compact:
             return kind
     return None
 
@@ -534,19 +590,36 @@ def _page_is_cn_word_table(text: str) -> bool:
 
 
 def _page_continues_cn_table(text: str) -> bool:
-    """表内续页：无新表标题，但有课号行或大量汉字词条。"""
+    """表内续页：无新表标题、无后记，但有课号行或表格式汉字词条。
+
+    注意：表内「语文园地」是课号小节（列该模块的字词），应续页而非停。
+    """
     if not text or not text.strip():
         return False
     if _page_is_cn_word_table(text):
         return False
-    lesson_nos = cn_lines = 0
+    if _CN_TABLE_STOP_RE.search("\n".join((text or "").splitlines()[:6])):
+        return False
+    lesson_nos = char_lines = word_lines = 0
+    garden_sec = False
     for line in text.splitlines():
         s = line.strip()
+        if not s:
+            continue
         if re.match(r"^\d{1,2}$", s):
             lesson_nos += 1
-        elif re.search(r"[\u4e00-\u9fff]", s) and 1 < len(s) <= 24:
-            cn_lines += 1
-    return lesson_nos >= 1 or cn_lines >= 5
+            continue
+        compact = _compact_cn_heading(s)
+        if compact == "语文园地" or (compact.startswith("语文园地") and len(compact) <= 8):
+            garden_sec = True
+            continue
+        spaced = _CN_HEADING_SPACE.sub(" ", s).strip()
+        if re.fullmatch(r"[\u4e00-\u9fff](?: [\u4e00-\u9fff]){0,30}", spaced):
+            char_lines += 1
+            continue
+        if re.search(r"[\u4e00-\u9fff]{2,}", s) and len(s) <= 40 and "。" not in s:
+            word_lines += 1
+    return lesson_nos >= 1 or garden_sec or char_lines >= 1 or word_lines >= 4
 
 
 def _cn_table_title_from_kind(kind: str) -> str:
@@ -564,6 +637,9 @@ def _lesson_end_clear_of_cn_tables(page_no: int, end: int, tables: list[dict]) -
     return max(end, page_no)
 
 
+_CN_TABLE_TAIL = 28  # 册末表只在书末附近，避免对全文逐页 OCR
+
+
 def _detect_chinese_word_tables(
     pdf_path: str, subject: str, texts: list[str], total_pages: int, db
 ) -> list[dict]:
@@ -572,10 +648,11 @@ def _detect_chinese_word_tables(
         return []
 
     segments: list[dict] = []
-    i = 0
+    i = max(0, total_pages - _CN_TABLE_TAIL)
     while i < total_pages:
         raw = texts[i] or ""
-        if not _page_is_cn_word_table(raw) and db is not None:
+        # 文本层够用则不再 OCR；仅空白/扫描页才问视觉模型
+        if not _page_is_cn_word_table(raw) and db is not None and len(raw.strip()) < 24:
             ocr = _ocr_page(
                 pdf_path,
                 i,
@@ -594,7 +671,11 @@ def _detect_chinese_word_tables(
             nxt = texts[j] or ""
             if _cn_table_kind_from_text(nxt):
                 break
-            if not _page_continues_cn_table(nxt) and db is not None:
+            if (
+                not _page_continues_cn_table(nxt)
+                and db is not None
+                and len((nxt or "").strip()) < 24
+            ):
                 ocr = _ocr_page(pdf_path, j, db, "若仍在上一张识字/写字/词语表内，原样转写；否则只回复 no。")
                 if ocr and ocr.strip().lower() not in {"no", "no.", "否", "不是"}:
                     if _cn_table_kind_from_text(ocr):

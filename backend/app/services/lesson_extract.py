@@ -18,7 +18,9 @@ from .word_kinds import (
 from .pdf_split import (
     SUBJECT_RULES,
     WORD_LIST_OCR_PROMPT,
+    _CN_MODULE_TITLE_RE,
     _CN_TABLE_TITLES,
+    _compact_cn_heading,
     _detect_chinese_word_tables,
     _detect_word_list,
     _is_scanned,
@@ -32,6 +34,17 @@ from .pdf_split import (
 
 _LESSON_NO_LINE = re.compile(r"^\s*(\d{1,2})\s*$")
 _HAN_TOKEN = re.compile(r"[\u4e00-\u9fff]+")
+_CN_TABLE_NOISE = re.compile(r"仅供个人|未经授权|不得另做|义务教育教科书")
+
+
+def is_cn_backfill_lesson(title: str) -> bool:
+    """册末表课号只对应阅读课文，不含园地/口语/习作/日积月累/表本身。"""
+    t = (title or "").replace("\u200b", "").strip()
+    if not t or is_cn_table_title(t) or is_word_list_title(t):
+        return False
+    if _CN_MODULE_TITLE_RE.match(t):
+        return False
+    return True
 
 
 def _lesson_texts(pdf_path: str, start_page: int, end_page: int, db=None) -> str:
@@ -255,7 +268,14 @@ def parse_chinese_table_text(raw: str, kind: str) -> dict[int, list[dict]]:
         s = line.strip()
         if not s:
             continue
-        if s in _CN_TABLE_TITLES or any(s.startswith(t) for t in _CN_TABLE_TITLES):
+        compact = _compact_cn_heading(s)
+        if compact in _CN_TABLE_TITLES or any(compact.startswith(t) for t in _CN_TABLE_TITLES):
+            continue
+        # 表内「语文园地」小节无阅读课号，其下字词不进回填桶
+        if compact == "语文园地" or compact.startswith("语文园地"):
+            cur = None
+            continue
+        if _CN_TABLE_NOISE.search(s):
             continue
         m = _LESSON_NO_LINE.match(s)
         if m:
@@ -405,6 +425,16 @@ def _replace_lesson_words_kind(db: Session, lesson, kind: str, items: list[dict]
 
     kind = normalize_kind(kind)
     subject = lesson.subject or "语文"
+    # 同课同 kind 同词去重，避免 UNIQUE(lesson_id, kind, word) 炸
+    deduped: list[dict] = []
+    seen_keys: set[str] = set()
+    for item in items:
+        key = _norm_word(item.get("word"))
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(item)
+    items = deduped
     old = db.query(WordBank).filter_by(lesson_id=lesson.id, kind=kind).all()
     old_by_key: dict[str, list] = {}
     for w in old:
@@ -431,31 +461,66 @@ def _replace_lesson_words_kind(db: Session, lesson, kind: str, items: list[dict]
 
 
 def apply_chinese_word_tables(db: Session, document_id: int, pdf_path: str) -> dict:
-    from ..models import Lesson
+    from ..models import KnowledgePoint, Lesson
+    from .cleanup import detach_points
 
     texts = _page_text(pdf_path) or []
     tables = _detect_chinese_word_tables(pdf_path, "语文", texts, len(texts), db)
     if not tables:
         return {"tables": 0, "lessons": 0, "words": 0}
-    lessons = (
+    all_lessons = (
         db.query(Lesson)
         .filter_by(document_id=document_id, subject="语文")
         .order_by(Lesson.start_page, Lesson.id)
         .all()
     )
-    lessons = [l for l in lessons if not is_cn_table_title(l.title) and not is_word_list_title(l.title)]
+    lessons = [l for l in all_lessons if is_cn_backfill_lesson(l.title)]
+    summary_by_title = {l.title: l for l in all_lessons if is_cn_table_title(l.title)}
+    # 园地/口语等模块课不参与课号回填；清掉历史错位残留
+    module_lessons = [
+        l for l in all_lessons
+        if not is_cn_backfill_lesson(l.title) and not is_cn_table_title(l.title)
+        and not is_word_list_title(l.title)
+    ]
     updated = words_n = 0
     for tbl in tables:
         by = extract_chinese_table_units(
             pdf_path, db, tbl["kind"], tbl["start_page"], tbl["end_page"],
         )
+        for mod in module_lessons:
+            _replace_lesson_words_kind(db, mod, tbl["kind"], [])
+        # 有册末表则该 kind 以表为准：表中缺课号也清空，避免旧错位残留
         for idx, lesson in enumerate(lessons, start=1):
-            items = by.get(idx)
-            if not items:
-                continue
+            items = by.get(idx) or []
             _replace_lesson_words_kind(db, lesson, tbl["kind"], items)
-            updated += 1
-            words_n += len(items)
+            if items:
+                updated += 1
+                words_n += len(items)
+        # 汇总课：写入本表全部字词，清掉误当正文抽到的知识点
+        summary = summary_by_title.get(tbl["title"])
+        if summary is not None:
+            flat: list[dict] = []
+            seen_w: set[str] = set()
+            for n in sorted(by):
+                for w in by[n]:
+                    key = _norm_word(w["word"])
+                    if not key or key in seen_w:
+                        continue  # 多课重复字只留首次，避免 UNIQUE(lesson_id,kind,word)
+                    seen_w.add(key)
+                    extra = w.get("extra") or ""
+                    label = f"第{n}课" + (f" · {extra}" if extra else "")
+                    flat.append({"word": w["word"], "extra": label, "kind": tbl["kind"]})
+            _replace_lesson_words_kind(db, summary, tbl["kind"], flat)
+            words_n += len(flat)
+            point_ids = [r[0] for r in db.query(KnowledgePoint.id).filter_by(lesson_id=summary.id).all()]
+            detach_points(db, point_ids)
+            if point_ids:
+                db.query(KnowledgePoint).filter(KnowledgePoint.id.in_(point_ids)).delete(
+                    synchronize_session=False
+                )
+            summary.start_page = tbl["start_page"]
+            summary.end_page = tbl["end_page"]
+            summary.extract_status = "done"
     db.commit()
     return {"tables": len(tables), "lessons": updated, "words": words_n}
 
