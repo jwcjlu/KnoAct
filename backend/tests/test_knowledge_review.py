@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from app.models import KnowledgeMastery, KnowledgePoint, KnowledgeReviewItem, LearningProgress
 from app.services.bucket_service import ensure_bucket
 from app.services.knowledge_review import try_enroll
+from app.services.scheduler import INTERVALS
 from conftest import make_document, make_lesson, make_user
 
 
@@ -100,6 +101,19 @@ def test_try_enroll_success_when_mastered_in_scope(db):
     assert row.interval_index == 0
     assert row.bucket_id == bid
     assert row.enroll_source == "mastery"
-    expected = before + timedelta(days=1)
+    expected = before + timedelta(days=INTERVALS[0])
     assert row.next_review_at >= expected - timedelta(seconds=2)
-    assert row.next_review_at <= after + timedelta(days=1) + timedelta(seconds=2)
+    assert row.next_review_at <= after + timedelta(days=INTERVALS[0]) + timedelta(seconds=2)
+
+
+def test_try_enroll_returns_none_when_already_active(db):
+    user = make_user(db)
+    doc = make_document(db, subject="语文")
+    lesson = make_lesson(db, subject="语文", title="第1课", document=doc)
+    kp = _kp_on_lesson(db, lesson)
+    _progress(db, user.id, doc.id, "语文", lesson.id)
+    bid = ensure_bucket(db, user.id).id
+    _mastery(db, user.id, kp.id, bid)
+    first = try_enroll(db, user.id, kp.id)
+    assert first is not None
+    assert try_enroll(db, user.id, kp.id) is None

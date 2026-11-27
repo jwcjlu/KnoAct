@@ -38,6 +38,8 @@ def try_enroll(
     source="mastery",
 ):
     from .bucket_guard import resolve_bucket_id
+    from .mastery import GATE
+    from .scheduler import INTERVALS
 
     bid = resolve_bucket_id(db, user_id, None)
     if bid is None:
@@ -50,7 +52,7 @@ def try_enroll(
         .filter_by(user_id=user_id, knowledge_point_id=knowledge_point_id, bucket_id=bid)
         .first()
     )
-    if not m or not (m.mastered or m.mastery >= 0.9):
+    if not m or not (m.mastered or m.mastery >= GATE):
         return None
     row = (
         db.query(KnowledgeReviewItem)
@@ -67,7 +69,7 @@ def try_enroll(
         db.add(row)
     row.status = "active"
     row.interval_index = 0
-    row.next_review_at = now + timedelta(days=1)
+    row.next_review_at = now + timedelta(days=INTERVALS[0])
     row.enrolled_by = enrolled_by
     row.enroll_source = source
     row.enrolled_at = now
