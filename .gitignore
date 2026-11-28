@@ -47,7 +47,3 @@ knoact-student-app-*.tar
 
 # 本地服务日志（scripts/dev.ps1 产生）
 .devlogs/
-
-# Phonics 例词配套音（家庭自用导出，不默认入库）
-content/phonics/audio/word/*
-!content/phonics/audio/word/.gitkeep

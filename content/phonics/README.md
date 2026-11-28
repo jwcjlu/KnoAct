@@ -12,7 +12,7 @@
 | `letter_sounds_index.md` / `.yaml` | 字母 a/e/i/o/u/y **多种读法总览**（查阅用，不改学习路径） |
 | `audio_manifest.yaml` | 规则音 / 例词音的期望路径与 `exists` 状态 |
 | `audio/rule/` | 每条规则的示范音（优先外部音源；缺省再 TTS） |
-| `audio/word/` | 例词音（TTS 或教材导出，**默认不入库**） |
+| `audio/word/` | 例词音（TTS 或教材导出，**已入库**） |
 | `vendor/openlettersounds/` | [Open Letter Sounds](https://purplecomputerorg.github.io/openlettersounds/) CC0 原包 |
 | `vendor/vocamax-ipa/` | [vocamax/ipa-audios](https://github.com/vocamax/ipa-audios) IPA 音素包（见 ATTRIBUTION.md） |
 | `tools/` | 生成、清单、合成、外部音源导入脚本 |
@@ -65,7 +65,7 @@ python content/phonics/tools/generate_letter_index.py
 # digraph / 元音组合等：vocamax IPA（CC BY）
 python content/phonics/tools/import_vocamax_ipa.py --root content/phonics
 
-# 例词真音（讯飞 TTS → audio/word/<word>.wav，本地、默认不入库）
+# 例词真音（讯飞 TTS → audio/word/<word>.wav，可提交入库）
 python content/phonics/tools/synthesize_word_audio.py --root content/phonics
 
 # 仅 source=tts 且缺失的规则音：占位或真 TTS
@@ -88,5 +88,5 @@ python content/phonics/tools/synthesize_rule_audio.py --root content/phonics --f
 
 ## Git 与体积
 
-- `audio/word/*` 被 `.gitignore` 忽略（保留 `.gitkeep`）。
-- `audio/rule/*` 可提交（外部音源 + 少量 TTS）。
+- `audio/rule/*` 与 `audio/word/*` 均可提交（规则音约 2MB；例词 TTS 约 6MB）。
+- 产品化上线前仍须按上文替换有版权风险的 `textbook` / `companion` 音源。
