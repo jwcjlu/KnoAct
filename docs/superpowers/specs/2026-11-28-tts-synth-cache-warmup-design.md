@@ -19,7 +19,7 @@
 | 范围 | 磁盘缓存 + 任务生成后后台预热 |
 | 缓存键 | `text + provider + model + voice + speed` |
 | 预热失败 | 静默跳过；不挡任务、不展示 |
-| 预热文本 | 当日听写相关全部可播：`speak_text` / `word` / cue（有则） |
+| 预热文本 | 孩子端实际会打到 `/api/tts/synthesize` 的串：`speak_text`（有则）+ `word`（与 speak_text 不同或缺失时）；**不**把 `dictation_cue` JSON 整段拿去合成 |
 | 淘汰 | MVP 不做；只写缓存，运维/手工清盘 |
 | 方案 | 商业 TTS 统一缓存层 + 生成后后台预热（方案 2） |
 
@@ -51,7 +51,7 @@
 BackgroundTasks / 短命后台线程
         │
         ▼
-收集去重文本（speak_text / word / cue）
+收集去重文本（speak_text / word）
         │
         ▼
 串行：商用 synthesize + 写 tts_synth_cache（失败 continue）
@@ -61,8 +61,10 @@ BackgroundTasks / 短命后台线程
 |------|------|
 | `tts_synth_cache` 读写 | 键、路径、原子写；与 `tts_cache` 目录分离 |
 | `tts_router.synthesize` | 商用路径：先查缓存再合成；命中跳过上游 |
-| 预热入口 | 听写任务写入成功后触发；调度路径用后台线程 |
-| 文本收集 | 从当日听写 task payload / 关联 WordBank 取三种文本并去重 |
+| 预热入口 | 听写任务写入成功后触发；调度路径用后台线程（自开 `SessionLocal`，不复用已关闭 session） |
+| 文本收集 | 从当日听写 task `content` 取 `speak_text` / `word` 并去重 |
+
+**与课堂报读的关系**：`speak_text` 来自 `2026-11-28-dictation-classroom-speak`。该字段尚未写入旧任务时，预热仍应对每条 `word` 生效。
 
 ## 1. 缓存层
 
@@ -99,11 +101,14 @@ sha1(f"{provider}|{model}|{voice}|{speed:.2f}|{text}")[:24]
 
 **文本收集**（去重后串行）：
 
-1. 每条 item 的 `speak_text`（有则）
-2. 生词 `word`
-3. `dictation_cue` / 短释义（有且非空，且 ≠ word、≠ speak_text）
+1. 每条 item 的 `speak_text`（有且非空）
+2. 每条 item 的 `word`（当无 `speak_text`，或 `word` ≠ `speak_text` 时）
+
+说明：`WordBank.dictation_cue` 是 JSON（`compound` / `gloss_short` 等），客户端只播 `speak_text ?? word`，**从不**把 cue 整段或字段单独请求 TTS。组词/短释义已编进 `speak_text`，故预热**不**再单独合成 cue / compound / gloss_short，避免无命中的商用调用。
 
 **合成路径**：与商用 synthesize + 写 `tts_synth_cache` 同一逻辑；跳过真人与浏览器兜底。`voice`/`speed` 用当前 TTS profile 默认，与孩子端未显式传参时的键一致。
+
+对 `word` 的商用预热是**兜底**：孩子端 `real=true` 时词条优先 `word_audio`；商用缓存主要加速 `speak_text`（整句）以及真人 miss 时的词条合成。成功标准不以「词条首听必走商用缓存」计量。
 
 **限流**：同一预热批内串行；单条超时/异常 `continue`；整批上限约 40 条文本。
 
@@ -124,7 +129,7 @@ sha1(f"{provider}|{model}|{voice}|{speed:.2f}|{text}")[:24]
 
 - 同键第二次 synthesize **不**调 provider。
 - 改 `speed` / `voice` / `provider`（或 model）各应 miss 一次。
-- 预热：mock synthesize，断言当日 word / speak_text / cue 均被请求且写盘。
+- 预热：mock synthesize，断言当日应收集的 `speak_text` / `word` 被请求且写盘；**不**对 cue JSON 发起合成。
 - 预热失败：provider 抛错 → 听写任务仍存在、无异常冒泡。
 
 ## 非目标（本期不做）
