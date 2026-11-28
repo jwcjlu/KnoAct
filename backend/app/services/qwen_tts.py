@@ -77,6 +77,23 @@ def merge_audio_segments(chunks: list[bytes]) -> bytes:
     return out.getvalue()
 
 
+def _qwen_http_error(status: int, body: str) -> str:
+    snippet = (body or "")[:200]
+    hint = ""
+    low = snippet.lower()
+    if "invalid voice" in low or "voice" in low and "invalid" in low:
+        hint = "（请确认音色为 Cherry/Serena/Ethan 等英文 ID，模型为 qwen3-tts-flash，且已在百炼开通；改配置后须先保存再测）"
+    return f"千问 TTS 失败：{status} {snippet}{hint}"
+
+
+def _qwen_biz_error(code: str, message: str, *, model: str, voice: str) -> str:
+    hint = ""
+    low = (message or "").lower()
+    if "invalid voice" in low or "not licensed" in low:
+        hint = f"（当前 model={model!r} voice={voice!r}；请用 qwen3-tts-flash + Cherry，并在百炼模型广场开通）"
+    return f"千问 TTS 错误 code={code} {message}{hint}"
+
+
 def synthesize_qwen(
     *,
     text: str,
@@ -118,11 +135,12 @@ def synthesize_qwen(
             timeout=60,
         )
         if resp.status_code != 200:
-            raise RuntimeError(f"千问 TTS 失败：{resp.status_code} {resp.text[:200]}")
+            raise RuntimeError(_qwen_http_error(resp.status_code, resp.text))
         data = resp.json()
         code = data.get("code") or ""
         if code:
-            raise RuntimeError(f"千问 TTS 错误 code={code} {str(data.get('message') or '')[:160]}")
+            msg = str(data.get("message") or "")[:160]
+            raise RuntimeError(_qwen_biz_error(code, msg, model=payload["model"], voice=payload["input"]["voice"]))
         audio_url = ((data.get("output") or {}).get("audio") or {}).get("url") or ""
         if not audio_url:
             raise RuntimeError("千问 TTS 未返回音频 URL")

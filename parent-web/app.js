@@ -4002,13 +4002,21 @@ function msRoleHtml(){
       ${r.id==='tts' ? (()=>{
         const prov = msConnProviderForRole('tts') || 'openai';
         const voices = MS_TTS_VOICES[prov] || MS_TTS_VOICES.openai;
-        const cur = opts.voice || voices[0] || '';
+        // 切换厂商后旧音色（如 alloy）不在新列表里，界面会假显示第一项，实际仍传旧值 → 百炼报 Invalid voice
+        let cur = opts.voice || '';
+        if(!voices.includes(cur)){
+          cur = voices[0] || '';
+          if(cur) msSetOption('voice', cur);
+        }
+        if(prov==='qwen' && !(svc.model||'').trim()){
+          svc.model = 'qwen3-tts-flash';
+        }
         return `<div class="ms-field"><div class="ms-label">音色</div>
         <select class="ms-select" onchange="msSetOption('voice',this.value)">
           ${voices.map(v=>`<option value="${escapeAttr(v)}" ${cur===v?'selected':''}>${escapeAttr(v)}</option>`).join('')}
         </select>
         ${prov==='xunfei'?'<div class="ms-hint">需在「提供方」选用厂商 xunfei 并填写开放平台语音合成凭证。</div>':''}
-        ${prov==='qwen'?'<div class="ms-hint">千问 TTS：模型填 <b>qwen3-tts-flash</b>；音色如 Cherry（芊悦）。语速对本期无效。</div>':''}</div>`;
+        ${prov==='qwen'?'<div class="ms-hint">千问 TTS：模型须为 <b>qwen3-tts-flash</b>（已自动填）；音色用 Cherry 等英文 ID。改完先点「保存配置」再测。语速本期无效。若仍报 Invalid voice，请到百炼控制台开通该模型。</div>':''}</div>`;
       })() : ''}
       ${r.id==='tts' ? `
         <div class="ms-field">
@@ -4330,6 +4338,20 @@ function msSetConn(val){
   const s = msSvc(msRoleTab);
   s.connection_index = val === '' ? null : parseInt(val);
   s.model = '';
+  const conn = msConnAt(s.connection_index);
+  const prov = (conn && conn.provider) || '';
+  if(msRoleTab === 'tts'){
+    if(prov === 'qwen'){
+      s.model = 'qwen3-tts-flash';
+      msSetOption('voice', (MS_TTS_VOICES.qwen || ['Cherry'])[0]);
+    } else {
+      const voices = MS_TTS_VOICES[prov] || MS_TTS_VOICES.openai;
+      const o = msOpts('tts');
+      if(voices.length && !voices.includes(o.voice || '')){
+        msSetOption('voice', voices[0]);
+      }
+    }
+  }
   render();
 }
 function msSetModel(val){ msSvc(msRoleTab).model = val; }
