@@ -7,8 +7,17 @@ from sqlalchemy.orm import Session
 from .ai import ocr_image
 
 
+def _word_line(w: dict) -> str:
+    n = w["index"] + 1
+    accept = w.get("accept")
+    if accept:
+        alts = "，".join(accept)
+        return f"{n}. 标准：{w['word']}；也可接受：{alts}"
+    return f"{n}. {w['word']}"
+
+
 def _grading_instruction(words: list[dict]) -> str:
-    word_list = "\n".join(f"{w['index']+1}. {w['word']}" for w in words)
+    word_list = "\n".join(_word_line(w) for w in words)
     return (
         "这是一张孩子手写听写词语的照片。请按从上到下、从左到右的顺序，识别孩子写的每个词，"
         "并与下面的标准词语列表一一对应，判断每个词是否写对（注意形近字、潦草字，仔细辨认）。\n\n"
@@ -55,6 +64,23 @@ def parse_grading_result(raw: str) -> list[dict]:
     return out
 
 
+def apply_accept(results: list[dict], words: list[dict]) -> list[dict]:
+    by_index = {w["index"]: w for w in words}
+    out: list[dict] = []
+    for r in results:
+        w = by_index.get(r["index"])
+        if w is None:
+            out.append(r)
+            continue
+        accept = w.get("accept") or [w["word"]]
+        written = (r.get("written") or "").strip()
+        item = dict(r)
+        if written in accept:
+            item["is_correct"] = True
+        out.append(item)
+    return out
+
+
 def grade_handwriting(db: Session, image_bytes: bytes, words: list[dict]) -> list[dict]:
     """用视觉模型批改手写听写。返回 [{index, written, is_correct}]。
 
@@ -64,6 +90,6 @@ def grade_handwriting(db: Session, image_bytes: bytes, words: list[dict]) -> lis
         return []
     try:
         raw = ocr_image(db, image_bytes, _grading_instruction(words))
-        return parse_grading_result(raw)
+        return apply_accept(parse_grading_result(raw), words)
     except Exception:
         return []

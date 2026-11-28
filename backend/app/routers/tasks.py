@@ -11,6 +11,7 @@ from ..core.access import ensure_user_access, require_learning_user, resolve_tar
 from ..core.deps import require_role
 from ..database import get_db
 from ..models import Task, Point, User, TrainingItem
+from ..services.dictation_speak import speak_incomplete_count
 from ..services.task_gen import generate_tasks_for_user
 from ..services.answer_record import record_answer
 
@@ -96,6 +97,9 @@ def _to_dict(t: Task) -> dict:
         "content_status": t.content_status,
         "submit_status": t.submit_status,
         "photo_path": t.photo_path,
+        "speak_incomplete_count": speak_incomplete_count(t.content)
+        if t.task_type == "dictation"
+        else 0,
     }
 
 

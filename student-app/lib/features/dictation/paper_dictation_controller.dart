@@ -16,6 +16,8 @@ class PaperWrongWord {
     required this.meaning,
     this.yours = '',
     this.written = '',
+    this.speakText = '',
+    this.accept = const [],
   });
 
   final String word;
@@ -24,14 +26,24 @@ class PaperWrongWord {
   final String meaning;
   final String yours;
   final String written;
+  final String speakText;
+  final List<String> accept;
 
-  PaperWrongWord copyWith({String? yours, String? written}) => PaperWrongWord(
+  PaperWrongWord copyWith({
+    String? yours,
+    String? written,
+    String? speakText,
+    List<String>? accept,
+  }) =>
+      PaperWrongWord(
         word: word,
         id: id,
         pinyin: pinyin,
         meaning: meaning,
         yours: yours ?? this.yours,
         written: written ?? this.written,
+        speakText: speakText ?? this.speakText,
+        accept: accept ?? this.accept,
       );
 }
 
@@ -141,13 +153,26 @@ class PaperDictationController extends Notifier<PaperDictationState> {
     if (state.rewriting) {
       if (state.rewriteIdx >= state.wrong.length) return null;
       final w = state.wrong[state.rewriteIdx];
-      return DictWord(id: w.id, word: w.word, extra: '${w.pinyin} ${w.meaning}'.trim());
+      return DictWord(
+        id: w.id,
+        word: w.word,
+        extra: '${w.pinyin} ${w.meaning}'.trim(),
+        speakTextRaw: w.speakText.isNotEmpty ? w.speakText : null,
+        accept: w.accept,
+      );
     }
     if (state.idx >= state.words.length) return null;
     return state.words[state.idx];
   }
 
-  String? speakText() => _currentWord?.word;
+  String? speakText() {
+    if (state.rewriting) {
+      if (state.rewriteIdx >= state.wrong.length) return null;
+      final w = state.wrong[state.rewriteIdx];
+      return w.speakText.isNotEmpty ? w.speakText : w.word;
+    }
+    return _currentWord?.speakText;
+  }
 
   void hint() {
     final key = _hintKey;
@@ -193,14 +218,27 @@ class PaperDictationController extends Notifier<PaperDictationState> {
     state = state.copyWith(phase: PaperDictationPhase.grading, gradeImageBase64: imageBase64, busy: true);
   }
 
+  @visibleForTesting
+  List<Map<String, dynamic>> gradeWordPayloadForTest() => _gradeWordPayload();
+
   List<Map<String, dynamic>> _gradeWordPayload() {
     if (state.rewriting) {
       return [
-        for (var i = 0; i < state.wrong.length; i++) {'index': i, 'word': state.wrong[i].word},
+        for (var i = 0; i < state.wrong.length; i++)
+          {
+            'index': i,
+            'word': state.wrong[i].word,
+            'accept': state.wrong[i].accept.isNotEmpty ? state.wrong[i].accept : [state.wrong[i].word],
+          },
       ];
     }
     return [
-      for (var i = 0; i < state.words.length; i++) {'index': i, 'word': state.words[i].word},
+      for (var i = 0; i < state.words.length; i++)
+        {
+          'index': i,
+          'word': state.words[i].word,
+          'accept': state.words[i].accept.isNotEmpty ? state.words[i].accept : [state.words[i].word],
+        },
     ];
   }
 
@@ -278,6 +316,8 @@ class PaperDictationController extends Notifier<PaperDictationState> {
           meaning: w.meaning,
           yours: r?.written ?? '',
           written: r?.written ?? '',
+          speakText: w.speakText,
+          accept: w.accept,
         );
         wrong.add(item);
         firstRoundWrong.add(item);

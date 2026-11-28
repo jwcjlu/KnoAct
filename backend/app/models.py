@@ -103,6 +103,7 @@ class WordBank(Base):
     subject: Mapped[str] = mapped_column(String(16))
     word: Mapped[str] = mapped_column(String(64))
     extra: Mapped[str] = mapped_column(LongText, default="")  # 拼音/音标/词性/释义，按学科
+    dictation_cue: Mapped[str] = mapped_column(LongText, default="")  # JSON {compound,gloss_short,source}
     kind: Mapped[str] = mapped_column(String(16), default="phrase")
 
 class KnowledgePoint(Base):

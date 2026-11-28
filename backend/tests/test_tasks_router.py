@@ -65,6 +65,33 @@ def test_list_tasks_published_only_for_child():
     assert r.json() == []  # pending_review, child shouldn't see
 
 
+def test_list_tasks_dictation_speak_incomplete_count():
+    uid = _seed()
+    content = (
+        '[{"word": "事", "speak_incomplete": true},'
+        '{"word": "认真", "speak_incomplete": false}]'
+    )
+    client.post(
+        "/api/tasks",
+        json={
+            "user_id": uid,
+            "date": str(date.today()),
+            "task_type": "dictation",
+            "subject": "语文",
+            "title": "听写",
+            "content": content,
+            "points": 20,
+        },
+        headers=_parent_h(uid),
+    )
+    r = client.get(
+        f"/api/tasks?user_id={uid}&date={date.today()}&role=parent",
+        headers=_parent_h(uid),
+    )
+    row = next(t for t in r.json() if t["title"] == "听写")
+    assert row["speak_incomplete_count"] == 1
+
+
 def test_approve_then_child_sees_task():
     uid = _seed()
     generate_tasks_for_user(SessionLocal(), uid, date.today())

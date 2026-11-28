@@ -165,13 +165,48 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
     n_review = len([w for w in picked if _is_due(w) or _is_mistaken(w)])
     n_new = len([w for w in picked if _is_new(w) and not _is_due(w) and not _is_mistaken(w)])
     n_rot = len(picked) - n_review - n_new
+
+    if subject == "语文":
+        from .dictation_cue_fill import fill_missing_cues
+        from .dictation_speak import (
+            build_speak_payload, resolve_cues_for_word, dump_cue, parse_cue,
+        )
+        fill_missing_cues(db, picked)
+        db.flush()
+        items = []
+        for w in picked:
+            cues = resolve_cues_for_word(
+                word=w.word, kind=w.kind, extra=w.extra or "",
+                cue_raw=getattr(w, "dictation_cue", None) or "",
+            )
+            if cues.get("compound") or cues.get("gloss_short"):
+                existing = parse_cue(getattr(w, "dictation_cue", None) or "")
+                if not existing.get("compound") and cues.get("compound"):
+                    existing["compound"] = cues["compound"]
+                    existing["source"] = cues.get("source") or "extra"
+                if not existing.get("gloss_short") and cues.get("gloss_short"):
+                    existing["gloss_short"] = cues["gloss_short"]
+                    existing["source"] = existing.get("source") or cues.get("source") or "extra"
+                w.dictation_cue = dump_cue(existing)
+            payload = build_speak_payload(
+                word=w.word, kind=w.kind,
+                compound=cues.get("compound") or None,
+                gloss_short=cues.get("gloss_short") or None,
+            )
+            items.append({
+                "id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind,
+                **payload,
+            })
+    else:
+        items = [
+            {"id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind}
+            for w in picked
+        ]
+
     return Task(
         task_type="dictation", subject=subject, title=f"{lesson.title} 生词听写",
         detail=f"今日听写 · {len(picked)} 个（复习 {n_review} + 新课 {n_new} + 轮转 {n_rot}）",
-        content=json.dumps([
-            {"id": w.id, "word": w.word, "extra": w.extra, "kind": w.kind}
-            for w in picked
-        ], ensure_ascii=False),
+        content=json.dumps(items, ensure_ascii=False),
         points=20,
     )
 

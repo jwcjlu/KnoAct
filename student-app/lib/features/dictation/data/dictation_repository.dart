@@ -7,17 +7,48 @@ import '../../../core/providers.dart';
 
 /// 听写词条
 class DictWord {
-  const DictWord({required this.id, required this.word, required this.extra});
+  const DictWord({
+    required this.id,
+    required this.word,
+    required this.extra,
+    this.speakTextRaw,
+    this.accept = const [],
+  });
 
   factory DictWord.fromJson(Map<String, dynamic> j) => DictWord(
         id: (j['id'] as num?)?.toInt() ?? 0,
         word: '${j['word'] ?? ''}',
         extra: '${j['extra'] ?? ''}',
+        speakTextRaw: _optionalNonEmptyString(j['speak_text']),
+        accept: _parseStringList(j['accept']),
       );
 
   final int id;
   final String word;
   final String extra;
+  final String? speakTextRaw;
+  final List<String> accept;
+
+  /// 课堂朗读文案（有 speak_text 用课堂句，否则用词本身）
+  String get speakText {
+    final raw = speakTextRaw;
+    if (raw != null && raw.isNotEmpty) return raw;
+    return word;
+  }
+
+  static String? _optionalNonEmptyString(Object? v) {
+    if (v == null) return null;
+    final s = '$v'.trim();
+    return s.isEmpty ? null : s;
+  }
+
+  static List<String> _parseStringList(Object? v) {
+    if (v is! List) return const [];
+    return [
+      for (final e in v)
+        if (e != null) '$e'.trim(),
+    ].where((s) => s.isNotEmpty).toList(growable: false);
+  }
 
   /// 拼音（extra 空格分隔的第一段）
   String get pinyin => extra.split(RegExp(r'\s+')).firstOrNull ?? '';

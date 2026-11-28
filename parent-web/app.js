@@ -2374,10 +2374,25 @@ function renderTaskTab(){
     ].filter(Boolean).join(' · ');
     const mathDetail = (t.task_type==='math' && t.submit_status==='submitted')
       ? renderMathSubmittedDetail(t) : '';
+    let speakIncomplete = '';
+    if(t.task_type==='dictation' && t.speak_incomplete_count>0){
+      speakIncomplete = `<span style="font-size:11px;color:#c05b4a">报读待补 ${t.speak_incomplete_count}</span>`;
+      let incompleteWords = [];
+      try{
+        const items = JSON.parse(t.content||'[]');
+        if(Array.isArray(items)){
+          incompleteWords = items.filter(x=>x&&x.speak_incomplete).map(x=>x.word).filter(Boolean);
+        }
+      }catch(e){}
+      if(incompleteWords.length){
+        speakIncomplete += `<details style="margin-top:4px;font-size:12px;color:#5c6761"><summary style="cursor:pointer">待补词</summary><ul style="margin:4px 0 0;padding-left:18px">${incompleteWords.map(w=>`<li>${escapeHtml(w)}</li>`).join('')}</ul></details>`;
+      }
+    }
     return `<div class="goal-item" style="display:flex;align-items:center;gap:12px">
       <div style="flex:1;min-width:0">
         <div class="g-top"><span class="g-name">${t.title||'(无标题)'}</span>${status}</div>
         ${meta?`<div class="g-meta">${meta}</div>`:''}
+        ${speakIncomplete}
         ${mathDetail}
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">${actions}<button class="btn-ghost" style="color:#c05b4a" onclick="deleteTask(${t.id})">删除</button></div>

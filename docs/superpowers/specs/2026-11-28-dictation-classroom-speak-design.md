@@ -1,7 +1,7 @@
 # 语文听写课堂式报读（组词 / 短释义）设计
 
 日期：2026-11-28  
-状态：已确认（brainstorming），待实现  
+状态：已实现（feature/dictation-classroom-speak）  
 范围：语文 `task_type=dictation` 的 TTS 报读文本生成与下发；任务生成时查缺补组词/短释义；单字宽判；家长端「报读待补」提示。英语听写不改。
 
 ## 背景与问题

@@ -425,7 +425,7 @@ def assignment_grade(req: AssignmentGradeReq, user: User = Depends(require_learn
 
 class GradeHandwritingReq(BaseModel):
     user_id: int
-    words: list[dict] = []   # [{index, word}]
+    words: list[dict] = []   # [{index, word, accept?}]
     image_base64: str = ""
 
 

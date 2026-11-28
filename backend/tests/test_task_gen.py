@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, date, timedelta
+from unittest.mock import patch
 from app.database import SessionLocal, Base, engine
 from app.models import (
     User, PdfDocument, Lesson, WordBank, KnowledgePoint, WordMastery, Text, Task, Question,
@@ -583,6 +584,63 @@ def test_dictation_filters_cn_kinds():
     assert words
     assert all(w["kind"] == "write" for w in words)
     assert {w["word"] for w in words} == {"写"}
+    db.close()
+
+
+def test_dictation_content_has_speak_text_for_chinese():
+    """语文听写 Task.content 含课堂播报复读字段。"""
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    db.query(WordBank).filter_by(lesson_id=l1_id).delete()
+    db.add(WordBank(
+        lesson_id=l1_id, subject="语文", word="事", extra="shì 事情", kind="write",
+    ))
+    db.add(ChildConfig(user_id=uid, key="dictation_kinds_语文", value='["write"]'))
+    db.commit()
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(
+        user_id=uid, subject="语文", date=date.today(), task_type="dictation",
+    ).first()
+    assert t is not None
+    item = json.loads(t.content)[0]
+    assert item["speak_text"] == "事，事情的事"
+    assert item["speak_incomplete"] is False
+    assert "事情" in item["accept"]
+    db.close()
+
+
+def test_dictation_english_unchanged_no_speak_required():
+    db = SessionLocal()
+    uid, _l1 = _setup_english(db)
+    with patch("app.services.dictation_cue_fill.fill_missing_cues") as m_fill:
+        generate_tasks_for_user(db, uid, date.today())
+        m_fill.assert_not_called()
+    t = db.query(Task).filter_by(
+        user_id=uid, subject="英语", date=date.today(), task_type="dictation",
+    ).first()
+    assert t is not None
+    for w in json.loads(t.content):
+        assert "speak_text" not in w
+    db.close()
+
+
+def test_dictation_speak_incomplete_without_cue_or_extra():
+    db = SessionLocal()
+    uid, l1_id = _setup(db)
+    db.query(WordBank).filter_by(lesson_id=l1_id).delete()
+    db.add(WordBank(lesson_id=l1_id, subject="语文", word="字", extra="", kind="write"))
+    db.add(ChildConfig(user_id=uid, key="dictation_kinds_语文", value='["write"]'))
+    db.commit()
+    with patch("app.services.dictation_cue_fill.fill_missing_cues"):
+        generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(
+        user_id=uid, subject="语文", date=date.today(), task_type="dictation",
+    ).first()
+    assert t is not None
+    item = json.loads(t.content)[0]
+    assert item["speak_text"] == "字，字"
+    assert item["speak_incomplete"] is True
+    assert item["accept"] == ["字"]
     db.close()
 
 
