@@ -54,3 +54,22 @@ def test_build_speak_fallback():
 def test_cue_roundtrip():
     raw = dump_cue({"compound": "事情", "gloss_short": "", "source": "ai"})
     assert parse_cue(raw)["compound"] == "事情"
+
+
+def test_wordbank_dictation_cue_column(setup_db, db):
+    from app.models import WordBank
+    from conftest import make_lesson
+
+    lesson = make_lesson(db, subject="语文")
+    wb = WordBank(
+        lesson_id=lesson.id,
+        subject="语文",
+        word="事",
+        extra="shì 事情",
+        kind="write",
+        dictation_cue='{"compound": "事情"}',
+    )
+    db.add(wb)
+    db.commit()
+    db.refresh(wb)
+    assert "事情" in (wb.dictation_cue or "")
