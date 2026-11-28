@@ -97,9 +97,10 @@ from app.services.qwen_tts import map_language_type, split_for_qwen, _MAX_CHARS
 
 
 def test_map_language_type():
+    # tts_lang_for_text：含汉字→zh，否则 en；故数字/英文都映射为 English（Auto 仅作兜底，当前不可达）
     assert map_language_type("箩") == "Chinese"
     assert map_language_type("hello") == "English"
-    assert map_language_type("123") == "Auto"
+    assert map_language_type("123") == "English"
 
 
 def test_split_short_unchanged():
@@ -467,9 +468,21 @@ git commit -m "feat(tts): 千问 Qwen-TTS HTTP 非实时合成"
 
 ```python
 from app.database import SessionLocal
-from app.models import ModelConnection, ModelProfile, RoleBinding
+from app.models import (
+    ChildConfig,
+    ModelConfig,
+    ModelConnection,
+    ModelProfile,
+    RoleBinding,
+    User,
+)
 from app.services.tts import get_tts, QwenTTS
-# 复用 test_model_config._clear 或同等清表逻辑，避免脏 binding
+
+
+def _clear_tts_config(db):
+    for m in (RoleBinding, ModelProfile, ModelConnection, ModelConfig, ChildConfig, User):
+        db.query(m).delete()
+    db.commit()
 
 
 def test_qwen_tts_requires_key():
@@ -482,10 +495,8 @@ def test_qwen_tts_requires_key():
 
 
 def test_get_tts_uses_qwen_binding():
-    from tests.test_model_config import _clear  # 若不可 import，内联同样的 delete
-
     db = SessionLocal()
-    _clear(db)
+    _clear_tts_config(db)
     conn = ModelConnection(provider="qwen", name="qw", api_key="sk-qwen")
     db.add(conn)
     db.flush()
