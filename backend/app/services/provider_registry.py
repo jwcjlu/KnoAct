@@ -15,6 +15,7 @@ DEEPSEEK = ProviderSpec("deepseek", "DeepSeek", False, "deepseek-chat")
 GLM = ProviderSpec("glm", "GLM（智谱）", False, "glm-4-flash")
 MINIMAX = ProviderSpec("minimax", "MiniMax", False, "speech-01-turbo")
 XUNFEI = ProviderSpec("xunfei", "科大讯飞", False, "")
+QWEN = ProviderSpec("qwen", "千问", False, "qwen3-tts-flash")
 FAKE = ProviderSpec("fake", "本地兜底", False, "")
 
 REGISTRY: dict[str, tuple[ProviderSpec, ...]] = {
@@ -22,7 +23,7 @@ REGISTRY: dict[str, tuple[ProviderSpec, ...]] = {
     "task":      (OPENAI, DEEPSEEK, GLM, FAKE),
     "embedding": (OPENAI, FAKE),
     "search":    (OPENAI, FAKE),
-    "tts":       (OPENAI, MINIMAX, XUNFEI, FAKE),
+    "tts":       (OPENAI, MINIMAX, XUNFEI, QWEN, FAKE),
     "stt":       (OPENAI, FAKE),
     "imagegen":  (OPENAI, FAKE),
 }
