@@ -121,9 +121,9 @@ def resolve_cues_for_word(*, word: str, kind: str | None, extra: str, cue_raw: s
     if mode == "char" and not compound:
         seeded = seed_compound_from_extra(word, extra)
         if seeded:
-            compound, source = seeded, source or "extra"
+            compound, source = seeded, "extra"
     if mode == "word" and not gloss:
         seeded_g = gloss_from_extra(word, extra)
         if seeded_g:
-            gloss, source = seeded_g, source or "extra"
+            gloss, source = seeded_g, "extra"
     return {"compound": compound or "", "gloss_short": gloss or "", "source": source}

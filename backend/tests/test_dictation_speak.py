@@ -73,3 +73,95 @@ def test_wordbank_dictation_cue_column(setup_db, db):
     db.commit()
     db.refresh(wb)
     assert "事情" in (wb.dictation_cue or "")
+
+
+def _wb_char_empty(db):
+    from app.models import WordBank
+    from conftest import make_lesson
+
+    lesson = make_lesson(db, subject="语文")
+    wb = WordBank(
+        lesson_id=lesson.id,
+        subject="语文",
+        word="事",
+        extra="",
+        kind="write",
+        dictation_cue="",
+    )
+    db.add(wb)
+    db.commit()
+    db.refresh(wb)
+    return wb
+
+
+def test_fill_missing_cues_writes_compound(setup_db, db):
+    from unittest.mock import MagicMock, patch
+
+    from app.services.dictation_cue_fill import FILL_TIMEOUT_SEC, fill_missing_cues
+
+    wb = _wb_char_empty(db)
+    provider = MagicMock()
+    provider.generate.return_value = (
+        f'{{"items":[{{"id": {wb.id}, "compound": "事情", "gloss_short": ""}}]}}'
+    )
+    with patch("app.services.dictation_cue_fill.get_provider", return_value=provider):
+        fill_missing_cues(db, [wb])
+    db.refresh(wb)
+    assert parse_cue(wb.dictation_cue)["compound"] == "事情"
+    provider.generate.assert_called_once()
+    _, kwargs = provider.generate.call_args
+    assert kwargs.get("json_mode") is True
+    assert kwargs.get("timeout") == FILL_TIMEOUT_SEC
+
+
+def test_fill_missing_cues_ai_failure_noop(setup_db, db):
+    from unittest.mock import patch
+
+    from app.services.dictation_cue_fill import fill_missing_cues
+
+    wb = _wb_char_empty(db)
+    with patch("app.services.dictation_cue_fill.get_provider", side_effect=RuntimeError("no ai")):
+        fill_missing_cues(db, [wb])
+    db.refresh(wb)
+    assert (wb.dictation_cue or "") == ""
+
+
+def test_fill_missing_cues_passes_short_timeout(setup_db, db):
+    from unittest.mock import MagicMock, patch
+
+    from app.services.dictation_cue_fill import FILL_TIMEOUT_SEC, fill_missing_cues
+
+    wb = _wb_char_empty(db)
+    provider = MagicMock()
+    provider.generate.return_value = (
+        f'{{"items":[{{"id": {wb.id}, "compound": "事情", "gloss_short": ""}}]}}'
+    )
+    with patch("app.services.dictation_cue_fill.get_provider", return_value=provider):
+        fill_missing_cues(db, [wb])
+    _, kwargs = provider.generate.call_args
+    assert kwargs.get("timeout") == FILL_TIMEOUT_SEC == 15.0
+
+
+def test_fill_missing_cues_skips_extra_seeded(setup_db, db):
+    from unittest.mock import MagicMock, patch
+
+    from app.models import WordBank
+    from app.services.dictation_cue_fill import fill_missing_cues
+    from conftest import make_lesson
+
+    lesson = make_lesson(db, subject="语文")
+    wb = WordBank(
+        lesson_id=lesson.id,
+        subject="语文",
+        word="事",
+        extra="shì 事情",
+        kind="write",
+        dictation_cue='{"compound": "错词", "source": "ai"}',
+    )
+    db.add(wb)
+    db.commit()
+    db.refresh(wb)
+    provider = MagicMock()
+    with patch("app.services.dictation_cue_fill.get_provider", return_value=provider):
+        fill_missing_cues(db, [wb])
+    provider.generate.assert_not_called()
