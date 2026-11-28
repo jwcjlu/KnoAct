@@ -451,6 +451,38 @@ def put_synth_cache(provider: str, model: str, voice: str, speed: float, text: s
     return path
 
 
+def synthesize_commercial_cached(db: Session, text: str, *, voice: str = "", speed: float = 1.0, child_id: int | None = None) -> bytes:
+    import logging
+    from .model_config import resolve
+
+    text = (text or "").strip()
+    if not text:
+        raise RuntimeError("empty_tts_text")
+    tts = get_tts(db, child_id)
+    if tts.name == "fake":
+        raise RuntimeError("tts_fake_skip_cache")
+    r = resolve(db, "tts", child_id)
+    provider = tts.name
+    model = (getattr(tts, "model", None) or r.model or "").strip()
+    use_voice = (voice or tts.voice or r.options.get("voice") or "").strip()
+    cached = find_synth_cache(provider, model, use_voice, float(speed), text)
+    if cached is not None:
+        logging.getLogger(__name__).info(
+            "tts_synth_cache hit provider=%s text_len=%s", provider, len(text)
+        )
+        return cached
+    logging.getLogger(__name__).info(
+        "tts_synth_cache miss provider=%s text_len=%s", provider, len(text)
+    )
+    audio = tts.synthesize(text, voice=use_voice, speed=speed)
+    if audio and len(audio) > 200:
+        put_synth_cache(provider, model, use_voice, float(speed), text, audio)
+        logging.getLogger(__name__).info(
+            "tts_synth_cache write provider=%s text_len=%s", provider, len(text)
+        )
+    return audio
+
+
 PROVIDERS = {
     "minimax": MiniMaxTTS,
     "xunfei": XunfeiTTS,
