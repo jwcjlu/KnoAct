@@ -2,7 +2,7 @@ rules:
 - id: vowel.a.short
   expected_path: audio/rule/vowel.a.short.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: cat
     expected_path: audio/word/cat.wav
@@ -23,7 +23,7 @@ rules:
 - id: consonant.s.primary
   expected_path: audio/rule/consonant.s.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: sun
     expected_path: audio/word/sun.wav
@@ -44,7 +44,7 @@ rules:
 - id: consonant.t.primary
   expected_path: audio/rule/consonant.t.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: top
     expected_path: audio/word/top.wav
@@ -65,7 +65,7 @@ rules:
 - id: consonant.p.primary
   expected_path: audio/rule/consonant.p.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: pen
     expected_path: audio/word/pen.wav
@@ -86,7 +86,7 @@ rules:
 - id: vowel.i.short
   expected_path: audio/rule/vowel.i.short.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: sit
     expected_path: audio/word/sit.wav
@@ -107,7 +107,7 @@ rules:
 - id: consonant.n.primary
   expected_path: audio/rule/consonant.n.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: net
     expected_path: audio/word/net.wav
@@ -128,7 +128,7 @@ rules:
 - id: consonant.m.primary
   expected_path: audio/rule/consonant.m.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: mat
     expected_path: audio/word/mat.wav
@@ -149,7 +149,7 @@ rules:
 - id: consonant.d.primary
   expected_path: audio/rule/consonant.d.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: dog
     expected_path: audio/word/dog.wav
@@ -170,7 +170,7 @@ rules:
 - id: vowel.o.short
   expected_path: audio/rule/vowel.o.short.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: dog
     expected_path: audio/word/dog.wav
@@ -191,7 +191,7 @@ rules:
 - id: consonant.g.primary
   expected_path: audio/rule/consonant.g.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: go
     expected_path: audio/word/go.wav
@@ -212,7 +212,7 @@ rules:
 - id: consonant.c.primary
   expected_path: audio/rule/consonant.c.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: cat
     expected_path: audio/word/cat.wav
@@ -233,7 +233,7 @@ rules:
 - id: vowel.u.short
   expected_path: audio/rule/vowel.u.short.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: cup
     expected_path: audio/word/cup.wav
@@ -254,7 +254,7 @@ rules:
 - id: consonant.b.primary
   expected_path: audio/rule/consonant.b.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: bat
     expected_path: audio/word/bat.wav
@@ -275,7 +275,7 @@ rules:
 - id: vowel.e.short
   expected_path: audio/rule/vowel.e.short.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: bed
     expected_path: audio/word/bed.wav
@@ -296,7 +296,7 @@ rules:
 - id: consonant.h.primary
   expected_path: audio/rule/consonant.h.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: hat
     expected_path: audio/word/hat.wav
@@ -317,7 +317,7 @@ rules:
 - id: consonant.l.primary
   expected_path: audio/rule/consonant.l.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: leg
     expected_path: audio/word/leg.wav
@@ -338,7 +338,7 @@ rules:
 - id: consonant.r.primary
   expected_path: audio/rule/consonant.r.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: red
     expected_path: audio/word/red.wav
@@ -359,7 +359,7 @@ rules:
 - id: consonant.f.primary
   expected_path: audio/rule/consonant.f.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: fan
     expected_path: audio/word/fan.wav
@@ -380,7 +380,7 @@ rules:
 - id: consonant.k.primary
   expected_path: audio/rule/consonant.k.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: kit
     expected_path: audio/word/kit.wav
@@ -401,7 +401,7 @@ rules:
 - id: consonant.j.primary
   expected_path: audio/rule/consonant.j.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: jam
     expected_path: audio/word/jam.wav
@@ -422,7 +422,7 @@ rules:
 - id: consonant.v.primary
   expected_path: audio/rule/consonant.v.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: van
     expected_path: audio/word/van.wav
@@ -443,7 +443,7 @@ rules:
 - id: consonant.w.primary
   expected_path: audio/rule/consonant.w.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: web
     expected_path: audio/word/web.wav
@@ -464,7 +464,7 @@ rules:
 - id: consonant.x.primary
   expected_path: audio/rule/consonant.x.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: box
     expected_path: audio/word/box.wav
@@ -485,7 +485,7 @@ rules:
 - id: consonant.z.primary
   expected_path: audio/rule/consonant.z.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: zip
     expected_path: audio/word/zip.wav
@@ -506,7 +506,7 @@ rules:
 - id: consonant.q.primary
   expected_path: audio/rule/consonant.q.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: queen
     expected_path: audio/word/queen.wav

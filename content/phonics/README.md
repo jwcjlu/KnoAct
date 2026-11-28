@@ -10,9 +10,10 @@
 | `path.yaml` | 阶段 1–7 的推荐学习顺序（`path_order_min` / `path_order_max`） |
 | `handbook.md` | 由工具生成的家长可读手册（**勿手改**，改 `rules.yaml` 后重生成） |
 | `audio_manifest.yaml` | 规则音 / 例词音的期望路径与 `exists` 状态 |
-| `audio/rule/` | 每条规则的示范音（`source: tts` 可由脚本占位或真 TTS） |
+| `audio/rule/` | 每条规则的示范音（优先外部音源；缺省再 TTS / 占位） |
 | `audio/word/` | 例词配套音（教材 / 配套 CD 等，**默认不入库**） |
-| `tools/` | 生成、清单、合成脚本 |
+| `vendor/openlettersounds/` | [Open Letter Sounds](https://purplecomputerorg.github.io/openlettersounds/) CC0 原包缓存 |
+| `tools/` | 生成、清单、合成、外部音源导入脚本 |
 | `tests/` | schema、覆盖、生成物一致性测试 |
 
 **怎么用「目录」vs「路径」：**
@@ -62,18 +63,28 @@ python content/phonics/tools/generate_manifest.py \
   --audio-root content/phonics/audio \
   --out content/phonics/audio_manifest.yaml
 
-# 为缺失的规则音写入最小占位 WAV（验收 / CI 用；无真实读音）
+# 导入 Open Letter Sounds（CC0）到字母主音规则音
+python content/phonics/tools/import_openlettersounds.py \
+  --root content/phonics \
+  --vendor content/phonics/vendor/openlettersounds
+
+# 仅为仍缺失且 source=tts 的规则音写占位 WAV（无真实读音）
 python content/phonics/tools/synthesize_rule_audio.py \
   --root content/phonics --fake
 ```
 
-合成后请**再跑一遍 manifest**，使 `audio/rule/*.wav` 的 `exists: true` 与仓库一致。
+合成 / 导入后请**再跑一遍 manifest**。
+
+### 外部音源优先级
+
+1. **Open Letter Sounds（CC0）**：已挂到 25 条字母主音（`a e i o u` + 20 辅音，不含 `y`——OLS 的 y 是辅音 /j/，与本库 `vowel.y.short`=/ɪ/ 不同）。`source: openlettersounds`。美式纯音素；与沪教牛津英式有差异处见各条 `notes`。许可见 `vendor/openlettersounds/LICENSE`。
+2. **Phonicademy 等 digraph / 元音组合包**：待导入时用 `source: phonicademy`（schema 已预留）。
+3. **TTS / `--fake`**：仅补缺口；`--fake` **不含可跟读内容**。
 
 ## 音频：家庭自用与产品化边界
 
 - **家庭自用**：可自行从教材、配套 CD、点读笔等导出例词读音，放入 `audio/word/`，文件名与 manifest 中 `expected_path` 一致（通常为 `audio/word/<word>.wav`），然后重新生成 `audio_manifest.yaml`。
-- **产品化 / 对外发布**：凡 `rules.yaml` 里 `source` 为 **`textbook`** 或 **`companion`** 的音频，必须使用**有权使用的素材**（自录、正版授权 TTS、采购音效库等），不得将家庭自用翻录文件随产品分发。
-- **规则音（`audio/rule/`）**：`source: tts` 可用本目录 `--fake` 占位 WAV 满足路径与测试；上架前建议换为合规 TTS 或专业录音。占位文件仅表示「文件存在」，**不含可跟读内容**。
+- **产品化 / 对外发布**：凡 `source` 为 **`textbook`** / **`companion`** 的音频，必须换成有权分发的素材。`openlettersounds`（CC0）可继续用；`tts` 占位须换成合规 TTS 或录音。
 
 ## 例词配套音 workflow
 

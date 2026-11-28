@@ -37,7 +37,13 @@ def validate_rule(rule: dict) -> None:
     audio = rule["audio"]
     if "rule" not in audio or "path" not in audio["rule"] or "source" not in audio["rule"]:
         raise ValidationError("audio.rule.path/source required")
-    if audio["rule"]["source"] not in ("textbook", "tts", "companion"):
+    if audio["rule"]["source"] not in (
+        "textbook",
+        "tts",
+        "companion",
+        "openlettersounds",
+        "phonicademy",
+    ):
         raise ValidationError("bad audio.rule.source")
 
 

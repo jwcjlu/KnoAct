@@ -53,3 +53,8 @@ def test_awareness_may_omit_ipa():
         approx_zh="闭音节：元音发短音（说明）",
         path_order=40,
     ))
+def test_openlettersounds_source_allowed():
+    validate_rule(_ok_rule(audio={
+        "rule": {"path": "audio/rule/vowel.a.short.wav", "source": "openlettersounds"},
+        "examples": [],
+    }))

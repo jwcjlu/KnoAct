@@ -27,7 +27,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel.a.short.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 1
   notes: 短 a，CVC 闭音节中的读音
@@ -59,7 +59,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.s.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 2
   notes: ''
@@ -91,7 +91,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.t.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 3
   notes: ''
@@ -123,7 +123,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.p.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 4
   notes: ''
@@ -155,7 +155,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel.i.short.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 5
   notes: 短 i
@@ -187,7 +187,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.n.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 6
   notes: ''
@@ -219,7 +219,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.m.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 7
   notes: ''
@@ -251,7 +251,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.d.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 8
   notes: ''
@@ -283,7 +283,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel.o.short.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 9
   notes: 短 o，英式 /ɒ/
@@ -315,7 +315,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.g.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 10
   notes: ''
@@ -347,7 +347,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.c.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 11
   notes: ''
@@ -379,7 +379,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel.u.short.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 12
   notes: 短 u
@@ -411,7 +411,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.b.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 13
   notes: ''
@@ -443,7 +443,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel.e.short.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 14
   notes: 短 e
@@ -475,7 +475,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.h.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 15
   notes: ''
@@ -507,7 +507,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.l.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 16
   notes: ''
@@ -539,7 +539,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.r.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 17
   notes: ''
@@ -571,7 +571,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.f.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 18
   notes: ''
@@ -603,7 +603,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.k.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 19
   notes: ''
@@ -635,7 +635,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.j.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 20
   notes: ''
@@ -667,7 +667,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.v.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 21
   notes: ''
@@ -699,7 +699,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.w.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 22
   notes: ''
@@ -731,7 +731,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.x.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 23
   notes: ''
@@ -763,7 +763,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.z.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 24
   notes: ''
@@ -795,7 +795,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant.q.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 25
   notes: q 几乎总与 u 连用成 qu /kw/，qu 见辅音 digraph
