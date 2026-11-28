@@ -47,6 +47,48 @@ def test_synthesize_commercial_cached_hits_disk(db, tmp_path, monkeypatch):
     assert a == b and calls["n"] == 1
 
 
+def test_synthesize_endpoint_uses_synth_cache(setup_db, monkeypatch, tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.database import SessionLocal
+    from app.routers import tts_router
+    from app.routers.tts_router import router
+    from app.services import tts as tts_mod
+    from app.services.tts import TTSProvider
+    from conftest import make_account, auth_headers
+
+    monkeypatch.setattr(tts_mod, "_SYNTH_CACHE_DIR", str(tmp_path / "synth"))
+    calls = {"n": 0}
+
+    class Stub(TTSProvider):
+        name = "qwen"
+        model = "qwen3-tts-flash"
+
+        def __init__(self):
+            super().__init__(voice="Cherry", api_key="x")
+
+        def synthesize(self, text, voice="", speed=1.0):
+            calls["n"] += 1
+            return b"ID3" + b"\x02" * 300
+
+    monkeypatch.setattr(tts_router, "get_tts", lambda db, child_id=None: Stub())
+    monkeypatch.setattr(tts_router, "word_audio", lambda text: None)
+    monkeypatch.setattr(tts_mod, "get_tts", lambda db, child_id=None: Stub())
+
+    s = SessionLocal()
+    u = make_account(s, "u_synth_cache", "child")
+    s.commit()
+    h = auth_headers(u)
+    s.close()
+    app = FastAPI()
+    app.include_router(router)
+    c = TestClient(app)
+    r1 = c.get("/api/tts/synthesize?text=你好&real=false", headers=h)
+    r2 = c.get("/api/tts/synthesize?text=你好&real=false", headers=h)
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert calls["n"] == 1
+
+
 def test_synthesize_commercial_cached_skips_fake(db, monkeypatch):
     from app.services import tts as tts_mod
 

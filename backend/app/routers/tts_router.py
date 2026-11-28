@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session
 from ..core.deps import get_current_user
 from ..database import get_db
 from ..models import User
-from ..services.tts import get_tts, sniff_audio_media_type, synthesize_public_mp3, word_audio
+from ..services.tts import (
+    get_tts,
+    sniff_audio_media_type,
+    synthesize_commercial_cached,
+    synthesize_public_mp3,
+    word_audio,
+)
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])
 
@@ -20,7 +26,7 @@ def _browser_tts_fallback(*, configured: bool, reason: str = ""):
     }
 
 
-def _configured_speed(db) -> float:
+def _configured_speed(db, child_id: int | None = None) -> float:
     """取配置里家长设的语速（tts profile 的 options.speed），默认 1.0。
 
     家长端「语音 → 语速」滑块写的就是这个值；调用方没显式传 speed 时以它为准，
@@ -29,7 +35,7 @@ def _configured_speed(db) -> float:
     from ..services.model_config import resolve
 
     try:
-        raw = (resolve(db, "tts").options or {}).get("speed")
+        raw = (resolve(db, "tts", child_id).options or {}).get("speed")
         val = float(raw)
     except (TypeError, ValueError):
         return 1.0
@@ -57,14 +63,17 @@ def synthesize(
             return Response(content=human, media_type="audio/mpeg")
 
     # 2) 合成 TTS
-    tts = get_tts(db)
+    child_id = _auth.id if getattr(_auth, "role", None) == "child" else None
+    tts = get_tts(db, child_id)
     configured = tts.name != "fake"
     if speed is None:
-        speed = _configured_speed(db)
+        speed = _configured_speed(db, child_id)
     upstream_err = ""
     if configured:
         try:
-            audio = tts.synthesize(text, voice=voice, speed=speed)
+            audio = synthesize_commercial_cached(
+                db, text, voice=voice, speed=speed, child_id=child_id,
+            )
             return Response(content=audio, media_type=sniff_audio_media_type(audio))
         except Exception as e:
             upstream_err = str(e)

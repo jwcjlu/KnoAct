@@ -203,6 +203,7 @@ def test_tts_endpoint_qwen_returns_wav_content_type(setup_db, monkeypatch):
     from app.database import SessionLocal
     from app.routers import tts_router
     from app.routers.tts_router import router
+    from app.services import tts as tts_mod
     from app.services.tts import TTSProvider
     from conftest import make_account, auth_headers
 
@@ -214,7 +215,8 @@ def test_tts_endpoint_qwen_returns_wav_content_type(setup_db, monkeypatch):
         def synthesize(self, text, voice="", speed=1.0):
             return wav
 
-    monkeypatch.setattr(tts_router, "get_tts", lambda db: Stub())
+    monkeypatch.setattr(tts_router, "get_tts", lambda db, child_id=None: Stub())
+    monkeypatch.setattr(tts_mod, "get_tts", lambda db, child_id=None: Stub())
     monkeypatch.setattr(tts_router, "word_audio", lambda text: None)
 
     s = SessionLocal()
