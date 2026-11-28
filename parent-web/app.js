@@ -128,6 +128,7 @@ const MS_TTS_VOICES = {
   xunfei: ['讯飞女声','讯飞男声','标准普通话'],
   minimax: ['male-qn-qingse','female-shaonv','presenter_male'],
   openai: ['alloy','echo','fable','onyx','nova','shimmer'],
+  qwen: ['Cherry','Serena','Ethan','Chelsie','Moon'],
 };
 
 // 家长端任务审核
@@ -168,6 +169,7 @@ const aiProviders = [
 const ttsProviders = [
   {id:'minimax',name:'MiniMax',voices:['清澈男声','温柔女声','标准童声'],needsBaseUrl:false},
   {id:'xunfei',name:'科大讯飞',voices:['讯飞女声','讯飞男声','标准普通话'],needsBaseUrl:false},
+  {id:'qwen',name:'千问',voices:['Cherry','Serena','Ethan','Chelsie','Moon'],needsBaseUrl:false},
   {id:'openai',name:'中转站 / OpenAI 兼容',voices:['alloy','echo','fable','onyx','nova','shimmer'],needsBaseUrl:true}
 ];
 
@@ -3903,10 +3905,10 @@ function msConnectionsHtml(){
             <input class="ms-input" value="${escapeAttr(c.name||'')}" oninput="msConnField(${i},'name',this.value)"></div>
           <div class="ms-field"><div class="ms-label">厂商</div>
             <select class="ms-select" onchange="msSetConnProvider(${i}, this.value)">
-              ${['openai','deepseek','glm','minimax','xunfei'].map(p=>
+              ${['openai','deepseek','glm','minimax','xunfei','qwen'].map(p=>
                 `<option value="${p}" ${(c.provider||'openai')===p?'selected':''}>${p}</option>`).join('')}
             </select>
-            <div class="ms-hint">语音选 <b>xunfei</b> 时需填写开放平台「语音合成」的 APPID / APIKey / APISecret。</div>
+            <div class="ms-hint">语音选 <b>xunfei</b> 时需填写开放平台「语音合成」的 APPID / APIKey / APISecret；选 <b>qwen</b> 时填阿里云百炼 API Key，TTS 模型用 <b>qwen3-tts-flash</b>。</div>
           </div>
           ${(c.provider||'openai') === 'xunfei' ? `
           <div class="ms-field"><div class="ms-label">APPID</div>
@@ -4005,7 +4007,8 @@ function msRoleHtml(){
         <select class="ms-select" onchange="msSetOption('voice',this.value)">
           ${voices.map(v=>`<option value="${escapeAttr(v)}" ${cur===v?'selected':''}>${escapeAttr(v)}</option>`).join('')}
         </select>
-        ${prov==='xunfei'?'<div class="ms-hint">需在「提供方」选用厂商 xunfei 并填写开放平台语音合成凭证。</div>':''}</div>`;
+        ${prov==='xunfei'?'<div class="ms-hint">需在「提供方」选用厂商 xunfei 并填写开放平台语音合成凭证。</div>':''}
+        ${prov==='qwen'?'<div class="ms-hint">千问 TTS：模型填 <b>qwen3-tts-flash</b>；音色如 Cherry（芊悦）。语速对本期无效。</div>':''}</div>`;
       })() : ''}
       ${r.id==='tts' ? `
         <div class="ms-field">
