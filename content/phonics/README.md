@@ -104,3 +104,12 @@ python content/phonics/tools/synthesize_rule_audio.py \
 `ash
 python content/phonics/tools/import_vocamax_ipa.py --root content/phonics
 `
+
+### 例词真音（本地，默认不入库）
+
+\\ash
+# 用项目 TTS（讯飞）批量合成 example_words → audio/word/<word>.wav
+python content/phonics/tools/synthesize_word_audio.py --root content/phonics
+\
+生成后重新跑 \generate_manifest.py\。\udio/word/*\ 被 gitignore，仅本机跟读；产品化勿提交有版权风险的翻录。
+
