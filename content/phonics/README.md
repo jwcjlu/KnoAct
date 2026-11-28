@@ -68,6 +68,9 @@ python content/phonics/tools/import_vocamax_ipa.py --root content/phonics
 # 例词真音（讯飞 TTS → audio/word/<word>.wav，可提交入库）
 python content/phonics/tools/synthesize_word_audio.py --root content/phonics
 
+# 导出到 Flutter 学生端（catalog.json + 同步 audio → student-app/assets/phonics/）
+python content/phonics/tools/export_flutter_catalog.py --root content/phonics --student-app student-app
+
 # 仅 source=tts 且缺失的规则音：占位或真 TTS
 python content/phonics/tools/synthesize_rule_audio.py --root content/phonics --fake
 python content/phonics/tools/synthesize_rule_audio.py --root content/phonics --force --only <rule_id>

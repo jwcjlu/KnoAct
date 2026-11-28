@@ -21,6 +21,7 @@ import '../features/knowledge_review/ui/knowledge_page.dart';
 import '../features/kp_srs/ui/kp_srs_page.dart';
 import '../features/lesson_audio/ui/listening_page.dart';
 import '../features/math_exercise/ui/math_page.dart';
+import '../features/phonics/ui/phonics_page.dart';
 import '../features/profile/ui/profile_page.dart';
 import '../features/reader/ui/pdf_reader_spike_page.dart';
 import '../features/reader/ui/reader_home_page.dart';
@@ -68,6 +69,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           path == '/reader/spike' ||
           path == '/bank-exercise' ||
           path == '/listening' ||
+          path == '/phonics' ||
           path == '/brain-games/sudoku' ||
           path == '/brain-games/schulte' ||
           path == '/brain-games/minesweeper') {
@@ -111,6 +113,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
+      GoRoute(path: '/phonics', builder: (_, _) => const PhonicsPage()),
       GoRoute(
         path: '/bank-exercise',
         builder: (_, state) {
