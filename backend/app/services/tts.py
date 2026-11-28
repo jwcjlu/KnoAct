@@ -195,6 +195,14 @@ def _public_tts_chunks(text: str) -> list[str]:
     return out[:40]
 
 
+def sniff_audio_media_type(data: bytes) -> str:
+    if data.startswith(b"RIFF"):
+        return "audio/wav"
+    if data.startswith(b"ID3") or data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio/mpeg"
+    return "audio/mpeg"
+
+
 def _looks_like_mp3(data: bytes, ctype: str = "") -> bool:
     if not data or len(data) < 200:
         return False

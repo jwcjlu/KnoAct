@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..core.deps import get_current_user
 from ..database import get_db
 from ..models import User
-from ..services.tts import get_tts, synthesize_public_mp3, word_audio
+from ..services.tts import get_tts, sniff_audio_media_type, synthesize_public_mp3, word_audio
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])
 
@@ -65,7 +65,7 @@ def synthesize(
     if configured:
         try:
             audio = tts.synthesize(text, voice=voice, speed=speed)
-            return Response(content=audio, media_type="audio/mpeg")
+            return Response(content=audio, media_type=sniff_audio_media_type(audio))
         except Exception as e:
             upstream_err = str(e)
     # 3) fake 或商用合成失败：公开朗读兜底（安卓无中文语音包 / 中转站欠费）

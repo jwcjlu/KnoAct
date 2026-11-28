@@ -185,3 +185,46 @@ def test_get_tts_uses_qwen_binding():
     assert t.model == "qwen3-tts-flash"
     assert t.voice == "Cherry"
     db.close()
+
+
+from app.services.tts import sniff_audio_media_type
+
+
+def test_sniff_audio_media_type():
+    assert sniff_audio_media_type(b"RIFF...." + b"\x00" * 20) == "audio/wav"
+    assert sniff_audio_media_type(b"ID3" + b"\x00" * 20) == "audio/mpeg"
+    assert sniff_audio_media_type(b"\xff\xfb" + b"\x00" * 20) == "audio/mpeg"
+    assert sniff_audio_media_type(b"????") == "audio/mpeg"
+
+
+def test_tts_endpoint_qwen_returns_wav_content_type(setup_db, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.database import SessionLocal
+    from app.routers import tts_router
+    from app.routers.tts_router import router
+    from app.services.tts import TTSProvider
+    from conftest import make_account, auth_headers
+
+    wav = _pcm_wav(b"\x00\x01" * 40)
+
+    class Stub(TTSProvider):
+        name = "qwen"
+
+        def synthesize(self, text, voice="", speed=1.0):
+            return wav
+
+    monkeypatch.setattr(tts_router, "get_tts", lambda db: Stub())
+    monkeypatch.setattr(tts_router, "word_audio", lambda text: None)
+
+    s = SessionLocal()
+    u = make_account(s, "u_tts_qwen_wav", "child")
+    s.commit()
+    h = auth_headers(u)
+    s.close()
+    app = FastAPI()
+    app.include_router(router)
+    resp = TestClient(app).get("/api/tts/synthesize?text=你好", headers=h)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("audio/wav")
+    assert resp.content[:4] == b"RIFF"
