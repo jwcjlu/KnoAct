@@ -101,6 +101,36 @@ def test_progress_rows_are_independent(setup_db, db):
     assert {r.document_id for r in rows} == {book1.id, book2.id}
 
 
+def test_adjust_survives_legacy_subject_unique(setup_db, db):
+    """生产库若仍留着 uq_progress_user_subject：换另一本同科教材 adjust 不得 500。"""
+    from sqlalchemy import text
+
+    parent, child, docs = _setup_two_books(db)
+    book1, book2 = docs
+    l1 = db.query(Lesson).filter_by(document_id=book1.id).order_by(Lesson.id).first()
+    l2 = db.query(Lesson).filter_by(document_id=book2.id).order_by(Lesson.id).all()[1]
+    c = _client()
+    assert c.post("/api/progress/adjust", headers=_headers(parent), json={
+        "user_id": child.id, "lesson_id": l1.id, "document_id": book1.id,
+    }).status_code == 200
+
+    # 模拟未迁完的 MySQL：额外挂上旧的 (user_id, subject) 唯一约束
+    db.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_progress_user_subject "
+        "ON learning_progress (user_id, subject)"
+    ))
+    db.commit()
+
+    r = c.post("/api/progress/adjust", headers=_headers(parent), json={
+        "user_id": child.id, "lesson_id": l2.id, "document_id": book2.id,
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["document_id"] == book2.id
+    assert r.json()["current"] == 2
+    rows = db.query(LearningProgress).filter_by(user_id=child.id).all()
+    assert any(row.document_id == book2.id and row.current_lesson_id == l2.id for row in rows)
+
+
 def test_adjust_rejects_unknown_lesson(setup_db, db):
     parent, child, _docs = _setup_two_books(db)
     r = _client().post("/api/progress/adjust", headers=_headers(parent), json={

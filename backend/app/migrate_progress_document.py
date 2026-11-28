@@ -35,6 +35,18 @@ def _indexes(conn, table: str) -> set[str]:
         return set()
 
 
+def _mysql_index_names(conn, table: str) -> set[str]:
+    """information_schema 比 SQLAlchemy inspect 更稳：UNIQUE 约束一定在 STATISTICS 里。"""
+    try:
+        rows = conn.execute(text(
+            "SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t"
+        ), {"t": table})
+        return {r[0] for r in rows if r[0]}
+    except Exception:
+        return set()
+
+
 def _ddl(conn, table: str = "learning_progress") -> str:
     """取建表 DDL。SQLite 上判断约束/列是否齐全靠它。"""
     try:
@@ -85,9 +97,12 @@ def _mysql_update(conn) -> None:
     if "document_id" not in cols:
         conn.execute(text(
             "ALTER TABLE learning_progress ADD COLUMN document_id INTEGER NULL"))
-    idx = _indexes(conn, "learning_progress")
+    # inspect + information_schema 并集，避免旧 UNIQUE 漏卸导致 adjust 500
+    idx = _indexes(conn, "learning_progress") | _mysql_index_names(conn, "learning_progress")
     if _OLD_UNIQUE in idx:
         conn.execute(text(f"ALTER TABLE learning_progress DROP INDEX {_OLD_UNIQUE}"))
+        _log.info("已删除旧唯一索引 %s", _OLD_UNIQUE)
+    idx = _indexes(conn, "learning_progress") | _mysql_index_names(conn, "learning_progress")
     if _NEW_UNIQUE not in idx:
         conn.execute(text(
             f"ALTER TABLE learning_progress "

@@ -4,9 +4,12 @@
 同时学两本语文教材时会互相覆盖。现在改为 (user_id, document_id)，
 这里把「取/建/推进」都收在一处，避免各处 filter_by 写错。
 """
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..models import LearningProgress, Lesson
+
+_LEGACY_SUBJECT_UNIQUE = "uq_progress_user_subject"
 
 
 def get_progress(db: Session, user_id: int, document_id: int | None,
@@ -31,16 +34,54 @@ def get_progress(db: Session, user_id: int, document_id: int | None,
     return q.first()
 
 
+def _legacy_subject_unique_present(db: Session) -> bool:
+    """生产 MySQL 若未卸掉旧唯一键，换教材 insert 会 1062；测到则改绑而非再插。"""
+    bind = db.get_bind()
+    name = bind.dialect.name
+    try:
+        if name == "mysql":
+            row = db.execute(text(
+                "SELECT 1 FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'learning_progress' "
+                "AND INDEX_NAME = :n LIMIT 1"
+            ), {"n": _LEGACY_SUBJECT_UNIQUE}).first()
+            return row is not None
+        if name == "sqlite":
+            row = db.execute(text(
+                "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :n"
+            ), {"n": _LEGACY_SUBJECT_UNIQUE}).first()
+            return row is not None
+    except Exception:
+        return False
+    return False
+
+
 def ensure_progress(db: Session, user_id: int, document_id: int | None,
                     subject: str) -> LearningProgress:
-    """取或新建（不 commit）。"""
+    """取或新建（不 commit）。
+
+    兼容生产库尚未卸掉的旧唯一键 ``uq_progress_user_subject``：同科已有
+    其它教材进度时改绑到当前 ``document_id``，避免 ``/api/progress/adjust`` 500。
+    新结构（仅 user+document 唯一）下仍为每本教材各建一行。
+    """
     row = get_progress(db, user_id, document_id, subject)
     if row is not None:
-        # 老记录首次被「认领」到某本书时，补上 document_id
+        # 老行首次被「认领」到某本书时，补上 document_id
         if document_id is not None and row.document_id is None:
             row.document_id = document_id
             row.subject = subject
         return row
+    if document_id is not None and _legacy_subject_unique_present(db):
+        sibling = (
+            db.query(LearningProgress)
+            .filter_by(user_id=user_id, subject=subject)
+            .first()
+        )
+        if sibling is not None:
+            sibling.document_id = document_id
+            sibling.subject = subject
+            return sibling
     row = LearningProgress(user_id=user_id, document_id=document_id,
                            subject=subject, current_lesson_id=None)
     db.add(row)
