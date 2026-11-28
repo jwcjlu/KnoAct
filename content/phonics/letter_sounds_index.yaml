@@ -1,0 +1,205 @@
+letters:
+  a:
+  - id: vowel.a.short
+    label: 短音（主音）
+    grapheme: a
+    ipa: /æ/
+    audio_path: audio/rule/vowel.a.short.wav
+    example: cat
+  - id: syllable_pattern.a_e.magic_e
+    label: magic e 长音
+    grapheme: a_e
+    ipa: /eɪ/
+    audio_path: audio/rule/syllable_pattern.a_e.magic_e.wav
+    example: make
+  - id: r_controlled.ar.primary
+    label: a + r
+    grapheme: ar
+    ipa: /ɑː/
+    audio_path: audio/rule/r_controlled.ar.primary.wav
+    example: car
+  - id: vowel_team.ai.primary
+    label: 组合 ai
+    grapheme: ai
+    ipa: /eɪ/
+    audio_path: audio/rule/vowel_team.ai.primary.wav
+    example: rain
+  - id: vowel_team.ay.primary
+    label: 组合 ay
+    grapheme: ay
+    ipa: /eɪ/
+    audio_path: audio/rule/vowel_team.ay.primary.wav
+    example: day
+  - id: vowel_team.aw.primary
+    label: 组合 aw
+    grapheme: aw
+    ipa: /ɔː/
+    audio_path: audio/rule/vowel_team.aw.primary.wav
+    example: saw
+  - id: vowel_team.au.primary
+    label: 组合 au
+    grapheme: au
+    ipa: /ɔː/
+    audio_path: audio/rule/vowel_team.au.primary.wav
+    example: autumn
+  e:
+  - id: vowel.e.short
+    label: 短音（主音）
+    grapheme: e
+    ipa: /e/
+    audio_path: audio/rule/vowel.e.short.wav
+    example: bed
+  - id: syllable_pattern.e_e.magic_e
+    label: magic e 长音
+    grapheme: e_e
+    ipa: /iː/
+    audio_path: audio/rule/syllable_pattern.e_e.magic_e.wav
+    example: these
+  - id: r_controlled.er.primary
+    label: e + r
+    grapheme: er
+    ipa: /ɜː/
+    audio_path: audio/rule/r_controlled.er.primary.wav
+    example: her
+  - id: vowel_team.ee.primary
+    label: 组合 ee
+    grapheme: ee
+    ipa: /iː/
+    audio_path: audio/rule/vowel_team.ee.primary.wav
+    example: see
+  - id: vowel_team.ea.primary
+    label: 组合 ea
+    grapheme: ea
+    ipa: /iː/
+    audio_path: audio/rule/vowel_team.ea.primary.wav
+    example: eat
+  - id: vowel_team.ew.primary
+    label: 组合 ew
+    grapheme: ew
+    ipa: /uː/
+    audio_path: audio/rule/vowel_team.ew.primary.wav
+    example: new
+  i:
+  - id: vowel.i.short
+    label: 短音（主音）
+    grapheme: i
+    ipa: /ɪ/
+    audio_path: audio/rule/vowel.i.short.wav
+    example: sit
+  - id: syllable_pattern.i_e.magic_e
+    label: magic e 长音
+    grapheme: i_e
+    ipa: /aɪ/
+    audio_path: audio/rule/syllable_pattern.i_e.magic_e.wav
+    example: bike
+  - id: r_controlled.ir.primary
+    label: i + r
+    grapheme: ir
+    ipa: /ɜː/
+    audio_path: audio/rule/r_controlled.ir.primary.wav
+    example: bird
+  - id: vowel_team.ie.primary
+    label: 组合 ie
+    grapheme: ie
+    ipa: /aɪ/
+    audio_path: audio/rule/vowel_team.ie.primary.wav
+    example: pie
+  - id: vowel_team.igh.primary
+    label: 组合 igh
+    grapheme: igh
+    ipa: /aɪ/
+    audio_path: audio/rule/vowel_team.igh.primary.wav
+    example: high
+  o:
+  - id: vowel.o.short
+    label: 短音（主音）
+    grapheme: o
+    ipa: /ɒ/
+    audio_path: audio/rule/vowel.o.short.wav
+    example: dog
+  - id: syllable_pattern.o_e.magic_e
+    label: magic e 长音
+    grapheme: o_e
+    ipa: /oʊ/
+    audio_path: audio/rule/syllable_pattern.o_e.magic_e.wav
+    example: home
+  - id: r_controlled.or.primary
+    label: o + r
+    grapheme: or
+    ipa: /ɔː/
+    audio_path: audio/rule/r_controlled.or.primary.wav
+    example: for
+  - id: r_controlled.ore.primary
+    label: 组合 ore
+    grapheme: ore
+    ipa: /ɔː/
+    audio_path: audio/rule/r_controlled.ore.primary.wav
+    example: more
+  - id: vowel_team.oa.primary
+    label: 组合 oa
+    grapheme: oa
+    ipa: /oʊ/
+    audio_path: audio/rule/vowel_team.oa.primary.wav
+    example: boat
+  - id: vowel_team.oo.primary
+    label: 组合 oo
+    grapheme: oo
+    ipa: /uː/
+    audio_path: audio/rule/vowel_team.oo.primary.wav
+    example: moon
+  - id: vowel_team.oi.primary
+    label: 组合 oi
+    grapheme: oi
+    ipa: /ɔɪ/
+    audio_path: audio/rule/vowel_team.oi.primary.wav
+    example: oil
+  - id: vowel_team.oy.primary
+    label: 组合 oy
+    grapheme: oy
+    ipa: /ɔɪ/
+    audio_path: audio/rule/vowel_team.oy.primary.wav
+    example: boy
+  - id: vowel_team.ou.primary
+    label: 组合 ou
+    grapheme: ou
+    ipa: /aʊ/
+    audio_path: audio/rule/vowel_team.ou.primary.wav
+    example: out
+  - id: vowel_team.ow.primary
+    label: 组合 ow
+    grapheme: ow
+    ipa: /aʊ/
+    audio_path: audio/rule/vowel_team.ow.primary.wav
+    example: cow
+  u:
+  - id: vowel.u.short
+    label: 短音（主音）
+    grapheme: u
+    ipa: /ʌ/
+    audio_path: audio/rule/vowel.u.short.wav
+    example: cup
+  - id: syllable_pattern.u_e.magic_e
+    label: magic e 长音
+    grapheme: u_e
+    ipa: /uː/
+    audio_path: audio/rule/syllable_pattern.u_e.magic_e.wav
+    example: cute
+  - id: r_controlled.ur.primary
+    label: u + r
+    grapheme: ur
+    ipa: /ɜː/
+    audio_path: audio/rule/r_controlled.ur.primary.wav
+    example: turn
+  - id: vowel_team.ue.primary
+    label: 组合 ue
+    grapheme: ue
+    ipa: /uː/
+    audio_path: audio/rule/vowel_team.ue.primary.wav
+    example: blue
+  y:
+  - id: vowel.y.short
+    label: 作元音（主音，如 happy）
+    grapheme: y
+    ipa: /ɪ/
+    audio_path: audio/rule/vowel.y.short.wav
+    example: gym

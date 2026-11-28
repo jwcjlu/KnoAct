@@ -9,6 +9,7 @@
 | `rules.yaml` | 全部 GPC 条目（字形、IPA、`path_order`、例词、音频路径与 `source`） |
 | `path.yaml` | 阶段 1–7 的推荐学习顺序（`path_order_min` / `path_order_max`） |
 | `handbook.md` | 由工具生成的家长可读手册（**勿手改**，改 `rules.yaml` 后重生成） |
+| `letter_sounds_index.md` / `.yaml` | 字母 a/e/i/o/u/y **多种读法总览**（查阅用，不改学习路径） |
 | `audio_manifest.yaml` | 规则音 / 例词音的期望路径与 `exists` 状态 |
 | `audio/rule/` | 每条规则的示范音（优先外部音源；缺省再 TTS） |
 | `audio/word/` | 例词音（TTS 或教材导出，**默认不入库**） |
@@ -54,6 +55,12 @@ python content/phonics/tools/generate_manifest.py \
 
 # 字母主音：Open Letter Sounds（CC0）
 python content/phonics/tools/import_openlettersounds.py --root content/phonics
+
+# 字母多种读法总览
+python content/phonics/tools/generate_letter_index.py
+
+# 字母多种读法总览（查阅索引）
+python content/phonics/tools/generate_letter_index.py
 
 # digraph / 元音组合等：vocamax IPA（CC BY）
 python content/phonics/tools/import_vocamax_ipa.py --root content/phonics
