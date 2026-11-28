@@ -132,3 +132,56 @@ def test_synthesize_posts_and_downloads(monkeypatch):
     out = mod.synthesize_qwen(text="你好", api_key="sk-test", voice="Cherry")
     assert out == wav
     assert calls["post"] == 1 and calls["get"] == 1
+
+
+from app.database import SessionLocal
+from app.models import (
+    ChildConfig,
+    ModelConfig,
+    ModelConnection,
+    ModelProfile,
+    RoleBinding,
+    User,
+)
+from app.services.tts import get_tts, QwenTTS
+
+
+def _clear_tts_config(db):
+    for m in (RoleBinding, ModelProfile, ModelConnection, ModelConfig, ChildConfig, User):
+        db.query(m).delete()
+    db.commit()
+
+
+def test_qwen_tts_requires_key():
+    p = QwenTTS(api_key="")
+    try:
+        p.synthesize("测")
+        assert False
+    except RuntimeError:
+        pass
+
+
+def test_get_tts_uses_qwen_binding():
+    db = SessionLocal()
+    _clear_tts_config(db)
+    conn = ModelConnection(provider="qwen", name="qw", api_key="sk-qwen")
+    db.add(conn)
+    db.flush()
+    prof = ModelProfile(
+        role="tts",
+        connection_id=conn.id,
+        model="qwen3-tts-flash",
+        options='{"voice":"Cherry"}',
+    )
+    db.add(prof)
+    db.flush()
+    db.add(RoleBinding(role="tts", profile_id=prof.id))
+    db.commit()
+
+    t = get_tts(db)
+    assert isinstance(t, QwenTTS)
+    assert t.name == "qwen"
+    assert t.api_key == "sk-qwen"
+    assert t.model == "qwen3-tts-flash"
+    assert t.voice == "Cherry"
+    db.close()

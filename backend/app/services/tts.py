@@ -110,6 +110,27 @@ class OpenAITTS(TTSProvider):
         return resp.content
 
 
+class QwenTTS(TTSProvider):
+    name = "qwen"
+
+    def __init__(self, voice: str = "", api_key: str = "", base_url: str = "", model: str = ""):
+        super().__init__(voice=voice, api_key=api_key)
+        self.base_url = base_url
+        self.model = model or "qwen3-tts-flash"
+
+    def synthesize(self, text, voice="", speed=1.0):
+        from .qwen_tts import synthesize_qwen
+
+        return synthesize_qwen(
+            text=text,
+            api_key=self.api_key,
+            voice=voice or self.voice or "Cherry",
+            model=self.model,
+            base_url=self.base_url,
+            speed=speed,
+        )
+
+
 class FakeTTS(TTSProvider):
     """本地兜底：返回占位字节。前端实际播放走浏览器 speechSynthesis。"""
     name = "fake"
@@ -373,7 +394,13 @@ def word_audio(text: str, *, allow_public: bool = True) -> bytes | None:
     return data or None
 
 
-PROVIDERS = {"minimax": MiniMaxTTS, "xunfei": XunfeiTTS, "openai": OpenAITTS, "fake": FakeTTS}
+PROVIDERS = {
+    "minimax": MiniMaxTTS,
+    "xunfei": XunfeiTTS,
+    "openai": OpenAITTS,
+    "qwen": QwenTTS,
+    "fake": FakeTTS,
+}
 
 
 def _xunfei_credentials(r) -> tuple[str, str]:
@@ -394,4 +421,11 @@ def get_tts(db: Session, child_id: int | None = None) -> TTSProvider:
     if cls is XunfeiTTS:
         app_id, api_secret = _xunfei_credentials(r)
         return cls(voice=voice, api_key=r.api_key, app_id=app_id, api_secret=api_secret)
+    if cls is QwenTTS:
+        return cls(
+            voice=voice,
+            api_key=r.api_key,
+            base_url=r.base_url or "",
+            model=r.model or "qwen3-tts-flash",
+        )
     return cls(voice=voice, api_key=r.api_key)
