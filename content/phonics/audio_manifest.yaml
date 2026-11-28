@@ -1,0 +1,1387 @@
+rules:
+- id: vowel.a.short
+  expected_path: audio/rule/vowel.a.short.wav
+  exists: false
+  source: tts
+  examples:
+  - word: cat
+    expected_path: audio/word/cat.wav
+    exists: false
+    source: tts
+  - word: map
+    expected_path: audio/word/map.wav
+    exists: false
+    source: tts
+  - word: hat
+    expected_path: audio/word/hat.wav
+    exists: false
+    source: tts
+  - word: fantastic
+    expected_path: audio/word/fantastic.wav
+    exists: false
+    source: tts
+- id: consonant.s.primary
+  expected_path: audio/rule/consonant.s.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: sun
+    expected_path: audio/word/sun.wav
+    exists: false
+    source: tts
+  - word: sit
+    expected_path: audio/word/sit.wav
+    exists: false
+    source: tts
+  - word: sad
+    expected_path: audio/word/sad.wav
+    exists: false
+    source: tts
+  - word: sunshine
+    expected_path: audio/word/sunshine.wav
+    exists: false
+    source: tts
+- id: consonant.t.primary
+  expected_path: audio/rule/consonant.t.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: top
+    expected_path: audio/word/top.wav
+    exists: false
+    source: tts
+  - word: ten
+    expected_path: audio/word/ten.wav
+    exists: false
+    source: tts
+  - word: tap
+    expected_path: audio/word/tap.wav
+    exists: false
+    source: tts
+  - word: tomorrow
+    expected_path: audio/word/tomorrow.wav
+    exists: false
+    source: tts
+- id: consonant.p.primary
+  expected_path: audio/rule/consonant.p.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: pen
+    expected_path: audio/word/pen.wav
+    exists: false
+    source: tts
+  - word: pig
+    expected_path: audio/word/pig.wav
+    exists: false
+    source: tts
+  - word: pot
+    expected_path: audio/word/pot.wav
+    exists: false
+    source: tts
+  - word: pencil
+    expected_path: audio/word/pencil.wav
+    exists: false
+    source: tts
+- id: vowel.i.short
+  expected_path: audio/rule/vowel.i.short.wav
+  exists: false
+  source: tts
+  examples:
+  - word: sit
+    expected_path: audio/word/sit.wav
+    exists: false
+    source: tts
+  - word: pig
+    expected_path: audio/word/pig.wav
+    exists: false
+    source: tts
+  - word: big
+    expected_path: audio/word/big.wav
+    exists: false
+    source: tts
+  - word: window
+    expected_path: audio/word/window.wav
+    exists: false
+    source: tts
+- id: consonant.n.primary
+  expected_path: audio/rule/consonant.n.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: net
+    expected_path: audio/word/net.wav
+    exists: false
+    source: tts
+  - word: nut
+    expected_path: audio/word/nut.wav
+    exists: false
+    source: tts
+  - word: nap
+    expected_path: audio/word/nap.wav
+    exists: false
+    source: tts
+  - word: number
+    expected_path: audio/word/number.wav
+    exists: false
+    source: tts
+- id: consonant.m.primary
+  expected_path: audio/rule/consonant.m.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: mat
+    expected_path: audio/word/mat.wav
+    exists: false
+    source: tts
+  - word: man
+    expected_path: audio/word/man.wav
+    exists: false
+    source: tts
+  - word: mug
+    expected_path: audio/word/mug.wav
+    exists: false
+    source: tts
+  - word: monkey
+    expected_path: audio/word/monkey.wav
+    exists: false
+    source: tts
+- id: consonant.d.primary
+  expected_path: audio/rule/consonant.d.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: dog
+    expected_path: audio/word/dog.wav
+    exists: false
+    source: tts
+  - word: dad
+    expected_path: audio/word/dad.wav
+    exists: false
+    source: tts
+  - word: dig
+    expected_path: audio/word/dig.wav
+    exists: false
+    source: tts
+  - word: doctor
+    expected_path: audio/word/doctor.wav
+    exists: false
+    source: tts
+- id: vowel.o.short
+  expected_path: audio/rule/vowel.o.short.wav
+  exists: false
+  source: tts
+  examples:
+  - word: dog
+    expected_path: audio/word/dog.wav
+    exists: false
+    source: tts
+  - word: hot
+    expected_path: audio/word/hot.wav
+    exists: false
+    source: tts
+  - word: top
+    expected_path: audio/word/top.wav
+    exists: false
+    source: tts
+  - word: hospital
+    expected_path: audio/word/hospital.wav
+    exists: false
+    source: tts
+- id: consonant.g.primary
+  expected_path: audio/rule/consonant.g.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: go
+    expected_path: audio/word/go.wav
+    exists: false
+    source: tts
+  - word: pig
+    expected_path: audio/word/pig.wav
+    exists: false
+    source: tts
+  - word: bag
+    expected_path: audio/word/bag.wav
+    exists: false
+    source: tts
+  - word: garden
+    expected_path: audio/word/garden.wav
+    exists: false
+    source: tts
+- id: consonant.c.primary
+  expected_path: audio/rule/consonant.c.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: cat
+    expected_path: audio/word/cat.wav
+    exists: false
+    source: tts
+  - word: cup
+    expected_path: audio/word/cup.wav
+    exists: false
+    source: tts
+  - word: cap
+    expected_path: audio/word/cap.wav
+    exists: false
+    source: tts
+  - word: computer
+    expected_path: audio/word/computer.wav
+    exists: false
+    source: tts
+- id: vowel.u.short
+  expected_path: audio/rule/vowel.u.short.wav
+  exists: false
+  source: tts
+  examples:
+  - word: cup
+    expected_path: audio/word/cup.wav
+    exists: false
+    source: tts
+  - word: bus
+    expected_path: audio/word/bus.wav
+    exists: false
+    source: tts
+  - word: sun
+    expected_path: audio/word/sun.wav
+    exists: false
+    source: tts
+  - word: umbrella
+    expected_path: audio/word/umbrella.wav
+    exists: false
+    source: tts
+- id: consonant.b.primary
+  expected_path: audio/rule/consonant.b.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: bat
+    expected_path: audio/word/bat.wav
+    exists: false
+    source: tts
+  - word: bed
+    expected_path: audio/word/bed.wav
+    exists: false
+    source: tts
+  - word: bus
+    expected_path: audio/word/bus.wav
+    exists: false
+    source: tts
+  - word: basket
+    expected_path: audio/word/basket.wav
+    exists: false
+    source: tts
+- id: vowel.e.short
+  expected_path: audio/rule/vowel.e.short.wav
+  exists: false
+  source: tts
+  examples:
+  - word: bed
+    expected_path: audio/word/bed.wav
+    exists: false
+    source: tts
+  - word: pen
+    expected_path: audio/word/pen.wav
+    exists: false
+    source: tts
+  - word: red
+    expected_path: audio/word/red.wav
+    exists: false
+    source: tts
+  - word: elephant
+    expected_path: audio/word/elephant.wav
+    exists: false
+    source: tts
+- id: consonant.h.primary
+  expected_path: audio/rule/consonant.h.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: hat
+    expected_path: audio/word/hat.wav
+    exists: false
+    source: tts
+  - word: hot
+    expected_path: audio/word/hot.wav
+    exists: false
+    source: tts
+  - word: hen
+    expected_path: audio/word/hen.wav
+    exists: false
+    source: tts
+  - word: holiday
+    expected_path: audio/word/holiday.wav
+    exists: false
+    source: tts
+- id: consonant.l.primary
+  expected_path: audio/rule/consonant.l.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: leg
+    expected_path: audio/word/leg.wav
+    exists: false
+    source: tts
+  - word: lip
+    expected_path: audio/word/lip.wav
+    exists: false
+    source: tts
+  - word: log
+    expected_path: audio/word/log.wav
+    exists: false
+    source: tts
+  - word: little
+    expected_path: audio/word/little.wav
+    exists: false
+    source: tts
+- id: consonant.r.primary
+  expected_path: audio/rule/consonant.r.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: red
+    expected_path: audio/word/red.wav
+    exists: false
+    source: tts
+  - word: run
+    expected_path: audio/word/run.wav
+    exists: false
+    source: tts
+  - word: rat
+    expected_path: audio/word/rat.wav
+    exists: false
+    source: tts
+  - word: rabbit
+    expected_path: audio/word/rabbit.wav
+    exists: false
+    source: tts
+- id: consonant.f.primary
+  expected_path: audio/rule/consonant.f.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: fan
+    expected_path: audio/word/fan.wav
+    exists: false
+    source: tts
+  - word: fit
+    expected_path: audio/word/fit.wav
+    exists: false
+    source: tts
+  - word: fun
+    expected_path: audio/word/fun.wav
+    exists: false
+    source: tts
+  - word: family
+    expected_path: audio/word/family.wav
+    exists: false
+    source: tts
+- id: consonant.k.primary
+  expected_path: audio/rule/consonant.k.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: kit
+    expected_path: audio/word/kit.wav
+    exists: false
+    source: tts
+  - word: kid
+    expected_path: audio/word/kid.wav
+    exists: false
+    source: tts
+  - word: kick
+    expected_path: audio/word/kick.wav
+    exists: false
+    source: tts
+  - word: kitchen
+    expected_path: audio/word/kitchen.wav
+    exists: false
+    source: tts
+- id: consonant.j.primary
+  expected_path: audio/rule/consonant.j.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: jam
+    expected_path: audio/word/jam.wav
+    exists: false
+    source: tts
+  - word: jet
+    expected_path: audio/word/jet.wav
+    exists: false
+    source: tts
+  - word: jug
+    expected_path: audio/word/jug.wav
+    exists: false
+    source: tts
+  - word: jacket
+    expected_path: audio/word/jacket.wav
+    exists: false
+    source: tts
+- id: consonant.v.primary
+  expected_path: audio/rule/consonant.v.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: van
+    expected_path: audio/word/van.wav
+    exists: false
+    source: tts
+  - word: vet
+    expected_path: audio/word/vet.wav
+    exists: false
+    source: tts
+  - word: vest
+    expected_path: audio/word/vest.wav
+    exists: false
+    source: tts
+  - word: vegetable
+    expected_path: audio/word/vegetable.wav
+    exists: false
+    source: tts
+- id: consonant.w.primary
+  expected_path: audio/rule/consonant.w.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: web
+    expected_path: audio/word/web.wav
+    exists: false
+    source: tts
+  - word: win
+    expected_path: audio/word/win.wav
+    exists: false
+    source: tts
+  - word: wet
+    expected_path: audio/word/wet.wav
+    exists: false
+    source: tts
+  - word: window
+    expected_path: audio/word/window.wav
+    exists: false
+    source: tts
+- id: consonant.x.primary
+  expected_path: audio/rule/consonant.x.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: box
+    expected_path: audio/word/box.wav
+    exists: false
+    source: tts
+  - word: fox
+    expected_path: audio/word/fox.wav
+    exists: false
+    source: tts
+  - word: six
+    expected_path: audio/word/six.wav
+    exists: false
+    source: tts
+  - word: exercise
+    expected_path: audio/word/exercise.wav
+    exists: false
+    source: tts
+- id: consonant.z.primary
+  expected_path: audio/rule/consonant.z.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: zip
+    expected_path: audio/word/zip.wav
+    exists: false
+    source: tts
+  - word: zoo
+    expected_path: audio/word/zoo.wav
+    exists: false
+    source: tts
+  - word: zap
+    expected_path: audio/word/zap.wav
+    exists: false
+    source: tts
+  - word: puzzle
+    expected_path: audio/word/puzzle.wav
+    exists: false
+    source: tts
+- id: consonant.q.primary
+  expected_path: audio/rule/consonant.q.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: queen
+    expected_path: audio/word/queen.wav
+    exists: false
+    source: tts
+  - word: quick
+    expected_path: audio/word/quick.wav
+    exists: false
+    source: tts
+  - word: quiz
+    expected_path: audio/word/quiz.wav
+    exists: false
+    source: tts
+  - word: question
+    expected_path: audio/word/question.wav
+    exists: false
+    source: tts
+- id: vowel.y.short
+  expected_path: audio/rule/vowel.y.short.wav
+  exists: false
+  source: tts
+  examples:
+  - word: gym
+    expected_path: audio/word/gym.wav
+    exists: false
+    source: tts
+  - word: myth
+    expected_path: audio/word/myth.wav
+    exists: false
+    source: tts
+  - word: system
+    expected_path: audio/word/system.wav
+    exists: false
+    source: tts
+  - word: symbol
+    expected_path: audio/word/symbol.wav
+    exists: false
+    source: tts
+- id: consonant_digraph.sh.primary
+  expected_path: audio/rule/consonant_digraph.sh.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: ship
+    expected_path: audio/word/ship.wav
+    exists: false
+    source: tts
+  - word: fish
+    expected_path: audio/word/fish.wav
+    exists: false
+    source: tts
+  - word: shop
+    expected_path: audio/word/shop.wav
+    exists: false
+    source: tts
+  - word: shoulder
+    expected_path: audio/word/shoulder.wav
+    exists: false
+    source: tts
+- id: consonant_digraph.ch.primary
+  expected_path: audio/rule/consonant_digraph.ch.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: chip
+    expected_path: audio/word/chip.wav
+    exists: false
+    source: tts
+  - word: lunch
+    expected_path: audio/word/lunch.wav
+    exists: false
+    source: tts
+  - word: chin
+    expected_path: audio/word/chin.wav
+    exists: false
+    source: tts
+  - word: chicken
+    expected_path: audio/word/chicken.wav
+    exists: false
+    source: tts
+- id: consonant_digraph.th.primary
+  expected_path: audio/rule/consonant_digraph.th.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: thin
+    expected_path: audio/word/thin.wav
+    exists: false
+    source: tts
+  - word: bath
+    expected_path: audio/word/bath.wav
+    exists: false
+    source: tts
+  - word: think
+    expected_path: audio/word/think.wav
+    exists: false
+    source: tts
+  - word: birthday
+    expected_path: audio/word/birthday.wav
+    exists: false
+    source: tts
+- id: consonant_digraph.ck.primary
+  expected_path: audio/rule/consonant_digraph.ck.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: duck
+    expected_path: audio/word/duck.wav
+    exists: false
+    source: tts
+  - word: black
+    expected_path: audio/word/black.wav
+    exists: false
+    source: tts
+  - word: sock
+    expected_path: audio/word/sock.wav
+    exists: false
+    source: tts
+  - word: chicken
+    expected_path: audio/word/chicken.wav
+    exists: false
+    source: tts
+- id: consonant_digraph.ng.primary
+  expected_path: audio/rule/consonant_digraph.ng.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: ring
+    expected_path: audio/word/ring.wav
+    exists: false
+    source: tts
+  - word: king
+    expected_path: audio/word/king.wav
+    exists: false
+    source: tts
+  - word: song
+    expected_path: audio/word/song.wav
+    exists: false
+    source: tts
+  - word: morning
+    expected_path: audio/word/morning.wav
+    exists: false
+    source: tts
+- id: consonant_digraph.wh.primary
+  expected_path: audio/rule/consonant_digraph.wh.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: whale
+    expected_path: audio/word/whale.wav
+    exists: false
+    source: tts
+  - word: white
+    expected_path: audio/word/white.wav
+    exists: false
+    source: tts
+  - word: wheel
+    expected_path: audio/word/wheel.wav
+    exists: false
+    source: tts
+  - word: whistle
+    expected_path: audio/word/whistle.wav
+    exists: false
+    source: tts
+- id: consonant_digraph.ph.primary
+  expected_path: audio/rule/consonant_digraph.ph.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: phone
+    expected_path: audio/word/phone.wav
+    exists: false
+    source: tts
+  - word: photo
+    expected_path: audio/word/photo.wav
+    exists: false
+    source: tts
+  - word: dolphin
+    expected_path: audio/word/dolphin.wav
+    exists: false
+    source: tts
+  - word: elephant
+    expected_path: audio/word/elephant.wav
+    exists: false
+    source: tts
+- id: consonant_digraph.qu.primary
+  expected_path: audio/rule/consonant_digraph.qu.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: queen
+    expected_path: audio/word/queen.wav
+    exists: false
+    source: tts
+  - word: quick
+    expected_path: audio/word/quick.wav
+    exists: false
+    source: tts
+  - word: quiet
+    expected_path: audio/word/quiet.wav
+    exists: false
+    source: tts
+  - word: question
+    expected_path: audio/word/question.wav
+    exists: false
+    source: tts
+- id: vowel_team.ai.primary
+  expected_path: audio/rule/vowel_team.ai.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: rain
+    expected_path: audio/word/rain.wav
+    exists: false
+    source: tts
+  - word: train
+    expected_path: audio/word/train.wav
+    exists: false
+    source: tts
+  - word: mail
+    expected_path: audio/word/mail.wav
+    exists: false
+    source: tts
+  - word: afraid
+    expected_path: audio/word/afraid.wav
+    exists: false
+    source: tts
+- id: vowel_team.ay.primary
+  expected_path: audio/rule/vowel_team.ay.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: day
+    expected_path: audio/word/day.wav
+    exists: false
+    source: tts
+  - word: play
+    expected_path: audio/word/play.wav
+    exists: false
+    source: tts
+  - word: say
+    expected_path: audio/word/say.wav
+    exists: false
+    source: tts
+  - word: holiday
+    expected_path: audio/word/holiday.wav
+    exists: false
+    source: tts
+- id: vowel_team.ee.primary
+  expected_path: audio/rule/vowel_team.ee.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: see
+    expected_path: audio/word/see.wav
+    exists: false
+    source: tts
+  - word: tree
+    expected_path: audio/word/tree.wav
+    exists: false
+    source: tts
+  - word: feet
+    expected_path: audio/word/feet.wav
+    exists: false
+    source: tts
+  - word: sleepy
+    expected_path: audio/word/sleepy.wav
+    exists: false
+    source: tts
+- id: vowel_team.ea.primary
+  expected_path: audio/rule/vowel_team.ea.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: eat
+    expected_path: audio/word/eat.wav
+    exists: false
+    source: tts
+  - word: sea
+    expected_path: audio/word/sea.wav
+    exists: false
+    source: tts
+  - word: read
+    expected_path: audio/word/read.wav
+    exists: false
+    source: tts
+  - word: teacher
+    expected_path: audio/word/teacher.wav
+    exists: false
+    source: tts
+- id: vowel_team.oa.primary
+  expected_path: audio/rule/vowel_team.oa.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: boat
+    expected_path: audio/word/boat.wav
+    exists: false
+    source: tts
+  - word: coat
+    expected_path: audio/word/coat.wav
+    exists: false
+    source: tts
+  - word: road
+    expected_path: audio/word/road.wav
+    exists: false
+    source: tts
+  - word: goalkeeper
+    expected_path: audio/word/goalkeeper.wav
+    exists: false
+    source: tts
+- id: vowel_team.ow.primary
+  expected_path: audio/rule/vowel_team.ow.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: cow
+    expected_path: audio/word/cow.wav
+    exists: false
+    source: tts
+  - word: now
+    expected_path: audio/word/now.wav
+    exists: false
+    source: tts
+  - word: down
+    expected_path: audio/word/down.wav
+    exists: false
+    source: tts
+  - word: flower
+    expected_path: audio/word/flower.wav
+    exists: false
+    source: tts
+- id: vowel_team.oo.primary
+  expected_path: audio/rule/vowel_team.oo.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: moon
+    expected_path: audio/word/moon.wav
+    exists: false
+    source: tts
+  - word: food
+    expected_path: audio/word/food.wav
+    exists: false
+    source: tts
+  - word: zoo
+    expected_path: audio/word/zoo.wav
+    exists: false
+    source: tts
+  - word: afternoon
+    expected_path: audio/word/afternoon.wav
+    exists: false
+    source: tts
+- id: vowel_team.oi.primary
+  expected_path: audio/rule/vowel_team.oi.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: oil
+    expected_path: audio/word/oil.wav
+    exists: false
+    source: tts
+  - word: coin
+    expected_path: audio/word/coin.wav
+    exists: false
+    source: tts
+  - word: boil
+    expected_path: audio/word/boil.wav
+    exists: false
+    source: tts
+  - word: noisy
+    expected_path: audio/word/noisy.wav
+    exists: false
+    source: tts
+- id: vowel_team.oy.primary
+  expected_path: audio/rule/vowel_team.oy.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: boy
+    expected_path: audio/word/boy.wav
+    exists: false
+    source: tts
+  - word: toy
+    expected_path: audio/word/toy.wav
+    exists: false
+    source: tts
+  - word: joy
+    expected_path: audio/word/joy.wav
+    exists: false
+    source: tts
+  - word: enjoy
+    expected_path: audio/word/enjoy.wav
+    exists: false
+    source: tts
+- id: vowel_team.ou.primary
+  expected_path: audio/rule/vowel_team.ou.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: out
+    expected_path: audio/word/out.wav
+    exists: false
+    source: tts
+  - word: house
+    expected_path: audio/word/house.wav
+    exists: false
+    source: tts
+  - word: cloud
+    expected_path: audio/word/cloud.wav
+    exists: false
+    source: tts
+  - word: mountain
+    expected_path: audio/word/mountain.wav
+    exists: false
+    source: tts
+- id: vowel_team.aw.primary
+  expected_path: audio/rule/vowel_team.aw.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: saw
+    expected_path: audio/word/saw.wav
+    exists: false
+    source: tts
+  - word: draw
+    expected_path: audio/word/draw.wav
+    exists: false
+    source: tts
+  - word: paw
+    expected_path: audio/word/paw.wav
+    exists: false
+    source: tts
+  - word: strawberry
+    expected_path: audio/word/strawberry.wav
+    exists: false
+    source: tts
+- id: vowel_team.au.primary
+  expected_path: audio/rule/vowel_team.au.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: autumn
+    expected_path: audio/word/autumn.wav
+    exists: false
+    source: tts
+  - word: August
+    expected_path: audio/word/august.wav
+    exists: false
+    source: tts
+  - word: sauce
+    expected_path: audio/word/sauce.wav
+    exists: false
+    source: tts
+  - word: daughter
+    expected_path: audio/word/daughter.wav
+    exists: false
+    source: tts
+- id: vowel_team.ew.primary
+  expected_path: audio/rule/vowel_team.ew.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: new
+    expected_path: audio/word/new.wav
+    exists: false
+    source: tts
+  - word: few
+    expected_path: audio/word/few.wav
+    exists: false
+    source: tts
+  - word: grew
+    expected_path: audio/word/grew.wav
+    exists: false
+    source: tts
+  - word: newspaper
+    expected_path: audio/word/newspaper.wav
+    exists: false
+    source: tts
+- id: vowel_team.ie.primary
+  expected_path: audio/rule/vowel_team.ie.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: pie
+    expected_path: audio/word/pie.wav
+    exists: false
+    source: tts
+  - word: tie
+    expected_path: audio/word/tie.wav
+    exists: false
+    source: tts
+  - word: lie
+    expected_path: audio/word/lie.wav
+    exists: false
+    source: tts
+  - word: untie
+    expected_path: audio/word/untie.wav
+    exists: false
+    source: tts
+- id: vowel_team.igh.primary
+  expected_path: audio/rule/vowel_team.igh.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: high
+    expected_path: audio/word/high.wav
+    exists: false
+    source: tts
+  - word: night
+    expected_path: audio/word/night.wav
+    exists: false
+    source: tts
+  - word: light
+    expected_path: audio/word/light.wav
+    exists: false
+    source: tts
+  - word: tonight
+    expected_path: audio/word/tonight.wav
+    exists: false
+    source: tts
+- id: vowel_team.ue.primary
+  expected_path: audio/rule/vowel_team.ue.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: blue
+    expected_path: audio/word/blue.wav
+    exists: false
+    source: tts
+  - word: 'true'
+    expected_path: audio/word/true.wav
+    exists: false
+    source: tts
+  - word: clue
+    expected_path: audio/word/clue.wav
+    exists: false
+    source: tts
+  - word: rescue
+    expected_path: audio/word/rescue.wav
+    exists: false
+    source: tts
+- id: r_controlled.ar.primary
+  expected_path: audio/rule/r_controlled.ar.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: car
+    expected_path: audio/word/car.wav
+    exists: false
+    source: tts
+  - word: star
+    expected_path: audio/word/star.wav
+    exists: false
+    source: tts
+  - word: farm
+    expected_path: audio/word/farm.wav
+    exists: false
+    source: tts
+  - word: garden
+    expected_path: audio/word/garden.wav
+    exists: false
+    source: tts
+- id: r_controlled.or.primary
+  expected_path: audio/rule/r_controlled.or.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: for
+    expected_path: audio/word/for.wav
+    exists: false
+    source: tts
+  - word: corn
+    expected_path: audio/word/corn.wav
+    exists: false
+    source: tts
+  - word: fork
+    expected_path: audio/word/fork.wav
+    exists: false
+    source: tts
+  - word: morning
+    expected_path: audio/word/morning.wav
+    exists: false
+    source: tts
+- id: r_controlled.er.primary
+  expected_path: audio/rule/r_controlled.er.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: her
+    expected_path: audio/word/her.wav
+    exists: false
+    source: tts
+  - word: fern
+    expected_path: audio/word/fern.wav
+    exists: false
+    source: tts
+  - word: term
+    expected_path: audio/word/term.wav
+    exists: false
+    source: tts
+  - word: teacher
+    expected_path: audio/word/teacher.wav
+    exists: false
+    source: tts
+- id: r_controlled.ir.primary
+  expected_path: audio/rule/r_controlled.ir.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: bird
+    expected_path: audio/word/bird.wav
+    exists: false
+    source: tts
+  - word: girl
+    expected_path: audio/word/girl.wav
+    exists: false
+    source: tts
+  - word: shirt
+    expected_path: audio/word/shirt.wav
+    exists: false
+    source: tts
+  - word: birthday
+    expected_path: audio/word/birthday.wav
+    exists: false
+    source: tts
+- id: r_controlled.ur.primary
+  expected_path: audio/rule/r_controlled.ur.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: turn
+    expected_path: audio/word/turn.wav
+    exists: false
+    source: tts
+  - word: burn
+    expected_path: audio/word/burn.wav
+    exists: false
+    source: tts
+  - word: nurse
+    expected_path: audio/word/nurse.wav
+    exists: false
+    source: tts
+  - word: Saturday
+    expected_path: audio/word/saturday.wav
+    exists: false
+    source: tts
+- id: r_controlled.ore.primary
+  expected_path: audio/rule/r_controlled.ore.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: more
+    expected_path: audio/word/more.wav
+    exists: false
+    source: tts
+  - word: store
+    expected_path: audio/word/store.wav
+    exists: false
+    source: tts
+  - word: shore
+    expected_path: audio/word/shore.wav
+    exists: false
+    source: tts
+  - word: tomorrow
+    expected_path: audio/word/tomorrow.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.a_e.magic_e
+  expected_path: audio/rule/syllable_pattern.a_e.magic_e.wav
+  exists: false
+  source: tts
+  examples:
+  - word: make
+    expected_path: audio/word/make.wav
+    exists: false
+    source: tts
+  - word: cake
+    expected_path: audio/word/cake.wav
+    exists: false
+    source: tts
+  - word: name
+    expected_path: audio/word/name.wav
+    exists: false
+    source: tts
+  - word: snake
+    expected_path: audio/word/snake.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.e_e.magic_e
+  expected_path: audio/rule/syllable_pattern.e_e.magic_e.wav
+  exists: false
+  source: tts
+  examples:
+  - word: these
+    expected_path: audio/word/these.wav
+    exists: false
+    source: tts
+  - word: Pete
+    expected_path: audio/word/pete.wav
+    exists: false
+    source: tts
+  - word: theme
+    expected_path: audio/word/theme.wav
+    exists: false
+    source: tts
+  - word: complete
+    expected_path: audio/word/complete.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.i_e.magic_e
+  expected_path: audio/rule/syllable_pattern.i_e.magic_e.wav
+  exists: false
+  source: tts
+  examples:
+  - word: bike
+    expected_path: audio/word/bike.wav
+    exists: false
+    source: tts
+  - word: time
+    expected_path: audio/word/time.wav
+    exists: false
+    source: tts
+  - word: like
+    expected_path: audio/word/like.wav
+    exists: false
+    source: tts
+  - word: smile
+    expected_path: audio/word/smile.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.o_e.magic_e
+  expected_path: audio/rule/syllable_pattern.o_e.magic_e.wav
+  exists: false
+  source: tts
+  examples:
+  - word: home
+    expected_path: audio/word/home.wav
+    exists: false
+    source: tts
+  - word: nose
+    expected_path: audio/word/nose.wav
+    exists: false
+    source: tts
+  - word: bone
+    expected_path: audio/word/bone.wav
+    exists: false
+    source: tts
+  - word: stone
+    expected_path: audio/word/stone.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.u_e.magic_e
+  expected_path: audio/rule/syllable_pattern.u_e.magic_e.wav
+  exists: false
+  source: tts
+  examples:
+  - word: cute
+    expected_path: audio/word/cute.wav
+    exists: false
+    source: tts
+  - word: flute
+    expected_path: audio/word/flute.wav
+    exists: false
+    source: tts
+  - word: tune
+    expected_path: audio/word/tune.wav
+    exists: false
+    source: tts
+  - word: computer
+    expected_path: audio/word/computer.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.closed_syllable.awareness
+  expected_path: audio/rule/syllable_pattern.closed_syllable.awareness.wav
+  exists: false
+  source: tts
+  examples:
+  - word: cat
+    expected_path: audio/word/cat.wav
+    exists: false
+    source: tts
+  - word: sit
+    expected_path: audio/word/sit.wav
+    exists: false
+    source: tts
+  - word: hot
+    expected_path: audio/word/hot.wav
+    exists: false
+    source: tts
+  - word: picnic
+    expected_path: audio/word/picnic.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.open_syllable.awareness
+  expected_path: audio/rule/syllable_pattern.open_syllable.awareness.wav
+  exists: false
+  source: tts
+  examples:
+  - word: go
+    expected_path: audio/word/go.wav
+    exists: false
+    source: tts
+  - word: he
+    expected_path: audio/word/he.wav
+    exists: false
+    source: tts
+  - word: me
+    expected_path: audio/word/me.wav
+    exists: false
+    source: tts
+  - word: tiger
+    expected_path: audio/word/tiger.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.tion.primary
+  expected_path: audio/rule/syllable_pattern.tion.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: station
+    expected_path: audio/word/station.wav
+    exists: false
+    source: tts
+  - word: action
+    expected_path: audio/word/action.wav
+    exists: false
+    source: tts
+  - word: nation
+    expected_path: audio/word/nation.wav
+    exists: false
+    source: tts
+  - word: education
+    expected_path: audio/word/education.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.ture.primary
+  expected_path: audio/rule/syllable_pattern.ture.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: picture
+    expected_path: audio/word/picture.wav
+    exists: false
+    source: tts
+  - word: nature
+    expected_path: audio/word/nature.wav
+    exists: false
+    source: tts
+  - word: future
+    expected_path: audio/word/future.wav
+    exists: false
+    source: tts
+  - word: adventure
+    expected_path: audio/word/adventure.wav
+    exists: false
+    source: tts
+- id: syllable_pattern.le.primary
+  expected_path: audio/rule/syllable_pattern.le.primary.wav
+  exists: false
+  source: tts
+  examples:
+  - word: table
+    expected_path: audio/word/table.wav
+    exists: false
+    source: tts
+  - word: apple
+    expected_path: audio/word/apple.wav
+    exists: false
+    source: tts
+  - word: little
+    expected_path: audio/word/little.wav
+    exists: false
+    source: tts
+  - word: bicycle
+    expected_path: audio/word/bicycle.wav
+    exists: false
+    source: tts
