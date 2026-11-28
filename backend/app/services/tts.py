@@ -402,6 +402,55 @@ def word_audio(text: str, *, allow_public: bool = True) -> bytes | None:
     return data or None
 
 
+# ===== 商业合成 TTS 磁盘缓存 =====
+#
+# 与真人听写缓存（_CACHE_DIR）分离：键含 provider/model/voice/speed/text。
+
+_SYNTH_CACHE_DIR = "uploads/tts_synth_cache"
+
+
+def _synth_cache_key(provider: str, model: str, voice: str, speed: float, text: str) -> str:
+    import hashlib
+
+    raw = f"{provider}|{model}|{voice}|{speed:.2f}|{text}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def _synth_ext_for_bytes(data: bytes) -> str:
+    mt = sniff_audio_media_type(data)
+    if "wav" in mt:
+        return ".wav"
+    if "mpeg" in mt or "mp3" in mt:
+        return ".mp3"
+    return ".bin"
+
+
+def _synth_cache_path(provider: str, model: str, voice: str, speed: float, text: str, ext: str = ".bin") -> str:
+    import os
+
+    key = _synth_cache_key(provider, model, voice, speed, text)
+    return os.path.join(_SYNTH_CACHE_DIR, f"{provider}_{key}{ext}")
+
+
+def find_synth_cache(provider: str, model: str, voice: str, speed: float, text: str) -> bytes | None:
+    """尝试常见扩展名读盘（写时带真实 ext，读时不知 ext）。"""
+    import os
+
+    key = _synth_cache_key(provider, model, voice, speed, text)
+    base = os.path.join(_SYNTH_CACHE_DIR, f"{provider}_{key}")
+    for ext in (".mp3", ".wav", ".bin", ""):
+        hit = _read_cache(base + ext if ext else base)
+        if hit is not None:
+            return hit
+    return None
+
+
+def put_synth_cache(provider: str, model: str, voice: str, speed: float, text: str, data: bytes) -> str:
+    path = _synth_cache_path(provider, model, voice, speed, text, _synth_ext_for_bytes(data))
+    _write_cache(path, data)
+    return path
+
+
 PROVIDERS = {
     "minimax": MiniMaxTTS,
     "xunfei": XunfeiTTS,
