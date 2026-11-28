@@ -831,3 +831,1125 @@ rules:
     examples: []
   path_order: 26
   notes: y 作元音（非词首）读短 i /ɪ/
+- id: consonant_digraph.sh.primary
+  category: consonant_digraph
+  grapheme: sh
+  ipa: /ʃ/
+  approx_zh: 近似「嘘」的音，嘴唇微圆（近似）
+  example_words:
+  - word: ship
+    grades: &id001
+    - 3
+    - 5
+    source: common
+  - word: fish
+    grades: *id001
+    source: common
+  - word: shop
+    grades:
+    - 3
+    source: common
+  - word: shoulder
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant_digraph.sh.primary.wav
+      source: tts
+    examples: []
+  path_order: 36
+  notes: s+h 合成一个音 /ʃ/
+- id: consonant_digraph.ch.primary
+  category: consonant_digraph
+  grapheme: ch
+  ipa: /tʃ/
+  approx_zh: 近似「吃」的短促音（近似）
+  example_words:
+  - word: chip
+    grades: *id001
+    source: common
+  - word: lunch
+    grades: *id001
+    source: common
+  - word: chin
+    grades:
+    - 3
+    source: common
+  - word: chicken
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant_digraph.ch.primary.wav
+      source: tts
+    examples: []
+  path_order: 37
+  notes: ch 通常读 /tʃ/；个别外来词读 /k/ 或 /ʃ/ 暂不展开
+- id: consonant_digraph.th.primary
+  category: consonant_digraph
+  grapheme: th
+  ipa: /θ/
+  approx_zh: 舌尖轻咬在齿间送气，无近似汉字（近似「丝」但舌在齿间）
+  example_words:
+  - word: thin
+    grades: *id001
+    source: common
+  - word: bath
+    grades: *id001
+    source: common
+  - word: think
+    grades:
+    - 3
+    source: common
+  - word: birthday
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant_digraph.th.primary.wav
+      source: tts
+    examples: []
+  path_order: 38
+  notes: 清音 /θ/；浊音 /ð/（this, that）后续再补
+- id: consonant_digraph.ck.primary
+  category: consonant_digraph
+  grapheme: ck
+  ipa: /k/
+  approx_zh: 近似「克」的轻音（近似）
+  example_words:
+  - word: duck
+    grades: *id001
+    source: common
+  - word: black
+    grades: *id001
+    source: common
+  - word: sock
+    grades:
+    - 3
+    source: common
+  - word: chicken
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant_digraph.ck.primary.wav
+      source: tts
+    examples: []
+  path_order: 39
+  notes: ck 只出现在短元音之后，读 /k/
+- id: consonant_digraph.ng.primary
+  category: consonant_digraph
+  grapheme: ng
+  ipa: /ŋ/
+  approx_zh: 鼻音，近似「嗯」收尾的后鼻音（近似）
+  example_words:
+  - word: ring
+    grades: *id001
+    source: common
+  - word: king
+    grades: *id001
+    source: common
+  - word: song
+    grades:
+    - 3
+    source: common
+  - word: morning
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant_digraph.ng.primary.wav
+      source: tts
+    examples: []
+  path_order: 40
+  notes: ng 合成一个鼻音 /ŋ/，常在词尾
+- id: consonant_digraph.wh.primary
+  category: consonant_digraph
+  grapheme: wh
+  ipa: /w/
+  approx_zh: 近似「乌」开头的圆唇音（近似）
+  example_words:
+  - word: whale
+    grades: *id001
+    source: common
+  - word: white
+    grades: *id001
+    source: common
+  - word: wheel
+    grades:
+    - 3
+    source: common
+  - word: whistle
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant_digraph.wh.primary.wav
+      source: tts
+    examples: []
+  path_order: 41
+  notes: wh 在多数词中读 /w/；who 等例外
+- id: consonant_digraph.ph.primary
+  category: consonant_digraph
+  grapheme: ph
+  ipa: /f/
+  approx_zh: 近似「夫」的清音（近似）
+  example_words:
+  - word: phone
+    grades: *id001
+    source: common
+  - word: photo
+    grades: *id001
+    source: common
+  - word: dolphin
+    grades:
+    - 3
+    source: common
+  - word: elephant
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant_digraph.ph.primary.wav
+      source: tts
+    examples: []
+  path_order: 42
+  notes: ph 读 /f/，多见于希腊来源词
+- id: consonant_digraph.qu.primary
+  category: consonant_digraph
+  grapheme: qu
+  ipa: /kw/
+  approx_zh: 近似「夸」的音，k 加 w（近似）
+  example_words:
+  - word: queen
+    grades: *id001
+    source: common
+  - word: quick
+    grades: *id001
+    source: common
+  - word: quiet
+    grades:
+    - 3
+    source: common
+  - word: question
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant_digraph.qu.primary.wav
+      source: tts
+    examples: []
+  path_order: 43
+  notes: q 总与 u 连用，读 /kw/
+- id: vowel_team.ai.primary
+  category: vowel_team
+  grapheme: ai
+  ipa: /eɪ/
+  approx_zh: 近似「诶」的长音，嘴形由大到小（近似）
+  example_words:
+  - word: rain
+    grades: *id001
+    source: common
+  - word: train
+    grades: *id001
+    source: common
+  - word: mail
+    grades:
+    - 3
+    source: common
+  - word: afraid
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ai.primary.wav
+      source: tts
+    examples: []
+  path_order: 51
+  notes: ai 多出现在词中，读长 a /eɪ/
+- id: vowel_team.ay.primary
+  category: vowel_team
+  grapheme: ay
+  ipa: /eɪ/
+  approx_zh: 近似「诶」的长音（近似）
+  example_words:
+  - word: day
+    grades: *id001
+    source: common
+  - word: play
+    grades: *id001
+    source: common
+  - word: say
+    grades:
+    - 3
+    source: common
+  - word: holiday
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ay.primary.wav
+      source: tts
+    examples: []
+  path_order: 52
+  notes: ay 多出现在词尾，读长 a /eɪ/
+- id: vowel_team.ee.primary
+  category: vowel_team
+  grapheme: ee
+  ipa: /iː/
+  approx_zh: 近似「衣」的长音，嘴角拉开（近似）
+  example_words:
+  - word: see
+    grades: *id001
+    source: common
+  - word: tree
+    grades: *id001
+    source: common
+  - word: feet
+    grades:
+    - 3
+    source: common
+  - word: sleepy
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ee.primary.wav
+      source: tts
+    examples: []
+  path_order: 53
+  notes: ee 读长 e /iː/
+- id: vowel_team.ea.primary
+  category: vowel_team
+  grapheme: ea
+  ipa: /iː/
+  approx_zh: 近似「衣」的长音（近似）
+  example_words:
+  - word: eat
+    grades: *id001
+    source: common
+  - word: sea
+    grades: *id001
+    source: common
+  - word: read
+    grades:
+    - 3
+    source: common
+  - word: teacher
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ea.primary.wav
+      source: tts
+    examples: []
+  path_order: 54
+  notes: ea 最常读 /iː/；bread、head 读 /e/ 为例外，后续补
+- id: vowel_team.oa.primary
+  category: vowel_team
+  grapheme: oa
+  ipa: /oʊ/
+  approx_zh: 近似「欧」的长音，嘴形渐圆（近似）
+  example_words:
+  - word: boat
+    grades: *id001
+    source: common
+  - word: coat
+    grades: *id001
+    source: common
+  - word: road
+    grades:
+    - 3
+    source: common
+  - word: goalkeeper
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.oa.primary.wav
+      source: tts
+    examples: []
+  path_order: 55
+  notes: oa 读长 o /oʊ/
+- id: vowel_team.ow.primary
+  category: vowel_team
+  grapheme: ow
+  ipa: /aʊ/
+  approx_zh: 近似「奥」的音，嘴由大到圆（近似）
+  example_words:
+  - word: cow
+    grades: *id001
+    source: common
+  - word: now
+    grades: *id001
+    source: common
+  - word: down
+    grades:
+    - 3
+    source: common
+  - word: flower
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ow.primary.wav
+      source: tts
+    examples: []
+  path_order: 56
+  notes: ow 在 cow 类词读 /aʊ/；在 snow、yellow 等词读 /oʊ/，属另一读法，后续补 variant
+- id: vowel_team.oo.primary
+  category: vowel_team
+  grapheme: oo
+  ipa: /uː/
+  approx_zh: 近似「乌」的长音，嘴唇前突（近似）
+  example_words:
+  - word: moon
+    grades: *id001
+    source: common
+  - word: food
+    grades: *id001
+    source: common
+  - word: zoo
+    grades:
+    - 3
+    source: common
+  - word: afternoon
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.oo.primary.wav
+      source: tts
+    examples: []
+  path_order: 57
+  notes: oo 常读长 /uː/；book、foot 读短 /ʊ/ 后续补 variant
+- id: vowel_team.oi.primary
+  category: vowel_team
+  grapheme: oi
+  ipa: /ɔɪ/
+  approx_zh: 近似「噢咦」连读，由圆唇滑向展唇（近似）
+  example_words:
+  - word: oil
+    grades: *id001
+    source: common
+  - word: coin
+    grades: *id001
+    source: common
+  - word: boil
+    grades:
+    - 3
+    source: common
+  - word: noisy
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.oi.primary.wav
+      source: tts
+    examples: []
+  path_order: 58
+  notes: oi 多在词中，读 /ɔɪ/
+- id: vowel_team.oy.primary
+  category: vowel_team
+  grapheme: oy
+  ipa: /ɔɪ/
+  approx_zh: 近似「噢咦」连读（近似）
+  example_words:
+  - word: boy
+    grades: *id001
+    source: common
+  - word: toy
+    grades: *id001
+    source: common
+  - word: joy
+    grades:
+    - 3
+    source: common
+  - word: enjoy
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.oy.primary.wav
+      source: tts
+    examples: []
+  path_order: 59
+  notes: oy 多在词尾，读 /ɔɪ/，与 oi 同音
+- id: vowel_team.ou.primary
+  category: vowel_team
+  grapheme: ou
+  ipa: /aʊ/
+  approx_zh: 近似「奥」的音（近似）
+  example_words:
+  - word: out
+    grades: *id001
+    source: common
+  - word: house
+    grades: *id001
+    source: common
+  - word: cloud
+    grades:
+    - 3
+    source: common
+  - word: mountain
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ou.primary.wav
+      source: tts
+    examples: []
+  path_order: 60
+  notes: ou 常读 /aʊ/；young、soup 等为例外
+- id: vowel_team.aw.primary
+  category: vowel_team
+  grapheme: aw
+  ipa: /ɔː/
+  approx_zh: 近似「噢」的长音，嘴圆而开（近似）
+  example_words:
+  - word: saw
+    grades: *id001
+    source: common
+  - word: draw
+    grades: *id001
+    source: common
+  - word: paw
+    grades:
+    - 3
+    source: common
+  - word: strawberry
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.aw.primary.wav
+      source: tts
+    examples: []
+  path_order: 61
+  notes: aw 多在词尾或 n/l 前，读 /ɔː/
+- id: vowel_team.au.primary
+  category: vowel_team
+  grapheme: au
+  ipa: /ɔː/
+  approx_zh: 近似「噢」的长音（近似）
+  example_words:
+  - word: autumn
+    grades: *id001
+    source: common
+  - word: August
+    grades: *id001
+    source: common
+  - word: sauce
+    grades:
+    - 3
+    source: common
+  - word: daughter
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.au.primary.wav
+      source: tts
+    examples: []
+  path_order: 62
+  notes: au 多在词中，读 /ɔː/，与 aw 同音
+- id: vowel_team.ew.primary
+  category: vowel_team
+  grapheme: ew
+  ipa: /uː/
+  approx_zh: 近似「乌」的长音，前面有时带 /j/（近似）
+  example_words:
+  - word: new
+    grades: *id001
+    source: common
+  - word: few
+    grades: *id001
+    source: common
+  - word: grew
+    grades:
+    - 3
+    source: common
+  - word: newspaper
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ew.primary.wav
+      source: tts
+    examples: []
+  path_order: 63
+  notes: ew 读 /uː/ 或 /juː/（few, new 英式常带 /j/），此处取 /uː/ 为主音
+- id: vowel_team.ie.primary
+  category: vowel_team
+  grapheme: ie
+  ipa: /aɪ/
+  approx_zh: 近似「爱」的双元音（近似）
+  example_words:
+  - word: pie
+    grades: *id001
+    source: common
+  - word: tie
+    grades: *id001
+    source: common
+  - word: lie
+    grades:
+    - 3
+    source: common
+  - word: untie
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ie.primary.wav
+      source: tts
+    examples: []
+  path_order: 64
+  notes: ie 在词尾多读 /aɪ/；field、piece 读 /iː/ 另列，后续补 variant
+- id: vowel_team.igh.primary
+  category: vowel_team
+  grapheme: igh
+  ipa: /aɪ/
+  approx_zh: 近似「爱」的双元音（近似）
+  example_words:
+  - word: high
+    grades: *id001
+    source: common
+  - word: night
+    grades: *id001
+    source: common
+  - word: light
+    grades:
+    - 3
+    source: common
+  - word: tonight
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.igh.primary.wav
+      source: tts
+    examples: []
+  path_order: 65
+  notes: igh 整体读 /aɪ/，gh 不发音
+- id: vowel_team.ue.primary
+  category: vowel_team
+  grapheme: ue
+  ipa: /uː/
+  approx_zh: 近似「乌」的长音（近似）
+  example_words:
+  - word: blue
+    grades: *id001
+    source: common
+  - word: 'true'
+    grades: *id001
+    source: common
+  - word: clue
+    grades:
+    - 3
+    source: common
+  - word: rescue
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel_team.ue.primary.wav
+      source: tts
+    examples: []
+  path_order: 66
+  notes: ue 在词尾读 /uː/ 或 /juː/，此处取 /uː/
+- id: r_controlled.ar.primary
+  category: r_controlled
+  grapheme: ar
+  ipa: /ɑː/
+  approx_zh: 近似「啊」的长音（近似）
+  example_words:
+  - word: car
+    grades: *id001
+    source: common
+  - word: star
+    grades: *id001
+    source: common
+  - word: farm
+    grades:
+    - 3
+    source: common
+  - word: garden
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/r_controlled.ar.primary.wav
+      source: tts
+    examples: []
+  path_order: 76
+  notes: 元音被 r 改变，读 /ɑː/
+- id: r_controlled.or.primary
+  category: r_controlled
+  grapheme: or
+  ipa: /ɔː/
+  approx_zh: 近似「噢」的长音（近似）
+  example_words:
+  - word: for
+    grades: *id001
+    source: common
+  - word: corn
+    grades: *id001
+    source: common
+  - word: fork
+    grades:
+    - 3
+    source: common
+  - word: morning
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/r_controlled.or.primary.wav
+      source: tts
+    examples: []
+  path_order: 77
+  notes: 元音被 r 改变，读 /ɔː/
+- id: r_controlled.er.primary
+  category: r_controlled
+  grapheme: er
+  ipa: /ɜː/
+  approx_zh: 近似「额」的长音，舌位居中（近似）
+  example_words:
+  - word: her
+    grades: *id001
+    source: common
+  - word: fern
+    grades: *id001
+    source: common
+  - word: term
+    grades:
+    - 3
+    source: common
+  - word: teacher
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/r_controlled.er.primary.wav
+      source: tts
+    examples: []
+  path_order: 78
+  notes: er 在重读时读 /ɜː/；在词尾弱读 /ə/ 后续补
+- id: r_controlled.ir.primary
+  category: r_controlled
+  grapheme: ir
+  ipa: /ɜː/
+  approx_zh: 近似「额」的长音（近似）
+  example_words:
+  - word: bird
+    grades: *id001
+    source: common
+  - word: girl
+    grades: *id001
+    source: common
+  - word: shirt
+    grades:
+    - 3
+    source: common
+  - word: birthday
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/r_controlled.ir.primary.wav
+      source: tts
+    examples: []
+  path_order: 79
+  notes: ir 读 /ɜː/，与 er、ur 同音
+- id: r_controlled.ur.primary
+  category: r_controlled
+  grapheme: ur
+  ipa: /ɜː/
+  approx_zh: 近似「额」的长音（近似）
+  example_words:
+  - word: turn
+    grades: *id001
+    source: common
+  - word: burn
+    grades: *id001
+    source: common
+  - word: nurse
+    grades:
+    - 3
+    source: common
+  - word: Saturday
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/r_controlled.ur.primary.wav
+      source: tts
+    examples: []
+  path_order: 80
+  notes: ur 读 /ɜː/，与 er、ir 同音
+- id: r_controlled.ore.primary
+  category: r_controlled
+  grapheme: ore
+  ipa: /ɔː/
+  approx_zh: 近似「噢」的长音（近似）
+  example_words:
+  - word: more
+    grades: *id001
+    source: common
+  - word: store
+    grades: *id001
+    source: common
+  - word: shore
+    grades:
+    - 3
+    source: common
+  - word: tomorrow
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/r_controlled.ore.primary.wav
+      source: tts
+    examples: []
+  path_order: 81
+  notes: ore 读 /ɔː/，与 or 同音；e 不发音
+- id: syllable_pattern.a_e.magic_e
+  category: syllable_pattern
+  grapheme: a_e
+  ipa: /eɪ/
+  approx_zh: 近似「诶」的长音（近似）
+  example_words:
+  - word: make
+    grades: *id001
+    source: common
+  - word: cake
+    grades: *id001
+    source: common
+  - word: name
+    grades:
+    - 3
+    source: common
+  - word: snake
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.a_e.magic_e.wav
+      source: tts
+    examples: []
+  path_order: 91
+  notes: a_e：元音+辅音+不发音的 e，元音读字母名 /eɪ/
+- id: syllable_pattern.e_e.magic_e
+  category: syllable_pattern
+  grapheme: e_e
+  ipa: /iː/
+  approx_zh: 近似「衣」的长音（近似）
+  example_words:
+  - word: these
+    grades: *id001
+    source: common
+  - word: Pete
+    grades: *id001
+    source: common
+  - word: theme
+    grades:
+    - 3
+    source: common
+  - word: complete
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.e_e.magic_e.wav
+      source: tts
+    examples: []
+  path_order: 92
+  notes: e_e：元音+辅音+不发音的 e，元音读字母名 /iː/
+- id: syllable_pattern.i_e.magic_e
+  category: syllable_pattern
+  grapheme: i_e
+  ipa: /aɪ/
+  approx_zh: 近似「爱」的双元音（近似）
+  example_words:
+  - word: bike
+    grades: *id001
+    source: common
+  - word: time
+    grades: *id001
+    source: common
+  - word: like
+    grades:
+    - 3
+    source: common
+  - word: smile
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.i_e.magic_e.wav
+      source: tts
+    examples: []
+  path_order: 93
+  notes: i_e：元音+辅音+不发音的 e，元音读字母名 /aɪ/
+- id: syllable_pattern.o_e.magic_e
+  category: syllable_pattern
+  grapheme: o_e
+  ipa: /oʊ/
+  approx_zh: 近似「欧」的长音（近似）
+  example_words:
+  - word: home
+    grades: *id001
+    source: common
+  - word: nose
+    grades: *id001
+    source: common
+  - word: bone
+    grades:
+    - 3
+    source: common
+  - word: stone
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.o_e.magic_e.wav
+      source: tts
+    examples: []
+  path_order: 94
+  notes: o_e：元音+辅音+不发音的 e，元音读字母名 /oʊ/
+- id: syllable_pattern.u_e.magic_e
+  category: syllable_pattern
+  grapheme: u_e
+  ipa: /uː/
+  approx_zh: 近似「乌」的长音（近似）
+  example_words:
+  - word: cute
+    grades: *id001
+    source: common
+  - word: flute
+    grades: *id001
+    source: common
+  - word: tune
+    grades:
+    - 3
+    source: common
+  - word: computer
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.u_e.magic_e.wav
+      source: tts
+    examples: []
+  path_order: 95
+  notes: u_e：元音+辅音+不发音的 e，元音读字母名 /uː/ 或 /juː/，取 /uː/
+- id: syllable_pattern.closed_syllable.awareness
+  category: syllable_pattern
+  grapheme: closed_syllable
+  ipa: ''
+  approx_zh: （意识层）以辅音结尾的音节，元音通常读短音
+  example_words:
+  - word: cat
+    grades: *id001
+    source: common
+  - word: sit
+    grades: *id001
+    source: common
+  - word: hot
+    grades:
+    - 3
+    source: common
+  - word: picnic
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.closed_syllable.awareness.wav
+      source: tts
+    examples: []
+  path_order: 96
+  notes: 识别型：闭音节（CVC）元音读短音，无需单独发音
+- id: syllable_pattern.open_syllable.awareness
+  category: syllable_pattern
+  grapheme: open_syllable
+  ipa: ''
+  approx_zh: （意识层）以元音结尾的音节，元音通常读长音
+  example_words:
+  - word: go
+    grades: *id001
+    source: common
+  - word: he
+    grades: *id001
+    source: common
+  - word: me
+    grades:
+    - 3
+    source: common
+  - word: tiger
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.open_syllable.awareness.wav
+      source: tts
+    examples: []
+  path_order: 97
+  notes: 识别型：开音节（CV）元音读长音，无需单独发音
+- id: syllable_pattern.tion.primary
+  category: syllable_pattern
+  grapheme: tion
+  ipa: /ʃən/
+  approx_zh: 近似「申」的弱读音（近似）
+  example_words:
+  - word: station
+    grades: *id001
+    source: common
+  - word: action
+    grades: *id001
+    source: common
+  - word: nation
+    grades:
+    - 3
+    source: common
+  - word: education
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.tion.primary.wav
+      source: tts
+    examples: []
+  path_order: 106
+  notes: 后缀 -tion 读 /ʃən/
+- id: syllable_pattern.ture.primary
+  category: syllable_pattern
+  grapheme: ture
+  ipa: /tʃə/
+  approx_zh: 近似「处」加弱读的音（近似）
+  example_words:
+  - word: picture
+    grades: *id001
+    source: common
+  - word: nature
+    grades: *id001
+    source: common
+  - word: future
+    grades:
+    - 3
+    source: common
+  - word: adventure
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.ture.primary.wav
+      source: tts
+    examples: []
+  path_order: 107
+  notes: 后缀 -ture 读 /tʃə/
+- id: syllable_pattern.le.primary
+  category: syllable_pattern
+  grapheme: le
+  ipa: /əl/
+  approx_zh: 近似「欧」弱读（近似）
+  example_words:
+  - word: table
+    grades: *id001
+    source: common
+  - word: apple
+    grades: *id001
+    source: common
+  - word: little
+    grades:
+    - 3
+    source: common
+  - word: bicycle
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/syllable_pattern.le.primary.wav
+      source: tts
+    examples: []
+  path_order: 108
+  notes: 词尾辅音+le 构成独立音节，读 /əl/
