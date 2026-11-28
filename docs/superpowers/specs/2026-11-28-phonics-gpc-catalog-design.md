@@ -61,13 +61,13 @@ content/phonics/rules.yaml          ← 唯一真相（GPC 条目）
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 稳定主键，如 `vowel.a.short`、`digraph.ai`；发布后不改语义 |
-| `category` | `vowel` / `consonant` / `vowel_team` / `consonant_digraph` / `r_controlled` / `syllable_pattern` … |
-| `grapheme` | 书面形式：`a`、`ai`、`tion`… |
-| `ipa` | 主音音标，如 `/æ/` |
-| `approx_zh` | 中文近似 + 必备注「近似」 |
-| `example_words` | 对象列表，每项至少含 `word`；可选 `grades: [3]` / `[5]` / `[3,5]`、`source: textbook\|common`。每条规则至少 3 个词；**须同时覆盖三年级可用词与五年级加难词**（可同一词标 `[3,5]`，或分列） |
+| `category` | 仅六值：`vowel` \| `consonant` \| `vowel_team` \| `consonant_digraph` \| `r_controlled` \| `syllable_pattern` |
+| `grapheme` | 书面形式：`a`、`ai`、`tion`；意识型条目可用符号名如 `closed_syllable` |
+| `ipa` | 主音音标，如 `/æ/`。意识型条目（`closed_syllable` / `open_syllable`）可填模式说明音标或留空，以 `notes` + 锚例词为准 |
+| `approx_zh` | 中文近似 + 必备注「近似」；意识型条目写模式的中文说明即可 |
+| `example_words` | 对象列表，每项至少含 `word`；可选 `grades: [3]` / `[5]` / `[3,5]`、`source: textbook\|common`（**例词出处**，与音频 `source` 不同）。每条规则至少 3 个词；**须同时覆盖三年级可用词与五年级加难词**（可同一词标 `[3,5]`，或分列） |
 | `accent` | 固定标记 `oxford_shanghai` |
-| `audio` | `{ rule: {path, source}, examples: [{word, path, source}] }`；`source` ∈ `textbook` \| `tts`（实现期可细分为 `companion`） |
+| `audio` | `{ rule: {path, source}, examples: [{word, path, source}] }`；此处 `source` 仅表示**音频来源** ∈ `textbook` \| `tts`（实现期可细分为 `companion`）。勿与 `example_words[].source` 混用 |
 | `path_order` | 推荐路径序号；未入路径可为空 |
 | `notes` | 可选：易混提示、五年级可加快等节奏提示、指向后续变音 `id`（如长音见 `vowel.a.magic_e`） |
 
