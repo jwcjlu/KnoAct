@@ -1,1 +1,833 @@
-rules: []
+rules:
+- id: vowel.a.short
+  category: vowel
+  grapheme: a
+  ipa: /æ/
+  approx_zh: 近似「欸」的短音，嘴张大（近似）
+  example_words:
+  - word: cat
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: map
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: hat
+    grades:
+    - 3
+    source: common
+  - word: fantastic
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel.a.short.wav
+      source: tts
+    examples: []
+  path_order: 1
+  notes: 短 a，CVC 闭音节中的读音
+- id: consonant.s.primary
+  category: consonant
+  grapheme: s
+  ipa: /s/
+  approx_zh: 近似「丝」的清音（近似）
+  example_words:
+  - word: sun
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: sit
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: sad
+    grades:
+    - 3
+    source: common
+  - word: sunshine
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.s.primary.wav
+      source: tts
+    examples: []
+  path_order: 2
+  notes: ''
+- id: consonant.t.primary
+  category: consonant
+  grapheme: t
+  ipa: /t/
+  approx_zh: 近似「特」的轻音（近似）
+  example_words:
+  - word: top
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: ten
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: tap
+    grades:
+    - 3
+    source: common
+  - word: tomorrow
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.t.primary.wav
+      source: tts
+    examples: []
+  path_order: 3
+  notes: ''
+- id: consonant.p.primary
+  category: consonant
+  grapheme: p
+  ipa: /p/
+  approx_zh: 近似「泼」的轻音，不送气（近似）
+  example_words:
+  - word: pen
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: pig
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: pot
+    grades:
+    - 3
+    source: common
+  - word: pencil
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.p.primary.wav
+      source: tts
+    examples: []
+  path_order: 4
+  notes: ''
+- id: vowel.i.short
+  category: vowel
+  grapheme: i
+  ipa: /ɪ/
+  approx_zh: 近似「衣」的短而松的音（近似）
+  example_words:
+  - word: sit
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: pig
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: big
+    grades:
+    - 3
+    source: common
+  - word: window
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel.i.short.wav
+      source: tts
+    examples: []
+  path_order: 5
+  notes: 短 i
+- id: consonant.n.primary
+  category: consonant
+  grapheme: n
+  ipa: /n/
+  approx_zh: 近似「讷」的鼻音（近似）
+  example_words:
+  - word: net
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: nut
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: nap
+    grades:
+    - 3
+    source: common
+  - word: number
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.n.primary.wav
+      source: tts
+    examples: []
+  path_order: 6
+  notes: ''
+- id: consonant.m.primary
+  category: consonant
+  grapheme: m
+  ipa: /m/
+  approx_zh: 近似「摸」的闭唇鼻音（近似）
+  example_words:
+  - word: mat
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: man
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: mug
+    grades:
+    - 3
+    source: common
+  - word: monkey
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.m.primary.wav
+      source: tts
+    examples: []
+  path_order: 7
+  notes: ''
+- id: consonant.d.primary
+  category: consonant
+  grapheme: d
+  ipa: /d/
+  approx_zh: 近似「得」的轻音（近似）
+  example_words:
+  - word: dog
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: dad
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: dig
+    grades:
+    - 3
+    source: common
+  - word: doctor
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.d.primary.wav
+      source: tts
+    examples: []
+  path_order: 8
+  notes: ''
+- id: vowel.o.short
+  category: vowel
+  grapheme: o
+  ipa: /ɒ/
+  approx_zh: 近似「奥」的短音，圆唇（近似）
+  example_words:
+  - word: dog
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: hot
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: top
+    grades:
+    - 3
+    source: common
+  - word: hospital
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel.o.short.wav
+      source: tts
+    examples: []
+  path_order: 9
+  notes: 短 o，英式 /ɒ/
+- id: consonant.g.primary
+  category: consonant
+  grapheme: g
+  ipa: /g/
+  approx_zh: 近似「格」的轻音（近似），g 在 e/i/y 前可读 /dʒ/，本条目为主音 /g/
+  example_words:
+  - word: go
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: pig
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: bag
+    grades:
+    - 3
+    source: common
+  - word: garden
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.g.primary.wav
+      source: tts
+    examples: []
+  path_order: 10
+  notes: ''
+- id: consonant.c.primary
+  category: consonant
+  grapheme: c
+  ipa: /k/
+  approx_zh: 近似「克」的轻音（近似），c 在 e/i/y 前读 /s/，本条目为主音 /k/
+  example_words:
+  - word: cat
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: cup
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: cap
+    grades:
+    - 3
+    source: common
+  - word: computer
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.c.primary.wav
+      source: tts
+    examples: []
+  path_order: 11
+  notes: ''
+- id: vowel.u.short
+  category: vowel
+  grapheme: u
+  ipa: /ʌ/
+  approx_zh: 近似「啊」的短音，嘴放松（近似）
+  example_words:
+  - word: cup
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: bus
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: sun
+    grades:
+    - 3
+    source: common
+  - word: umbrella
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel.u.short.wav
+      source: tts
+    examples: []
+  path_order: 12
+  notes: 短 u
+- id: consonant.b.primary
+  category: consonant
+  grapheme: b
+  ipa: /b/
+  approx_zh: 近似「波」的轻音，不送气（近似）
+  example_words:
+  - word: bat
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: bed
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: bus
+    grades:
+    - 3
+    source: common
+  - word: basket
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.b.primary.wav
+      source: tts
+    examples: []
+  path_order: 13
+  notes: ''
+- id: vowel.e.short
+  category: vowel
+  grapheme: e
+  ipa: /e/
+  approx_zh: 近似「诶」的短音，嘴扁（近似）
+  example_words:
+  - word: bed
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: pen
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: red
+    grades:
+    - 3
+    source: common
+  - word: elephant
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel.e.short.wav
+      source: tts
+    examples: []
+  path_order: 14
+  notes: 短 e
+- id: consonant.h.primary
+  category: consonant
+  grapheme: h
+  ipa: /h/
+  approx_zh: 近似「呵」的气音（近似）
+  example_words:
+  - word: hat
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: hot
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: hen
+    grades:
+    - 3
+    source: common
+  - word: holiday
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.h.primary.wav
+      source: tts
+    examples: []
+  path_order: 15
+  notes: ''
+- id: consonant.l.primary
+  category: consonant
+  grapheme: l
+  ipa: /l/
+  approx_zh: 近似「勒」，舌尖抵上齿龈（近似）
+  example_words:
+  - word: leg
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: lip
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: log
+    grades:
+    - 3
+    source: common
+  - word: little
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.l.primary.wav
+      source: tts
+    examples: []
+  path_order: 16
+  notes: ''
+- id: consonant.r.primary
+  category: consonant
+  grapheme: r
+  ipa: /r/
+  approx_zh: 近似「若」，舌尖卷起不触上颚（近似）
+  example_words:
+  - word: red
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: run
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: rat
+    grades:
+    - 3
+    source: common
+  - word: rabbit
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.r.primary.wav
+      source: tts
+    examples: []
+  path_order: 17
+  notes: ''
+- id: consonant.f.primary
+  category: consonant
+  grapheme: f
+  ipa: /f/
+  approx_zh: 近似「夫」，上齿轻触下唇（近似）
+  example_words:
+  - word: fan
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: fit
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: fun
+    grades:
+    - 3
+    source: common
+  - word: family
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.f.primary.wav
+      source: tts
+    examples: []
+  path_order: 18
+  notes: ''
+- id: consonant.k.primary
+  category: consonant
+  grapheme: k
+  ipa: /k/
+  approx_zh: 近似「克」的轻音（近似）
+  example_words:
+  - word: kit
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: kid
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: kick
+    grades:
+    - 3
+    source: common
+  - word: kitchen
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.k.primary.wav
+      source: tts
+    examples: []
+  path_order: 19
+  notes: ''
+- id: consonant.j.primary
+  category: consonant
+  grapheme: j
+  ipa: /dʒ/
+  approx_zh: 近似「基」的浊音（近似）
+  example_words:
+  - word: jam
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: jet
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: jug
+    grades:
+    - 3
+    source: common
+  - word: jacket
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.j.primary.wav
+      source: tts
+    examples: []
+  path_order: 20
+  notes: ''
+- id: consonant.v.primary
+  category: consonant
+  grapheme: v
+  ipa: /v/
+  approx_zh: 近似「乌」，上齿轻触下唇并振动声带（近似）
+  example_words:
+  - word: van
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: vet
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: vest
+    grades:
+    - 3
+    source: common
+  - word: vegetable
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.v.primary.wav
+      source: tts
+    examples: []
+  path_order: 21
+  notes: ''
+- id: consonant.w.primary
+  category: consonant
+  grapheme: w
+  ipa: /w/
+  approx_zh: 近似「乌」+ 元音的滑音（近似）
+  example_words:
+  - word: web
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: win
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: wet
+    grades:
+    - 3
+    source: common
+  - word: window
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.w.primary.wav
+      source: tts
+    examples: []
+  path_order: 22
+  notes: ''
+- id: consonant.x.primary
+  category: consonant
+  grapheme: x
+  ipa: /ks/
+  approx_zh: 近似「克斯」连读（近似）
+  example_words:
+  - word: box
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: fox
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: six
+    grades:
+    - 3
+    source: common
+  - word: exercise
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.x.primary.wav
+      source: tts
+    examples: []
+  path_order: 23
+  notes: ''
+- id: consonant.z.primary
+  category: consonant
+  grapheme: z
+  ipa: /z/
+  approx_zh: 近似「兹」的浊音（近似）
+  example_words:
+  - word: zip
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: zoo
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: zap
+    grades:
+    - 3
+    source: common
+  - word: puzzle
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.z.primary.wav
+      source: tts
+    examples: []
+  path_order: 24
+  notes: ''
+- id: consonant.q.primary
+  category: consonant
+  grapheme: q
+  ipa: /k/
+  approx_zh: 近似「克」（近似）；q 几乎总与 u 连用成 qu /kw/，qu 见辅音 digraph
+  example_words:
+  - word: queen
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: quick
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: quiz
+    grades:
+    - 3
+    source: common
+  - word: question
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/consonant.q.primary.wav
+      source: tts
+    examples: []
+  path_order: 25
+  notes: q 几乎总与 u 连用成 qu /kw/，qu 见辅音 digraph
+- id: vowel.y.short
+  category: vowel
+  grapheme: y
+  ipa: /ɪ/
+  approx_zh: 作元音时近似「衣」的短音（近似）
+  example_words:
+  - word: gym
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: myth
+    grades:
+    - 3
+    - 5
+    source: common
+  - word: system
+    grades:
+    - 5
+    source: common
+  - word: symbol
+    grades:
+    - 5
+    source: common
+  accent: oxford_shanghai
+  audio:
+    rule:
+      path: audio/rule/vowel.y.short.wav
+      source: tts
+    examples: []
+  path_order: 26
+  notes: y 作元音（非词首）读短 i /ɪ/
