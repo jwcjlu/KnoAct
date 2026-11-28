@@ -58,3 +58,10 @@ def test_openlettersounds_source_allowed():
         "rule": {"path": "audio/rule/vowel.a.short.wav", "source": "openlettersounds"},
         "examples": [],
     }))
+
+
+def test_vocamax_ipa_source_allowed():
+    validate_rule(_ok_rule(audio={
+        "rule": {"path": "audio/rule/vowel_team.ai.primary.wav", "source": "vocamax_ipa"},
+        "examples": [],
+    }))

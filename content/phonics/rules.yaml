@@ -827,7 +827,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel.y.short.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 26
   notes: y 作元音（非词首）读短 i /ɪ/
@@ -857,7 +857,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.sh.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 36
   notes: s+h 合成一个音 /ʃ/
@@ -885,7 +885,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.ch.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 37
   notes: ch 通常读 /tʃ/；个别外来词读 /k/ 或 /ʃ/ 暂不展开
@@ -913,7 +913,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.th.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 38
   notes: 清音 /θ/；浊音 /ð/（this, that）后续再补
@@ -941,7 +941,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.ck.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 39
   notes: ck 只出现在短元音之后，读 /k/
@@ -969,7 +969,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.ng.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 40
   notes: ng 合成一个鼻音 /ŋ/，常在词尾
@@ -997,7 +997,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.wh.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 41
   notes: wh 在多数词中读 /w/；who 等例外
@@ -1025,7 +1025,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.ph.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 42
   notes: ph 读 /f/，多见于希腊来源词
@@ -1053,7 +1053,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.qu.primary.wav
-      source: tts
+      source: openlettersounds
     examples: []
   path_order: 43
   notes: q 总与 u 连用，读 /kw/
@@ -1081,7 +1081,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ai.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 51
   notes: ai 多出现在词中，读长 a /eɪ/
@@ -1109,7 +1109,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ay.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 52
   notes: ay 多出现在词尾，读长 a /eɪ/
@@ -1137,7 +1137,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ee.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 53
   notes: ee 读长 e /iː/
@@ -1165,7 +1165,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ea.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 54
   notes: ea 最常读 /iː/；bread、head 读 /e/ 为例外，后续补
@@ -1193,7 +1193,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.oa.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 55
   notes: oa 读长 o /oʊ/
@@ -1221,7 +1221,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ow.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 56
   notes: ow 在 cow 类词读 /aʊ/；在 snow、yellow 等词读 /oʊ/，属另一读法，后续补 variant
@@ -1249,7 +1249,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.oo.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 57
   notes: oo 常读长 /uː/；book、foot 读短 /ʊ/ 后续补 variant
@@ -1277,7 +1277,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.oi.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 58
   notes: oi 多在词中，读 /ɔɪ/
@@ -1305,7 +1305,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.oy.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 59
   notes: oy 多在词尾，读 /ɔɪ/，与 oi 同音
@@ -1333,7 +1333,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ou.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 60
   notes: ou 常读 /aʊ/；young、soup 等为例外
@@ -1361,7 +1361,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.aw.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 61
   notes: aw 多在词尾或 n/l 前，读 /ɔː/
@@ -1389,7 +1389,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.au.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 62
   notes: au 多在词中，读 /ɔː/，与 aw 同音
@@ -1417,7 +1417,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ew.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 63
   notes: ew 读 /uː/ 或 /juː/（few, new 英式常带 /j/），此处取 /uː/ 为主音
@@ -1445,7 +1445,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ie.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 64
   notes: ie 在词尾多读 /aɪ/；field、piece 读 /iː/ 另列，后续补 variant
@@ -1473,7 +1473,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.igh.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 65
   notes: igh 整体读 /aɪ/，gh 不发音
@@ -1501,7 +1501,7 @@ rules:
   audio:
     rule:
       path: audio/rule/vowel_team.ue.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 66
   notes: ue 在词尾读 /uː/ 或 /juː/，此处取 /uː/
@@ -1529,7 +1529,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.ar.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 76
   notes: 元音被 r 改变，读 /ɑː/
@@ -1557,7 +1557,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.or.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 77
   notes: 元音被 r 改变，读 /ɔː/
@@ -1585,7 +1585,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.er.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 78
   notes: er 在重读时读 /ɜː/；在词尾弱读 /ə/ 后续补
@@ -1613,7 +1613,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.ir.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 79
   notes: ir 读 /ɜː/，与 er、ur 同音
@@ -1641,7 +1641,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.ur.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 80
   notes: ur 读 /ɜː/，与 er、ir 同音
@@ -1669,7 +1669,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.ore.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 81
   notes: ore 读 /ɔː/，与 or 同音；e 不发音
@@ -1697,7 +1697,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.a_e.magic_e.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 91
   notes: a_e：元音+辅音+不发音的 e，元音读字母名 /eɪ/
@@ -1725,7 +1725,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.e_e.magic_e.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 92
   notes: e_e：元音+辅音+不发音的 e，元音读字母名 /iː/
@@ -1753,7 +1753,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.i_e.magic_e.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 93
   notes: i_e：元音+辅音+不发音的 e，元音读字母名 /aɪ/
@@ -1781,7 +1781,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.o_e.magic_e.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 94
   notes: o_e：元音+辅音+不发音的 e，元音读字母名 /oʊ/
@@ -1809,7 +1809,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.u_e.magic_e.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 95
   notes: u_e：元音+辅音+不发音的 e，元音读字母名 /uː/ 或 /juː/，取 /uː/
@@ -1836,7 +1836,7 @@ rules:
   accent: oxford_shanghai
   audio:
     rule:
-      path: audio/rule/syllable_pattern.closed_syllable.awareness.wav
+      path: audio/rule/syllable_pattern.closed_syllable.awareness.mp3
       source: tts
     examples: []
   path_order: 96
@@ -1864,7 +1864,7 @@ rules:
   accent: oxford_shanghai
   audio:
     rule:
-      path: audio/rule/syllable_pattern.open_syllable.awareness.wav
+      path: audio/rule/syllable_pattern.open_syllable.awareness.mp3
       source: tts
     examples: []
   path_order: 97
@@ -1893,7 +1893,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.tion.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 106
   notes: 后缀 -tion 读 /ʃən/
@@ -1921,7 +1921,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.ture.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 107
   notes: 后缀 -ture 读 /tʃə/
@@ -1949,7 +1949,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.le.primary.wav
-      source: tts
+      source: vocamax_ipa
     examples: []
   path_order: 108
   notes: 词尾辅音+le 构成独立音节，读 /əl/

@@ -96,3 +96,11 @@ python content/phonics/tools/synthesize_rule_audio.py \
 
 - `audio/word/*` 默认被根目录 `.gitignore` 忽略（仅保留 `.gitkeep`），避免误提交配套翻录。
 - `audio/rule/*.wav` **可以提交**（含 `--fake` 生成的占位文件），以便克隆后 manifest 中规则音 `exists: true`。
+
+3. **vocamax/ipa-audios（CC BY）**：digraph / 元音组合 / r 控制 / magic e 等，按 IPA 映射；原包在 endor/vocamax-ipa/（见 ATTRIBUTION.md）。source: vocamax_ipa。
+4. **TTS**：仅剩意识型条目（开/闭音节）用项目讯飞 TTS 生成可跟读短句；--fake **不含可跟读内容**。
+
+导入：
+`ash
+python content/phonics/tools/import_vocamax_ipa.py --root content/phonics
+`

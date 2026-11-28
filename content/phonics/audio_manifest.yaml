@@ -527,7 +527,7 @@ rules:
 - id: vowel.y.short
   expected_path: audio/rule/vowel.y.short.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: gym
     expected_path: audio/word/gym.wav
@@ -548,7 +548,7 @@ rules:
 - id: consonant_digraph.sh.primary
   expected_path: audio/rule/consonant_digraph.sh.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: ship
     expected_path: audio/word/ship.wav
@@ -569,7 +569,7 @@ rules:
 - id: consonant_digraph.ch.primary
   expected_path: audio/rule/consonant_digraph.ch.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: chip
     expected_path: audio/word/chip.wav
@@ -590,7 +590,7 @@ rules:
 - id: consonant_digraph.th.primary
   expected_path: audio/rule/consonant_digraph.th.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: thin
     expected_path: audio/word/thin.wav
@@ -611,7 +611,7 @@ rules:
 - id: consonant_digraph.ck.primary
   expected_path: audio/rule/consonant_digraph.ck.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: duck
     expected_path: audio/word/duck.wav
@@ -632,7 +632,7 @@ rules:
 - id: consonant_digraph.ng.primary
   expected_path: audio/rule/consonant_digraph.ng.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: ring
     expected_path: audio/word/ring.wav
@@ -653,7 +653,7 @@ rules:
 - id: consonant_digraph.wh.primary
   expected_path: audio/rule/consonant_digraph.wh.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: whale
     expected_path: audio/word/whale.wav
@@ -674,7 +674,7 @@ rules:
 - id: consonant_digraph.ph.primary
   expected_path: audio/rule/consonant_digraph.ph.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: phone
     expected_path: audio/word/phone.wav
@@ -695,7 +695,7 @@ rules:
 - id: consonant_digraph.qu.primary
   expected_path: audio/rule/consonant_digraph.qu.primary.wav
   exists: true
-  source: tts
+  source: openlettersounds
   examples:
   - word: queen
     expected_path: audio/word/queen.wav
@@ -716,7 +716,7 @@ rules:
 - id: vowel_team.ai.primary
   expected_path: audio/rule/vowel_team.ai.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: rain
     expected_path: audio/word/rain.wav
@@ -737,7 +737,7 @@ rules:
 - id: vowel_team.ay.primary
   expected_path: audio/rule/vowel_team.ay.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: day
     expected_path: audio/word/day.wav
@@ -758,7 +758,7 @@ rules:
 - id: vowel_team.ee.primary
   expected_path: audio/rule/vowel_team.ee.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: see
     expected_path: audio/word/see.wav
@@ -779,7 +779,7 @@ rules:
 - id: vowel_team.ea.primary
   expected_path: audio/rule/vowel_team.ea.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: eat
     expected_path: audio/word/eat.wav
@@ -800,7 +800,7 @@ rules:
 - id: vowel_team.oa.primary
   expected_path: audio/rule/vowel_team.oa.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: boat
     expected_path: audio/word/boat.wav
@@ -821,7 +821,7 @@ rules:
 - id: vowel_team.ow.primary
   expected_path: audio/rule/vowel_team.ow.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: cow
     expected_path: audio/word/cow.wav
@@ -842,7 +842,7 @@ rules:
 - id: vowel_team.oo.primary
   expected_path: audio/rule/vowel_team.oo.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: moon
     expected_path: audio/word/moon.wav
@@ -863,7 +863,7 @@ rules:
 - id: vowel_team.oi.primary
   expected_path: audio/rule/vowel_team.oi.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: oil
     expected_path: audio/word/oil.wav
@@ -884,7 +884,7 @@ rules:
 - id: vowel_team.oy.primary
   expected_path: audio/rule/vowel_team.oy.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: boy
     expected_path: audio/word/boy.wav
@@ -905,7 +905,7 @@ rules:
 - id: vowel_team.ou.primary
   expected_path: audio/rule/vowel_team.ou.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: out
     expected_path: audio/word/out.wav
@@ -926,7 +926,7 @@ rules:
 - id: vowel_team.aw.primary
   expected_path: audio/rule/vowel_team.aw.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: saw
     expected_path: audio/word/saw.wav
@@ -947,7 +947,7 @@ rules:
 - id: vowel_team.au.primary
   expected_path: audio/rule/vowel_team.au.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: autumn
     expected_path: audio/word/autumn.wav
@@ -968,7 +968,7 @@ rules:
 - id: vowel_team.ew.primary
   expected_path: audio/rule/vowel_team.ew.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: new
     expected_path: audio/word/new.wav
@@ -989,7 +989,7 @@ rules:
 - id: vowel_team.ie.primary
   expected_path: audio/rule/vowel_team.ie.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: pie
     expected_path: audio/word/pie.wav
@@ -1010,7 +1010,7 @@ rules:
 - id: vowel_team.igh.primary
   expected_path: audio/rule/vowel_team.igh.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: high
     expected_path: audio/word/high.wav
@@ -1031,7 +1031,7 @@ rules:
 - id: vowel_team.ue.primary
   expected_path: audio/rule/vowel_team.ue.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: blue
     expected_path: audio/word/blue.wav
@@ -1052,7 +1052,7 @@ rules:
 - id: r_controlled.ar.primary
   expected_path: audio/rule/r_controlled.ar.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: car
     expected_path: audio/word/car.wav
@@ -1073,7 +1073,7 @@ rules:
 - id: r_controlled.or.primary
   expected_path: audio/rule/r_controlled.or.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: for
     expected_path: audio/word/for.wav
@@ -1094,7 +1094,7 @@ rules:
 - id: r_controlled.er.primary
   expected_path: audio/rule/r_controlled.er.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: her
     expected_path: audio/word/her.wav
@@ -1115,7 +1115,7 @@ rules:
 - id: r_controlled.ir.primary
   expected_path: audio/rule/r_controlled.ir.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: bird
     expected_path: audio/word/bird.wav
@@ -1136,7 +1136,7 @@ rules:
 - id: r_controlled.ur.primary
   expected_path: audio/rule/r_controlled.ur.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: turn
     expected_path: audio/word/turn.wav
@@ -1157,7 +1157,7 @@ rules:
 - id: r_controlled.ore.primary
   expected_path: audio/rule/r_controlled.ore.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: more
     expected_path: audio/word/more.wav
@@ -1178,7 +1178,7 @@ rules:
 - id: syllable_pattern.a_e.magic_e
   expected_path: audio/rule/syllable_pattern.a_e.magic_e.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: make
     expected_path: audio/word/make.wav
@@ -1199,7 +1199,7 @@ rules:
 - id: syllable_pattern.e_e.magic_e
   expected_path: audio/rule/syllable_pattern.e_e.magic_e.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: these
     expected_path: audio/word/these.wav
@@ -1220,7 +1220,7 @@ rules:
 - id: syllable_pattern.i_e.magic_e
   expected_path: audio/rule/syllable_pattern.i_e.magic_e.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: bike
     expected_path: audio/word/bike.wav
@@ -1241,7 +1241,7 @@ rules:
 - id: syllable_pattern.o_e.magic_e
   expected_path: audio/rule/syllable_pattern.o_e.magic_e.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: home
     expected_path: audio/word/home.wav
@@ -1262,7 +1262,7 @@ rules:
 - id: syllable_pattern.u_e.magic_e
   expected_path: audio/rule/syllable_pattern.u_e.magic_e.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: cute
     expected_path: audio/word/cute.wav
@@ -1281,7 +1281,7 @@ rules:
     exists: false
     source: tts
 - id: syllable_pattern.closed_syllable.awareness
-  expected_path: audio/rule/syllable_pattern.closed_syllable.awareness.wav
+  expected_path: audio/rule/syllable_pattern.closed_syllable.awareness.mp3
   exists: true
   source: tts
   examples:
@@ -1302,7 +1302,7 @@ rules:
     exists: false
     source: tts
 - id: syllable_pattern.open_syllable.awareness
-  expected_path: audio/rule/syllable_pattern.open_syllable.awareness.wav
+  expected_path: audio/rule/syllable_pattern.open_syllable.awareness.mp3
   exists: true
   source: tts
   examples:
@@ -1325,7 +1325,7 @@ rules:
 - id: syllable_pattern.tion.primary
   expected_path: audio/rule/syllable_pattern.tion.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: station
     expected_path: audio/word/station.wav
@@ -1346,7 +1346,7 @@ rules:
 - id: syllable_pattern.ture.primary
   expected_path: audio/rule/syllable_pattern.ture.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: picture
     expected_path: audio/word/picture.wav
@@ -1367,7 +1367,7 @@ rules:
 - id: syllable_pattern.le.primary
   expected_path: audio/rule/syllable_pattern.le.primary.wav
   exists: true
-  source: tts
+  source: vocamax_ipa
   examples:
   - word: table
     expected_path: audio/word/table.wav

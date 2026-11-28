@@ -43,6 +43,7 @@ def validate_rule(rule: dict) -> None:
         "companion",
         "openlettersounds",
         "phonicademy",
+        "vocamax_ipa",
     ):
         raise ValidationError("bad audio.rule.source")
 
