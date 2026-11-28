@@ -1,7 +1,9 @@
 """阿里云百炼 Qwen-TTS 非实时语音合成（HTTP）。"""
 from __future__ import annotations
 
+import io
 import re
+import wave
 
 _MAX_CHARS = 600
 _DEFAULT_BASE = "https://dashscope.aliyuncs.com/api/v1"
@@ -41,3 +43,33 @@ def split_for_qwen(text: str, max_chars: int = _MAX_CHARS) -> list[str]:
     if buf:
         out.append(buf)
     return out
+
+
+def _read_wav_pcm(data: bytes) -> tuple[bytes, int, int, int]:
+    if not data.startswith(b"RIFF"):
+        raise RuntimeError("qwen_tts_not_wav")
+    with wave.open(io.BytesIO(data), "rb") as w:
+        return w.readframes(w.getnframes()), w.getframerate(), w.getnchannels(), w.getsampwidth()
+
+
+def merge_audio_segments(chunks: list[bytes]) -> bytes:
+    if not chunks:
+        raise RuntimeError("qwen_tts_empty_audio")
+    if len(chunks) == 1:
+        return chunks[0]
+    pcms = []
+    rate = ch = sw = None
+    for raw in chunks:
+        pcm, r, c, s = _read_wav_pcm(raw)
+        if rate is None:
+            rate, ch, sw = r, c, s
+        elif (r, c, s) != (rate, ch, sw):
+            raise RuntimeError("qwen_tts_wav_fmt_mismatch")
+        pcms.append(pcm)
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(ch)
+        w.setsampwidth(sw)
+        w.setframerate(rate)
+        w.writeframes(b"".join(pcms))
+    return out.getvalue()
