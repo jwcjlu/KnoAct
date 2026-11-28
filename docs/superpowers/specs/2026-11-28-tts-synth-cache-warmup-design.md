@@ -96,8 +96,8 @@ sha1(f"{provider}|{model}|{voice}|{speed:.2f}|{text}")[:24]
 
 **触发方式**：
 
-- 有请求生命周期：FastAPI `BackgroundTasks`。
-- 每日调度 `generate_daily_tasks`（无 HTTP）：短命 daemon 线程（对齐 `main.py` 拆课续跑），异常吞掉。
+- **主路径（现网）**：每日调度 `generate_daily_tasks`（无 HTTP）→ 短命 daemon 线程（对齐 `main.py` 拆课续跑），自开 `SessionLocal`，异常吞掉。
+- **次路径**：若日后有带请求生命周期的听写「重生成」HTTP 入口，再用 FastAPI `BackgroundTasks`；勿在无 request 的 `task_gen` 里硬塞 `BackgroundTasks`。
 
 **文本收集**（去重后串行）：
 
@@ -110,7 +110,7 @@ sha1(f"{provider}|{model}|{voice}|{speed:.2f}|{text}")[:24]
 
 对 `word` 的商用预热是**兜底**：孩子端 `real=true` 时词条优先 `word_audio`；商用缓存主要加速 `speak_text`（整句）以及真人 miss 时的词条合成。成功标准不以「词条首听必走商用缓存」计量。
 
-**限流**：同一预热批内串行；单条超时/异常 `continue`；整批上限约 40 条文本。
+**限流**：同一预热批内串行；单条超时/异常 `continue`；**每个听写 task 一次预热作业**上限约 40 条文本（按 task，非跨孩子全局共用）。当前 TTS 为 `fake` 时整批跳过预热（禁止写 fake 缓存，早退避免空转）。
 
 **不做**：家长可见状态、重试队列、跨用户全局去重调度器。
 
