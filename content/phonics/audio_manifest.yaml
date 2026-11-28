@@ -695,7 +695,7 @@ rules:
 - id: consonant_digraph.qu.primary
   expected_path: audio/rule/consonant_digraph.qu.primary.wav
   exists: true
-  source: openlettersounds
+  source: blend_ols
   examples:
   - word: queen
     expected_path: audio/word/queen.wav
@@ -1052,7 +1052,7 @@ rules:
 - id: r_controlled.ar.primary
   expected_path: audio/rule/r_controlled.ar.primary.wav
   exists: true
-  source: vocamax_ipa
+  source: tts
   examples:
   - word: car
     expected_path: audio/word/car.wav
@@ -1073,7 +1073,7 @@ rules:
 - id: r_controlled.or.primary
   expected_path: audio/rule/r_controlled.or.primary.wav
   exists: true
-  source: vocamax_ipa
+  source: tts
   examples:
   - word: for
     expected_path: audio/word/for.wav
@@ -1157,7 +1157,7 @@ rules:
 - id: r_controlled.ore.primary
   expected_path: audio/rule/r_controlled.ore.primary.wav
   exists: true
-  source: vocamax_ipa
+  source: tts
   examples:
   - word: more
     expected_path: audio/word/more.wav
@@ -1281,7 +1281,7 @@ rules:
     exists: true
     source: tts
 - id: syllable_pattern.closed_syllable.awareness
-  expected_path: audio/rule/syllable_pattern.closed_syllable.awareness.mp3
+  expected_path: audio/rule/syllable_pattern.closed_syllable.awareness.wav
   exists: true
   source: tts
   examples:
@@ -1302,7 +1302,7 @@ rules:
     exists: true
     source: tts
 - id: syllable_pattern.open_syllable.awareness
-  expected_path: audio/rule/syllable_pattern.open_syllable.awareness.mp3
+  expected_path: audio/rule/syllable_pattern.open_syllable.awareness.wav
   exists: true
   source: tts
   examples:
@@ -1325,7 +1325,7 @@ rules:
 - id: syllable_pattern.tion.primary
   expected_path: audio/rule/syllable_pattern.tion.primary.wav
   exists: true
-  source: vocamax_ipa
+  source: blend_vocamax
   examples:
   - word: station
     expected_path: audio/word/station.wav
@@ -1346,7 +1346,7 @@ rules:
 - id: syllable_pattern.ture.primary
   expected_path: audio/rule/syllable_pattern.ture.primary.wav
   exists: true
-  source: vocamax_ipa
+  source: blend_vocamax
   examples:
   - word: picture
     expected_path: audio/word/picture.wav

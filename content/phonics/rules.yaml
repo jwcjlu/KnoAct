@@ -1053,7 +1053,7 @@ rules:
   audio:
     rule:
       path: audio/rule/consonant_digraph.qu.primary.wav
-      source: openlettersounds
+      source: blend_ols
     examples: []
   path_order: 43
   notes: q 总与 u 连用，读 /kw/
@@ -1529,7 +1529,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.ar.primary.wav
-      source: vocamax_ipa
+      source: tts
     examples: []
   path_order: 76
   notes: 元音被 r 改变，读 /ɑː/
@@ -1557,7 +1557,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.or.primary.wav
-      source: vocamax_ipa
+      source: tts
     examples: []
   path_order: 77
   notes: 元音被 r 改变，读 /ɔː/
@@ -1669,7 +1669,7 @@ rules:
   audio:
     rule:
       path: audio/rule/r_controlled.ore.primary.wav
-      source: vocamax_ipa
+      source: tts
     examples: []
   path_order: 81
   notes: ore 读 /ɔː/，与 or 同音；e 不发音
@@ -1836,7 +1836,7 @@ rules:
   accent: oxford_shanghai
   audio:
     rule:
-      path: audio/rule/syllable_pattern.closed_syllable.awareness.mp3
+      path: audio/rule/syllable_pattern.closed_syllable.awareness.wav
       source: tts
     examples: []
   path_order: 96
@@ -1864,7 +1864,7 @@ rules:
   accent: oxford_shanghai
   audio:
     rule:
-      path: audio/rule/syllable_pattern.open_syllable.awareness.mp3
+      path: audio/rule/syllable_pattern.open_syllable.awareness.wav
       source: tts
     examples: []
   path_order: 97
@@ -1893,7 +1893,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.tion.primary.wav
-      source: vocamax_ipa
+      source: blend_vocamax
     examples: []
   path_order: 106
   notes: 后缀 -tion 读 /ʃən/
@@ -1921,7 +1921,7 @@ rules:
   audio:
     rule:
       path: audio/rule/syllable_pattern.ture.primary.wav
-      source: vocamax_ipa
+      source: blend_vocamax
     examples: []
   path_order: 107
   notes: 后缀 -ture 读 /tʃə/

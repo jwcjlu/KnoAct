@@ -24,7 +24,7 @@ RULE_TO_STEM: dict[str, str] = {
     "consonant_digraph.ng.primary": "ng",
     "consonant_digraph.wh.primary": "w",
     "consonant_digraph.ph.primary": "f",
-    # qu: prefer Open Letter Sounds q (handled separately)
+    # qu /kw/ 由 repair_rule_audio 拼 k+w，勿用单字母 q
     "vowel_team.ai.primary": "ey",
     "vowel_team.ay.primary": "ey",
     "vowel_team.ee.primary": "iy",
@@ -52,8 +52,7 @@ RULE_TO_STEM: dict[str, str] = {
     "syllable_pattern.i_e.magic_e": "ay",
     "syllable_pattern.o_e.magic_e": "ow",
     "syllable_pattern.u_e.magic_e": "uw",
-    "syllable_pattern.tion.primary": "sh",  # approx /ʃən/
-    "syllable_pattern.ture.primary": "ch",  # approx /tʃə/
+    # tion/ture：完整弱读由 repair_rule_audio 拼 sh+er / ch+er，勿用单音素覆盖
     "syllable_pattern.le.primary": "l",  # approx /əl/
 }
 
@@ -86,16 +85,8 @@ def import_pack(
     missing_vendor: list[str] = []
 
     mapping = dict(RULE_TO_STEM)
-    # qu from Open Letter Sounds (already /kw/)
-    if ols_q and ols_q.is_file():
-        rid = "consonant_digraph.qu.primary"
-        rel = f"audio/rule/{rid}.wav"
-        dest = phonics_root / rel
-        if not dry_run:
-            shutil.copy2(ols_q, dest)
-            text, n = _patch_rule_audio(text, rid, rel, "openlettersounds")
-            if n:
-                patched.append(rid)
+    # qu 不再从 OLS 的 q.wav 误拷；见 repair_rule_audio.concat k+w
+    _ = ols_q  # CLI 兼容保留参数
 
     for rid, stem in mapping.items():
         src = vendor_dir / f"{stem}.wav"

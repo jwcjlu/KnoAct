@@ -77,9 +77,11 @@ python content/phonics/tools/synthesize_rule_audio.py --root content/phonics --f
 
 ## 外部音源优先级
 
-1. **openlettersounds（CC0）**：字母主音（`a e i o u` + 辅音，含 `qu`）。`y` 作元音用 vocamax `/ɪ/`。
+1. **openlettersounds（CC0）**：字母主音（`a e i o u` + 辅音）。`y` 作元音用 vocamax `/ɪ/`；`qu` 见 blend。
 2. **vocamax_ipa（CC BY）**：digraph / 元音组合 / r 控制 / magic e 等，按 IPA 映射。
-3. **tts**：开/闭音节意识等缺口；例词批量合成也走 TTS。`--fake` 仅占位、不可跟读。
+3. **tts**：开/闭音节意识、部分 r 控制等；例词批量合成也走 TTS。`--fake` 仅占位、不可跟读。
+4. **blend_***：`qu`=`k+w`（OLS）；`tion`/`ture`=`sh|ch+er`（vocamax）。修复脚本：
+   `python content/phonics/tools/repair_rule_audio.py --root content/phonics`
 
 ## 音频：家庭自用与产品化
 
