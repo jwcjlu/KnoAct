@@ -661,11 +661,21 @@ def _group_context(db: Session, question_ids: list[int]) -> list[dict]:
     return out
 
 
+def _schedule_dictation_warmups(task_ids: list[int]) -> None:
+    from .tts_warmup import schedule_dictation_warmup
+    for tid in task_ids:
+        try:
+            schedule_dictation_warmup(tid)
+        except Exception:
+            pass
+
+
 def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = False):
     """为单个孩子生成当天各科任务。幂等：同 (user_id, subject, date) 已存在则跳过。
     force=True 时先删除该孩子当天全部任务再重新生成（家长手动触发覆盖重生成）。"""
     from .bucket_service import ensure_bucket
     bucket = ensure_bucket(db, user_id)
+    warmed_ids: list[int] = []
     if force:
         db.query(Task).filter_by(user_id=user_id, date=day).delete(synchronize_session=False)
         # 同时删除当天该孩子的生成类题目，避免重复累积
@@ -710,12 +720,16 @@ def generate_tasks_for_user(db: Session, user_id: int, day: date, force: bool = 
                 gen.date = day
                 gen.bucket_id = bucket.id
                 db.add(gen)
+                db.flush()
+                if gen.task_type == "dictation" and gen.id:
+                    warmed_ids.append(gen.id)
     for gen in _gen_bank_practice_tasks(db, user_id, day):
         gen.user_id = user_id
         gen.date = day
         gen.bucket_id = bucket.id
         db.add(gen)
     db.commit()
+    _schedule_dictation_warmups(warmed_ids)
 
 
 def generate_daily_tasks(db: Session, day: date, force: bool = False):
