@@ -127,6 +127,21 @@ def test_generate_tasks_creates_listening_for_english():
     db.close()
 
 
+def test_english_dictation_includes_legacy_phrase_kind():
+    """WordBank 列默认 kind=phrase；英语听写不能因此空池（听力有词、听写没有）。"""
+    db = SessionLocal()
+    uid, l1 = _setup_english(db)
+    rows = db.query(WordBank).filter_by(lesson_id=l1).all()
+    assert rows and all((w.kind or "phrase") == "phrase" for w in rows)
+    generate_tasks_for_user(db, uid, date.today())
+    t = db.query(Task).filter_by(
+        user_id=uid, subject="英语", date=date.today(), task_type="dictation").first()
+    assert t is not None, "英语应生成生词听写"
+    words = json.loads(t.content)
+    assert {w["word"] for w in words} == {"apple", "banana"}
+    db.close()
+
+
 def test_generate_tasks_no_lesson_produces_no_tasks():
     db = SessionLocal()
     u = User(name="无课孩子", role="child")

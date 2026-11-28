@@ -96,7 +96,8 @@ def _gen_dictation(db, lesson, user_id, count, due_cap=0.5, new_floor=0.3):
         allowed = set(get_dictation_kinds_cn(db, user_id))
         words = [w for w in words if w.kind in allowed]
     else:
-        words = [w for w in words if (w.kind or "word") == "word"]
+        from .word_kinds import is_en_dictation_kind
+        words = [w for w in words if is_en_dictation_kind(w.kind)]
     if not words:
         return None
 
@@ -302,7 +303,8 @@ def _gen_review(db, lesson, user_id, count):
         allowed = set(get_dictation_kinds_cn(db, user_id))
         words = [w for w in words if w.kind in allowed]
     else:
-        words = [w for w in words if (w.kind or "word") == "word"]
+        from .word_kinds import is_en_dictation_kind
+        words = [w for w in words if is_en_dictation_kind(w.kind)]
     words = words[:count]
     if not words:
         return None

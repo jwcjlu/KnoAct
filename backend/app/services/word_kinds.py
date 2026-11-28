@@ -13,3 +13,9 @@ def normalize_kind(k: str) -> str:
 
 def default_kind_for_subject(subject: str) -> str:
     return KIND_PHRASE if (subject or "") == "语文" else KIND_WORD
+
+
+def is_en_dictation_kind(kind: str | None) -> bool:
+    """英语/数学听写候选：正式 kind=word；兼容 ORM 默认 phrase 与空串的旧数据。"""
+    k = (kind or "").strip()
+    return k in ("", KIND_WORD, KIND_PHRASE)
