@@ -17,6 +17,8 @@ flutter build web --release --no-web-resources-cdn --dart-define=API_BASE= # 空
 
 任务全屏页（阅读/听写等）使用 `push` + `returnTo` 查询参数；顶栏 **返回** 回上一屏，**房子图标** 回首页。见 `lib/features/shell/task_nav.dart`。
 
+**自然拼读**（`/phonics`）：首页独立入口，按路径跟听规则音/例词音，不进每日任务、不记掌握度。内容来自 `assets/phonics/`（由 `content/phonics/tools/export_flutter_catalog.py` 导出）。
+
 ```bash
 flutter build apk --release   # 使用 config.dart 中的 defaultProdApiBase
 ```

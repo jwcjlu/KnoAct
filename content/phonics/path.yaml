@@ -1,0 +1,8 @@
+stages:
+  - { id: 1, name: "高频单辅音 + 短元音（CVC）", path_order_min: 1, path_order_max: 20 }
+  - { id: 2, name: "其余辅音 / 易混音", path_order_min: 21, path_order_max: 35 }
+  - { id: 3, name: "辅音 digraph", path_order_min: 36, path_order_max: 50 }
+  - { id: 4, name: "常见元音组合", path_order_min: 51, path_order_max: 75 }
+  - { id: 5, name: "r 控制", path_order_min: 76, path_order_max: 90 }
+  - { id: 6, name: "magic e / 开闭音节", path_order_min: 91, path_order_max: 105 }
+  - { id: 7, name: "次常见组合 + 多音节模式", path_order_min: 106, path_order_max: 130 }

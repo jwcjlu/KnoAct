@@ -300,6 +300,32 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ),
               const SizedBox(height: 16),
+              // 自然拼读：独立入口，只跟听，不进每日任务、不记掌握度
+              Card(
+                child: ListTile(
+                  key: const ValueKey('phonics-home-entry'),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 8,
+                  ),
+                  leading: const Icon(
+                    Icons.abc,
+                    color: AppColors.orange,
+                    size: 32,
+                  ),
+                  title: const Text(
+                    '自然拼读',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  subtitle: const Text('按路径听字母与字母组合怎么读'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/phonics'),
+                ),
+              ),
+              const SizedBox(height: 16),
               // 思维训练：独立入口，孩子自由玩，不进每日任务
               Card(
                 child: Padding(
