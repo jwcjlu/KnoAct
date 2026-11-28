@@ -1,7 +1,12 @@
 from unittest.mock import patch
 
 from app.database import SessionLocal
-from app.services.handwriting import grade_handwriting, parse_grading_result
+from app.services.handwriting import (
+    _grading_instruction,
+    apply_accept,
+    grade_handwriting,
+    parse_grading_result,
+)
 
 
 def test_parse_grading_result():
@@ -28,6 +33,42 @@ def test_grade_handwriting_empty_input_returns_empty():
     db = SessionLocal()
     assert grade_handwriting(db, b"", []) == []
     assert grade_handwriting(db, b"img", []) == []
+    db.close()
+
+
+def test_grading_instruction_includes_accept():
+    text = _grading_instruction([{"index": 0, "word": "事", "accept": ["事", "事情"]}])
+    assert "事情" in text
+
+
+def test_apply_accept_overrides_model():
+    results = [{"index": 0, "written": "事情", "is_correct": False}]
+    words = [{"index": 0, "word": "事", "accept": ["事", "事情"]}]
+    out = apply_accept(results, words)
+    assert out[0]["is_correct"] is True
+
+
+def test_apply_accept_default_word_without_accept_key():
+    results = [{"index": 0, "written": "箩", "is_correct": False}]
+    words = [{"index": 0, "word": "箩"}]
+    out = apply_accept(results, words)
+    assert out[0]["is_correct"] is True
+
+
+def test_apply_accept_keeps_false_when_not_in_accept():
+    results = [{"index": 0, "written": "萝", "is_correct": False}]
+    words = [{"index": 0, "word": "箩", "accept": ["箩"]}]
+    out = apply_accept(results, words)
+    assert out[0]["is_correct"] is False
+
+
+def test_grade_handwriting_applies_accept_on_success():
+    db = SessionLocal()
+    raw = '{"results":[{"index":0,"written":"事情","is_correct":false}]}'
+    words = [{"index": 0, "word": "事", "accept": ["事", "事情"]}]
+    with patch("app.services.handwriting.ocr_image", return_value=raw):
+        out = grade_handwriting(db, b"img", words)
+    assert out[0]["is_correct"] is True
     db.close()
 
 
