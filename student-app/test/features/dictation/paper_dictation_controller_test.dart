@@ -41,4 +41,41 @@ void main() {
     expect(s.firstRoundWrong.first.word, '好');
     expect(s.wrong.length, 1);
   });
+
+  test('grading payload includes accept; rewrite keeps speakText', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final ctl = container.read(paperDictationControllerProvider.notifier);
+    ctl.bootstrap(
+      taskId: null,
+      title: '',
+      subject: '语文',
+      words: const [
+        DictWord(
+          id: 1,
+          word: '溪',
+          extra: 'xī 小溪',
+          speakTextRaw: '请写：溪',
+          accept: ['溪', '谿'],
+        ),
+      ],
+    );
+    final payload = ctl.gradeWordPayloadForTest();
+    expect(payload, [
+      {'index': 0, 'word': '溪', 'accept': ['溪', '谿']},
+    ]);
+    expect(ctl.speakText(), '请写：溪');
+
+    ctl.applyGradeResultsForTest([
+      const DictGradeItem(index: 0, isCorrect: false, written: '川'),
+    ]);
+    ctl.startRewrite();
+    final s = container.read(paperDictationControllerProvider);
+    expect(s.wrong.first.speakText, '请写：溪');
+    expect(s.wrong.first.accept, ['溪', '谿']);
+    expect(ctl.speakText(), '请写：溪');
+
+    final rewritePayload = ctl.gradeWordPayloadForTest();
+    expect(rewritePayload.first['accept'], ['溪', '谿']);
+  });
 }

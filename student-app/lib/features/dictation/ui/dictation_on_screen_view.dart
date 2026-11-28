@@ -43,7 +43,7 @@ class _DictationOnScreenViewState extends ConsumerState<DictationOnScreenView> {
         SectionCard(
           child: Column(children: [
             FilledButton.icon(
-              onPressed: () => ref.read(speechPlayerProvider).speak(word.word).catchError((Object _) {
+              onPressed: () => ref.read(speechPlayerProvider).speak(word.speakText).catchError((Object _) {
                 if (context.mounted) showMessage(context, '播放失败，请稍后重试');
               }),
               icon: const Icon(Icons.volume_up),

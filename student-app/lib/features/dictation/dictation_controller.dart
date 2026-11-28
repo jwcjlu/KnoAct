@@ -96,7 +96,13 @@ class DictationController extends Notifier<DictationState> {
     try {
       items = await ref.read(dictationRepositoryProvider).gradeHandwriting(
             userId: uid,
-            words: [{'index': 0, 'word': word.word}],
+            words: [
+              {
+                'index': 0,
+                'word': word.word,
+                'accept': word.accept.isNotEmpty ? word.accept : [word.word],
+              },
+            ],
             imageBase64: imageBase64,
           );
     } catch (_) {
