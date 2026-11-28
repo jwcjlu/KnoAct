@@ -64,6 +64,16 @@ def dump_cue(cue: dict) -> str:
     return json.dumps(cue or {}, ensure_ascii=False)
 
 
+def speak_incomplete_count(content: str) -> int:
+    try:
+        data = json.loads(content or "[]")
+    except (ValueError, TypeError):
+        return 0
+    if not isinstance(data, list):
+        return 0
+    return sum(1 for x in data if isinstance(x, dict) and x.get("speak_incomplete") is True)
+
+
 def valid_compound(word: str, compound: str | None) -> str | None:
     c = (compound or "").strip()
     if not c or word not in c:

@@ -5,6 +5,7 @@ from app.services.dictation_speak import (
     build_speak_payload,
     parse_cue,
     dump_cue,
+    speak_incomplete_count,
 )
 
 
@@ -49,6 +50,21 @@ def test_build_speak_fallback():
     assert p["speak_text"] == "事，事"
     assert p["speak_incomplete"] is True
     assert p["accept"] == ["事"]
+
+
+def test_speak_incomplete_count_empty_and_invalid():
+    assert speak_incomplete_count("") == 0
+    assert speak_incomplete_count("not json") == 0
+    assert speak_incomplete_count("{}") == 0
+
+
+def test_speak_incomplete_count_from_list():
+    content = (
+        '[{"word": "事", "speak_incomplete": true},'
+        '{"word": "认真", "speak_incomplete": false},'
+        '{"word": "的", "speak_incomplete": true}]'
+    )
+    assert speak_incomplete_count(content) == 2
 
 
 def test_cue_roundtrip():
