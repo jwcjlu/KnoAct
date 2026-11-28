@@ -151,3 +151,25 @@ def test_warmup_item_failure_continues(db, monkeypatch, tmp_path):
     db.refresh(t)
     wu.warmup_dictation_task(t.id)
     assert "ok" in texts_ok
+
+
+def test_schedule_only_new_dictation_ids(monkeypatch):
+    from app.services import task_gen
+
+    scheduled = []
+    monkeypatch.setattr(
+        "app.services.tts_warmup.schedule_dictation_warmup",
+        lambda task_id: scheduled.append(task_id),
+    )
+    task_gen._schedule_dictation_warmups([11, 22])
+    assert scheduled == [11, 22]
+
+
+def test_schedule_swallows_errors(monkeypatch):
+    from app.services import task_gen
+
+    def boom(_tid):
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr("app.services.tts_warmup.schedule_dictation_warmup", boom)
+    task_gen._schedule_dictation_warmups([1])
