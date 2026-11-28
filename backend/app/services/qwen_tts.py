@@ -5,6 +5,8 @@ import io
 import re
 import wave
 
+import requests
+
 _MAX_CHARS = 600
 _DEFAULT_BASE = "https://dashscope.aliyuncs.com/api/v1"
 _PATH = "/services/aigc/multimodal-generation/generation"
@@ -73,3 +75,60 @@ def merge_audio_segments(chunks: list[bytes]) -> bytes:
         w.setframerate(rate)
         w.writeframes(b"".join(pcms))
     return out.getvalue()
+
+
+def synthesize_qwen(
+    *,
+    text: str,
+    api_key: str,
+    voice: str = "Cherry",
+    model: str = "qwen3-tts-flash",
+    base_url: str = "",
+    speed: float = 1.0,  # accept but do NOT put in JSON
+) -> bytes:
+    if not (api_key or "").strip():
+        raise RuntimeError("千问 API Key 未配置")
+    body = (text or "").strip()
+    if not body:
+        raise RuntimeError("千问 TTS 文本为空")
+
+    base = (base_url or "").rstrip("/") or _DEFAULT_BASE
+    url = f"{base}{_PATH}"
+    chunks_text = split_for_qwen(body)
+    if not chunks_text:
+        raise RuntimeError("千问 TTS 文本为空")
+
+    audio_parts: list[bytes] = []
+    for piece in chunks_text:
+        payload = {
+            "model": model or "qwen3-tts-flash",
+            "input": {
+                "text": piece,
+                "voice": (voice or "Cherry").strip() or "Cherry",
+                "language_type": map_language_type(piece),
+            },
+        }
+        resp = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key.strip()}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=60,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"千问 TTS 失败：{resp.status_code} {resp.text[:200]}")
+        data = resp.json()
+        code = data.get("code") or ""
+        if code:
+            raise RuntimeError(f"千问 TTS 错误 code={code} {str(data.get('message') or '')[:160]}")
+        audio_url = ((data.get("output") or {}).get("audio") or {}).get("url") or ""
+        if not audio_url:
+            raise RuntimeError("千问 TTS 未返回音频 URL")
+        ar = requests.get(audio_url, timeout=60)
+        if ar.status_code != 200 or not ar.content:
+            raise RuntimeError(f"千问 TTS 下载失败：{ar.status_code}")
+        audio_parts.append(ar.content)
+
+    return merge_audio_segments(audio_parts)

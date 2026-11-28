@@ -80,3 +80,55 @@ def test_merge_fmt_mismatch_raises():
         assert False, "应因 fmt 不一致失败"
     except RuntimeError:
         pass
+
+
+def test_synthesize_requires_api_key():
+    from app.services.qwen_tts import synthesize_qwen
+
+    try:
+        synthesize_qwen(text="你好", api_key="")
+        assert False
+    except RuntimeError as e:
+        assert "Key" in str(e) or "key" in str(e).lower()
+
+
+def test_synthesize_posts_and_downloads(monkeypatch):
+    from app.services import qwen_tts as mod
+
+    calls = {"post": 0, "get": 0}
+    wav = _pcm_wav(b"\x00\x01" * 20)
+
+    class FakeResp:
+        def __init__(self, status, payload=None, content=b""):
+            self.status_code = status
+            self._payload = payload or {}
+            self.content = content
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls["post"] += 1
+        assert "multimodal-generation" in url
+        assert headers["Authorization"].startswith("Bearer sk-test")
+        assert json["model"] == "qwen3-tts-flash"
+        assert json["input"]["voice"] == "Cherry"
+        assert json["input"]["language_type"] == "Chinese"
+        assert "rate" not in json["input"] and "speed" not in json["input"]
+        return FakeResp(200, {
+            "output": {"audio": {"url": "https://example.com/a.wav"}},
+            "code": "",
+        })
+
+    def fake_get(url, timeout=None):
+        calls["get"] += 1
+        assert url == "https://example.com/a.wav"
+        return FakeResp(200, content=wav)
+
+    monkeypatch.setattr(mod.requests, "post", fake_post)
+    monkeypatch.setattr(mod.requests, "get", fake_get)
+
+    out = mod.synthesize_qwen(text="你好", api_key="sk-test", voice="Cherry")
+    assert out == wav
+    assert calls["post"] == 1 and calls["get"] == 1
