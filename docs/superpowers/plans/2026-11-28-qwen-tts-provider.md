@@ -140,7 +140,6 @@ from __future__ import annotations
 
 import io
 import re
-import struct
 import wave
 
 _MAX_CHARS = 600
